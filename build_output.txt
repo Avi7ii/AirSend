@@ -1,0 +1,16 @@
+🚀 Building HeadlessLocalSend (Debug Mode)...
+[0/1] Planning build
+Building for debugging...
+[0/4] Write sources
+[1/4] Write swift-version--1AB21518FC5DEDBE.txt
+[3/7] Compiling HeadlessLocalSend_macOS main.swift
+[4/7] Compiling HeadlessLocalSend_macOS DropZoneWindow.swift
+[5/7] Emitting module HeadlessLocalSend_macOS
+[5/8] Write Objects.LinkFileList
+[6/8] Linking HeadlessLocalSend-macOS
+[7/8] Applying HeadlessLocalSend-macOS
+Build complete! (1.31s)
+📦 Packaging HeadlessLocalSend.app...
+HeadlessLocalSend.app: replacing existing signature
+✅ Build Complete!
+📂 Location: /Users/thom/Desktop/Localsend X/HeadlessLocalSend-macOS/HeadlessLocalSend.app

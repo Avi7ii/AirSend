@@ -1,0 +1,16 @@
+🚀 Building HeadlessLocalSend (Debug Mode)...
+Building for debugging...
+[0/4] Write sources
+[1/4] Write swift-version--1AB21518FC5DEDBE.txt
+[3/6] Compiling HeadlessLocalSend_macOS FileSender.swift
+[4/6] Emitting module HeadlessLocalSend_macOS
+[4/7] Write Objects.LinkFileList
+[5/7] Linking HeadlessLocalSend-macOS
+[6/7] Applying HeadlessLocalSend-macOS
+Build complete! (0.92s)
+📦 Packaging HeadlessLocalSend.app...
+HeadlessLocalSend.app: replacing existing signature
+✅ Build Complete!
+📂 Location: /Users/thom/Desktop/Localsend X/HeadlessLocalSend-macOS/HeadlessLocalSend.app
+🔄 Restarting HeadlessLocalSend...
+✨ HeadlessLocalSend restarted successfully.

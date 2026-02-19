@@ -1,0 +1,38 @@
+# OS X
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+
+
+# Swift Package Manager
+.build/
+Packages/
+Package.resolved
+.swiftpm/
+
+# Xcode (in case you open it in Xcode)
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+DerivedData/
+
+# App Bundles
+*.app/
+
+# Logs (CRITICAL: exclude logs)
+*.log
+logs/
+
+# Development
+.agent/
+.gemini/
+.antigravityignore
+*.tmp
+*.temp
+
+# Certificates (CAUTION: usually shouldn't upload keys)
+*.pem
+*.p12
+*.key
+*.conf

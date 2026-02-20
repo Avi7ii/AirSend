@@ -1,8 +1,14 @@
+<p align="center">
+  <img src="Sources/AirSend/m3-icon-dynamic-rose-1024px.png" width="128" height="128" alt="AirSend Icon">
+</p>
+
 # 🚀 AirSend (macOS)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Platform: macOS](https://img.shields.io/badge/Platform-macOS%2013%2B-blue.svg)](https://developer.apple.com/macos/)
-[![Swift: 6.2](https://img.shields.io/badge/Swift-6.2-orange.svg)](https://swift.org)
+<p align="center">
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://developer.apple.com/macos/"><img src="https://img.shields.io/badge/Platform-macOS%2013%2B-blue.svg" alt="Platform: macOS"></a>
+  <a href="https://swift.org"><img src="https://img.shields.io/badge/Swift-6.2-orange.svg" alt="Swift: 6.2"></a>
+</p>
 
 ## 📖 你是否也和我一样？
 

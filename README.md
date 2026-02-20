@@ -1,7 +1,7 @@
 # 🚀 AirSend (macOS)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Platform: macOS](https://img.swift.org/badge/Platform-macOS%2013%2B-blue.svg)](https://developer.apple.com/macos/)
+[![Platform: macOS](https://img.shields.io/badge/Platform-macOS%2013%2B-blue.svg)](https://developer.apple.com/macos/)
 [![Swift: 6.2](https://img.shields.io/badge/Swift-6.2-orange.svg)](https://swift.org)
 
 ## 📖 你是否也和我一样？

@@ -19,6 +19,11 @@ cp -X "$BUILD_DIR/$EXECUTABLE_NAME" "$APP_NAME.app/Contents/MacOS/$APP_NAME"
 # Copy Info.plist
 cp -X Info.plist "$APP_NAME.app/Contents/Info.plist"
 
+# Copy Icon
+if [ -f "AppIcon.icns" ]; then
+    cp -X AppIcon.icns "$APP_NAME.app/Contents/Resources/AppIcon.icns"
+fi
+
 # Remove quarantine attribute (fix "App is damaged" error)
 xattr -cr "$APP_NAME.app"
 

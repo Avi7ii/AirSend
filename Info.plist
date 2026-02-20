@@ -30,5 +30,7 @@
         <key>NSAllowsLocalNetworking</key>
         <true/>
     </dict>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon.icns</string>
 </dict>
 </plist>

@@ -39,6 +39,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
     }
     
+    // Auto Update Preference
+    private var isAutoUpdateEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: "auto_update_enabled") }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "auto_update_enabled")
+            updateMenu()
+        }
+    }
+    
     var devices: [String: Device] = [:] {
         didSet {
             saveDevices()
@@ -809,6 +818,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         advancedMenu.addItem(NSMenuItem(title: "Clear Discovered Devices", action: #selector(clearDeviceHistory), keyEquivalent: ""))
         advancedMenu.addItem(NSMenuItem(title: "Reset Identity", action: #selector(resetIdentity(_:)), keyEquivalent: ""))
         
+        advancedMenu.addItem(NSMenuItem.separator())
+        let autoUpdateItem = NSMenuItem(title: "Auto-check for Updates", action: #selector(toggleAutoUpdate(_:)), keyEquivalent: "")
+        autoUpdateItem.state = isAutoUpdateEnabled ? .on : .off
+        advancedMenu.addItem(autoUpdateItem)
+        
         let advancedItem = NSMenuItem(title: "Advanced", action: nil, keyEquivalent: "")
         advancedItem.submenu = advancedMenu
         menu.addItem(advancedItem)
@@ -817,6 +831,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         let launchItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin(_:)), keyEquivalent: "")
         launchItem.state = isLaunchAtLoginEnabled ? .on : .off
         menu.addItem(launchItem)
+        
+        menu.addItem(NSMenuItem.separator())
+        
+        // 7. VERSION & UPDATE
+        let updateItem = NSMenuItem()
+        updateItem.view = UpdateMenuItemView()
+        menu.addItem(updateItem)
         
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit AirSend", action: #selector(quit), keyEquivalent: "q"))
@@ -998,6 +1019,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         // Perform an initial scan immediately
         discoveryService.triggerScan()
         
+        // Auto Update Check (if enabled)
+        if isAutoUpdateEnabled {
+            UpdateService.shared.checkUpdate(explicit: false)
+        }
+        
         // Start a 1-second timer for continuous scanning while menu is open
         menuScanTimer?.invalidate()
         menuScanTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -1132,6 +1158,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 logTransfer("❌ Failed to toggle Launch at Login: \(error)")
             }
         }
+    }
+    
+    // MARK: - Update Logic
+    
+    @objc func manualCheckUpdate() {
+        print("🚨 App: Manual update check triggered.")
+        UpdateService.shared.checkUpdate(explicit: true)
+    }
+    
+    @objc func toggleAutoUpdate(_ sender: NSMenuItem) {
+        isAutoUpdateEnabled.toggle()
+        print("🚨 App: Auto-update toggled to [\(isAutoUpdateEnabled)]")
     }
 }
 

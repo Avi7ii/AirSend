@@ -2,7 +2,7 @@
   <img src="Sources/AirSend/icon.svg" width="128" height="128" alt="AirSend Icon">
 </p>
 
-# 🚀 AirSend (macOS)
+<h1 align="center">🚀 AirSend (macOS)</h1>
 
 <p align="center">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
@@ -10,7 +10,7 @@
   <a href="https://swift.org"><img src="https://img.shields.io/badge/Swift-6.2-orange.svg" alt="Swift: 6.2"></a>
 </p>
 
-## 📖 你是否也和我一样？
+<h2 align="center">📖 你是否也和我一样？</h2>
 
 你深爱着 Mac 丝滑的 UI 和卓越的生产力，但口袋里却揣着一部自由而强大的 Android 手机。
 
@@ -23,7 +23,7 @@
 
 ---
 
-## 🔥 AirSend：打破边界，回归本能
+<h2 align="center">🔥 AirSend：打破边界，回归本能</h2>
 
 `AirSend` 是一款跨越生态鸿沟的“系统级增强”。我们坚信：**伟大的工具不应该抢夺用户的注意力。**
 
@@ -39,7 +39,7 @@ AirSend 彻底摒弃了繁琐的主界面。它的全部生命力都凝结在 ma
 
 ---
 
-## 💎 为什么选择 AirSend 而不是官方客户端？
+<h2 align="center">💎 为什么选择 AirSend 而不是官方客户端？</h2>
 
 我们在每一个像素和每一行代码上都进行了针对 macOS 的“重度”优化。
 
@@ -54,7 +54,7 @@ AirSend 彻底摒弃了繁琐的主界面。它的全部生命力都凝结在 ma
 
 ---
 
-## ✨ 核心亮点 (Key Features)
+<h2 align="center">✨ 核心亮点 (Key Features)</h2>
 
 *   **🔒 LocalSend 协议全兼容**：这是一切的基础。AirSend 可以与手机、Windows 上的官方 LocalSend 无缝互通。不需要改变你的跨平台生态。
 *   **⚡ 性能怪兽**：基于 Apple 原生 `Network.framework`。针对碎片文件优化了并发 Socket 调度，GB 级大文件传输时磁盘 0 缓存。
@@ -63,7 +63,7 @@ AirSend 彻底摒弃了繁琐的主界面。它的全部生命力都凝结在 ma
 
 ---
 
-## 快速上手
+<h2 align="center">快速上手</h2>
 
 1.  从 [Releases](link-to-your-release) 获取 `AirSend.app`。
 2.  拖入 `Applications` 文件夹，开启“开机自启”。
@@ -71,7 +71,7 @@ AirSend 彻底摒弃了繁琐的主界面。它的全部生命力都凝结在 ma
 
 ---
 
-## 🤝 贡献与反馈
+<h2 align="center">🤝 贡献与反馈</h2>
 
 如果您也觉得 Android 和 Mac 应该是天生一对，或者讨厌臃肿的工具，请点亮一个 🌟。
 

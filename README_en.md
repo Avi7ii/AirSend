@@ -74,7 +74,8 @@ We've optimized every pixel and line of code specifically for macOS.
 
 1.  Get `AirSend.app` from [GitHub Releases](https://github.com/Avi7ii/AirSend/releases/tag/v1.0).
 2.  Drag into the `Applications` folder and enable "Launch at Login".
-3.  **From now on, you'll even forget it exists.** Because it's there when you need it, and it's just air when you don't.
+3.  Android users please download the [official LocalSend client](https://github.com/localsend/localsend/releases) for seamless interoperability.
+4.  **From now on, you'll even forget it exists.** Because it's there when you need it, and it's just air when you don't.
 
 ---
 

@@ -18,44 +18,84 @@
   <a href="README_en.md">English</a> | <b>简体中文</b>
 </p>
 
-<h2 align="center">📖 你是否也和我一样？</h2>
+<h2 align="center">这是什么？</h2>
 
-你深爱着 Mac 丝滑的 UI 和卓越的生产力，但口袋里却揣着一部自由而强大的 Android 手机。
+AirSend 是一套专为 **Mac + Android** 用户设计的跨平台互联工具，核心目标是：**让文件传输和剪贴板同步像 AirDrop 一样顺手，而不需要两台 Apple 设备。**
 
-每当你想要把手机里的照片传到电脑，或者想要把手机上的验证码、链接瞬间同步到 Mac 剪贴板时，那道“生态围墙”便横亘在眼前：
-*   **AirDrop**？那是 Apple 用户的内部狂欢，Android 只能在墙外张望。
-*   **微信/QQ 传输助手**？为了传几个字节，你得忍受流量损耗、隐私扫描和繁琐的登录。
-*   **官方 LocalSend**？虽然解决了连通性，但作为跨平台框架（Flutter）的产物，它在 Mac 上显得过于迟钝、臃肿，甚至连窗口圆角都和系统格格不入。
+它由两部分组成：
+- **macOS 端**：一个用 Swift 原生开发的菜单栏应用，内存占用约 20MB，没有主窗口，拖拽即发
+- **Android 端**：按需选择——可以直接用官方 LocalSend，也可以安装 AirSend 定制 App 获得系统级深度集成
 
-**直到 AirSend 的出现。**
-
----
-
-<h2 align="center">🔥 AirSend：打破边界，回归本能</h2>
-
-`AirSend` 是一款跨越生态鸿沟的“系统级增强”。我们坚信：**伟大的工具不应该抢夺用户的注意力。**
-
-### 1. 零 UI 设计：它甚至没有一个多余的窗口
-AirSend 彻底摒弃了繁琐的主界面。它的全部生命力都凝结在 macOS 菜单栏的一个小巧图标中。
-没有复杂的菜单嵌套，没有沉重的面板。它像空气（Air）一样轻盈：
-*   **拖拽即发**：直接扔给菜单栏图标，握手自动完成。
-*   **静默守候**：只有在传输那一瞬间，它才会优雅地弹出微动画。
-
-### 2. 剪贴板云同步：让 Android 具备“通用剪贴板”
-这是 AirSend 的隐形必杀技。基于 LocalSend 协议的深度定制，它能实现**跨平台的剪贴板自动同步**。
-当你手机复制了一段文字，Mac 剪贴板已瞬间更新。无需任何操作，两端就像共用了一个大脑。
+> **网络要求**：两台设备需在同一 Wi-Fi 局域网下，路由器未开启 AP 隔离。
 
 ---
 
-<h2 align="center">💎 为什么选择 AirSend 而不是官方客户端？</h2>
+## 和官方 LocalSend 的区别
 
-我们在每一个像素 and 每一行代码上都进行了针对 macOS 的“重度”优化。我们没有选择“一套代码跑全平台”的偷懒做法，而是在两端都进行了最硬核的**系统级原生重构**。
+| 对比项           | 官方 LocalSend       | AirSend                            |
+| ---------------- | -------------------- | ---------------------------------- |
+| macOS 界面       | Flutter 跨平台主窗口 | 纯 Swift 原生菜单栏，无主窗口      |
+| 内存占用         | ~300MB               | ~20MB                              |
+| 剪贴板同步       | ❌                    | ✅ 双向自动（Android ↔ Mac）        |
+| 截图自动推送     | ❌                    | ✅ Android 截图后自动发到 Mac       |
+| 图片剪贴板同步   | ❌                    | ✅ Mac 复制图片自动发到 Android     |
+| Android 后台保活 | 依赖系统进程管理     | Rust 守护进程，独立于 App 生命周期 |
+| 系统级剪贴板访问 | ❌                    | ✅（需 Root + LSPosed）             |
+| 协议兼容性       | ✅ LocalSend 标准协议 | ✅ 完全兼容 LocalSend 协议          |
 
 ---
 
-<h2 align="center">🕸️ 脉络解析 (Architecture Overview)</h2>
+## 主要功能
 
-为了让极客玩家清晰地了解各端分工，我们绘制了一份极其精密的双端协作网络脑图。在这里，你将看到 Kotlin、Rust 守护进程、Xposed 钩子以及 Swift 底层网络是如何如同精密齿轮般交织互补的。
+### 📁 文件传输
+
+将文件拖拽到 macOS 菜单栏图标即可发送。支持两种模式：
+- **广播模式**：同时发给局域网内所有在线的 AirSend/LocalSend 设备
+- **单播模式**：在菜单中选中特定设备，只发给该设备
+
+接收到的文件直接以流式写入保存到下载目录，文件名冲突时自动重命名（如 `photo (1).jpg`），不占用额外内存缓存。
+
+由于完全兼容 LocalSend 协议，Android 端用官方 LocalSend App 即可与 Mac 互传文件，无需额外配置。
+
+### 📋 剪贴板双向同步
+
+**Android → Mac**：在手机上复制文字，Mac 剪贴板会在几秒内自动更新，无需打开任何 App，无弹窗提示。需要完整模式（Root + LSPosed）。
+
+**Mac → Android**：在 Mac 上复制内容，Android 剪贴板同步更新，同样无感知。
+
+**防死循环设计**：收到对端内容并写入本地剪贴板时，会设置内部标志位，避免触发新一轮同步。Mac 端接收到的剪贴板临时文件（clipboard.txt）会在读取内容后立即删除，不留磁盘痕迹。
+
+### 📸 截图自动发送（Android → Mac）
+
+Android 截图后，不需要打开任何 App、不需要手动分享，截图文件会直接出现在 Mac 的下载目录里。
+
+实现方式：Rust 守护进程通过 Linux `inotify` 持续监听截图目录，检测到新文件写入完成后延迟 1 秒（等待 EXT4 完成写盘），然后直接通过 HTTPS 推送至 Mac。兼容 AOSP 原生截图路径及 MIUI、HyperOS、ColorOS 等常见定制 ROM 的路径。
+
+### 🖼️ 图片剪贴板同步（Mac → Android）
+
+Mac 端复制截图或图片时，会优先检测剪贴板中是否存在 TIFF 格式图片数据，转换为 PNG 后通过 HTTPS 发送到 Android。
+
+### 📱 系统分享菜单集成（Direct Share）
+
+在 Android 上分享文件时，Mac 设备会直接出现在系统的直接分享目标列表里，类似"发送给联系人"的效果。无需打开 AirSend App，选中即发。
+
+---
+
+## 系统要求
+
+| 平台                    | 要求                                                |
+| ----------------------- | --------------------------------------------------- |
+| macOS                   | macOS 13 Ventura 及以上                             |
+| Android（基础文件传输） | Android 8.0+，安装官方 LocalSend 即可               |
+| Android（完整功能）     | Root 权限 + Magisk 或 KernelSU + LSPosed            |
+| 网络                    | 两端设备处于同一 Wi-Fi 局域网，路由器未开启 AP 隔离 |
+| 防火墙                  | 放行 UDP 53317 和 TCP 53317                         |
+
+---
+
+<h2 align="center">🕸️ 架构总览</h2>
+
+下图展示了 macOS 端和 Android 端各模块的分工以及通信链路。
 
 ```mermaid
 %%{init: {'theme': 'dark', 'themeVariables': {'background': 'transparent', 'clusterBkg': '#0d0d0d55', 'edgeLabelBackground': '#1a1a2e'}}}%%
@@ -160,67 +200,136 @@ flowchart TB
 ```
 
 <details>
-<summary>💡 开发人员手记：如何看懂这张图？ (点击展开)</summary>
+<summary>� 读图说明（点击展开）</summary>
 <br>
 
-*   **双端通信中枢**：两端设备始终通过中间的黄色虚线（完全实现了 LocalSend 协议标准）完成跨越路由器的握手和通讯，使得互换数据变得无缝。
-*   **Android 三核协作防阻塞**：在安卓底座上，最外层 `App Layer` 吸取 `ShortcutManager` 控制着快捷系统级分享面子；居中层级为 `Xposed` 实现了系统级剪贴板侦听并与守护进程通讯；最深层次的 `Rust Daemon` 完全不跑在 JVM 而跑在本机层面直接操作 UDS 套接字、inotify 以及多路复用的 `Tokio` HTTP并发请求。这真正让系统无任何感知地完成同步动作而不会消耗前台丝毫能量。
-*   **iOS 设备的先天不足**：Apple 严格控制 App 后台寿命机制，所以类似 `ClipboardHook` 或者 `Daemon inotify` 等极客手段很难施加于 iOS 端，这也是为什么此工具诞生初衷就是用来将 “封闭但不拘小节大度地处理传输包的 Mac 系统接发枢纽” 完美嫁接给 “极具黑客探索权限且开放自由底座的安卓原生引擎”。
+- **黄色链路**：LocalSend 协议的 HTTPS 传输通道，Mac 和 Android 的数据都经此跨越路由器
+- **蓝色区域（macOS 端）**：纯 Swift 实现，基于 `Network.framework` 的 NWListener，TLS 1.2-1.3 加密，每个连接分配独立调度队列
+- **绿色区域（Android App 层）**：Kotlin 前台服务，每 30 秒轮询守护进程获取在线设备，更新 Direct Share 快捷方式
+- **紫色区域（Xposed 层）**：运行在 `system_server` 进程中，以 UID 1000 权限绕过 Android 10+ 的后台剪贴板访问限制，同时作为双向 IPC 总线的 Mac→Android 方向终点
+- **橙色区域（Rust Daemon）**：独立于 App 生命周期的 `arm64-v8a` 原生进程，通过两条 Unix 域套接字（`@airsend_ipc` 和 `@airsend_app_ipc`）分别与 Kotlin App 层和 Xposed 层通信
+
 </details>
 
 ---
 
-<h3 align="center">🍎 核心篇章 1：macOS 端的原生进化 (Native Evolution)</h3>
+## macOS 端说明
 
-在 Mac 上，我们追求的是**隐形与极致效能**。伟大的工具不应该抢夺用户的注意力。
+### 运行方式
 
-*   **零 UI 设计**：彻底摒弃繁琐的 Flutter 主界面，全部生命力凝结在菜单栏图标中。**0 交互路径，拖拽即发**。
-*   **性能怪兽**：基于 Apple 原生 `Network.framework` 重写底层。优化了碎片文件的并发 Socket 调度，并在 GB 级大文件传输时实现磁盘 0 缓存。
-*   **资源极简**：内存占用从官方版的 ~300MB 骤降至 **~20MB**（15倍效率提升），微秒级即时启动。
-*   **100% 原生体验**：毛玻璃材质、物理回弹动画，彻底告别跨平台组件的僵硬手感。
-*   **智能归档**：后台自动为你分类入库来自手机的图片、文档和附件。
+AirSend 完全运行在菜单栏，没有 Dock 图标，没有主窗口。启动后默认开机自启（通过 `SMAppService` 实现，macOS 13+）。
 
----
+### 拖拽发送文件
 
-<h3 align="center">🤖 核心篇章 2：Android 端的神之特权 (God-Mode)</h3>
+将文件拖向菜单栏图标时，一个半透明的 DropZone 浮窗会自动出现。松手后立即发起 LocalSend 握手，传输进度显示在浮窗内。如果 8 秒内对方无响应，浮窗自动最小化到菜单栏（菜单栏图标出现白色小圆点），传输在后台继续进行。
 
-为了实现完美的“即刻同步”，普通的应用层权限远远不够。我们在 Android 端向下刺穿了系统封锁，为极客玩家打造了专属的底层挂载模块：
+**发送目标**：默认广播给局域网内所有设备；在菜单中选中特定设备后，只会发给该设备（单播）。历史连接过的设备会被记住，即使当时不在线也会保留在列表中。
 
-*   **Rust 守护进程 (Daemon) & Magisk 模块保驾**
-    *   **痛点**：传统的由 JVM 托管的 Android 后台经常被杀，且轮询监听极耗电。
-    *   **突破**：我们将核心逻辑用 Rust 交叉编译为 `arm64-v8a` 本机二进制文件，并包装为 **Magisk/KernelSU 模块**。它利用 Linux 内核级 `notify` (EXT4 物理文件系统监听) 实时感知变化。脱离 App 生命周期，实现常驻不死与极其克制的功耗。
-*   **Xposed 剪贴板注入 (LSPosed)**
-    *   **痛点**：Android 10 以后封杀了后台读取剪贴板的权限。
-    *   **突破**：通过 LSPosed 模块，我们直接 Hook 了系统的 `ClipboardManagerService`。无需任何弹窗确认，实现了**双向、秒级**的剪贴板隐形同步，并从底层实现了智能防死循环 (Loop Prevention) 机制。
-*   **原生 Share Sheet (Direct Share) 融合**
-    *   去掉了官方 App 繁琐的“打开面板->选设备”流程。你的 Mac 如今会直接以原生分享目标的形式，优雅地嵌入到 Android 系统的分享菜单中。
+**文件接收**：收到来自 Android 的文件后，Mac 端**自动接受，无需确认弹窗**，直接以流式写入保存到下载目录。
+
+### 剪贴板监听
+
+Mac 端每 3 秒（合并唤醒容差 1.5 秒）轮询一次 `NSPasteboard.general.changeCount`：
+
+- 检测到**图片**（TIFF）→ 转换为 PNG → 通过 `ClipboardSender` 发送到 Android
+- 检测到**纯文字** → 包装成 `clipboard.txt` → 通过 `ClipboardSender` 发送到 Android
+
+收到 Android 发来的 `clipboard.txt` 后，内容写入 `NSPasteboard`，临时文件立即删除（不在下载目录留档）。为防止写入操作本身触发新一轮同步，写入时同步更新 `lastChangeCount`。
 
 ---
 
+## Android 端说明
+
+Android 端分两种模式：
+
+### 🟢 基础模式（不需要 Root）
+
+安装官方 [LocalSend](https://github.com/localsend/localsend/releases) 即可与 Mac 互传文件，兼容性最好。
+
+**不包含的功能**：剪贴板自动同步、截图自动推送、Direct Share 快捷方式。
+
+### 🔴 完整模式（需要 Root + Magisk/KernelSU + LSPosed）
+
+安装 AirSend 定制 App 后包含三个组件：
+
+**Kotlin 前台服务（AirSendService）**
+
+开机自动启动（`BootReceiver`），以 `dataSync` 类型的前台服务持续运行（兼容 Android 14+），`START_STICKY` 保活。每 30 秒向 Rust 守护进程查询一次在线设备列表，并用查询结果更新系统 Direct Share 快捷方式（仅在设备列表实际变化时才更新，避免无意义的 Binder 调用）。
+
+**Rust 守护进程（Magisk/KernelSU 模块）**
+
+以 Magisk 模块形式随系统启动，完全独立于 App 生命周期。主要职责：
+
+- 绑定 `@airsend_ipc`（接收 Kotlin 和 Xposed 的命令）和 `@airsend_app_ipc`（向 Xposed 推送 Mac 下发的内容）两条 Unix 域套接字
+- 通过 `inotify`（`notify` crate）持续监听 `/data/media/0/Pictures/Screenshots` 和 `/data/media/0/DCIM/Screenshots`，检测到截图写入完成后延迟 1 秒（等待 EXT4 页缓存刷盘），再通过 LocalSend HTTPS 推送到 Mac
+- 通过 LocalSend 协议栈维护一份在线设备表，响应 Kotlin App 的 `GET_PEERS` 查询
+- 启动时强制清除所有代理环境变量（`NO_PROXY=*`），确保 HTTPS 请求直连 Mac，不经过 VPN 或代理工具
+
+**LSPosed 模块（Xposed）**
+
+在 `system_server` 进程中运行，Hook `ClipboardService$ClipboardImpl.setPrimaryClip`：
+
+- **Android → Mac**：用户复制内容时，拦截并将文字通过 UDS 发送给 Rust 守护进程，再由守护进程发往 Mac
+- **Mac → Android**：监听 `@airsend_app_ipc` 套接字，收到来自 Mac 的文字后，通过 `ActivityThread.getSystemContext()` 获取系统上下文，以 UID 1000 身份调用 `ClipboardManagerService.setPrimaryClip()`，绕过 Android 10+ 的后台剪贴板限制
+- **防死循环**：写入远端内容时设置 `isWritingFromSync` 标志位，500ms 后释放；写入期间的 Hook 回调会被直接丢弃，不触发新一轮发送
 
 ---
 
-<h2 align="center">⚙️ 快速上手 (Deployment Guide)</h2>
+## 快速上手
 
-**协议基础：** 完全兼容 LocalSend 协议，支持与任何官方客户端互通互联。
+### Step 1：部署 Mac 端
 
-### 🍎 Step 1: 部署 Mac 接收端
-1. 从 [GitHub Releases](https://github.com/Avi7ii/AirSend/releases/latest) 获取最新的 `AirSend.app`。
-2. 拖入 `Applications` 文件夹，开启“开机自启”。
+1. 前往 [Releases 页面](https://github.com/Avi7ii/AirSend/releases/latest) 下载最新的 `AirSend.app`
+2. 拖入 `/Applications` 文件夹并打开
+3. 右键菜单栏的纸飞机图标 → **「开机时启动」** → 开启
 
-### 🤖 Step 2: 部署 Android 发送端 (双击模式)
-*   **🟢 基础模式 (普通用户)**：直接在手机侧下载 [官方 LocalSend 客户端](https://github.com/localsend/localsend/releases) 即可获得基础的高速文件互传能力。
-*   **🔴 满血极客模式 (需 Root + LSPosed)**：
-    1. 安装 **AirSend 定制版 Android App**。
-    2. 在 **Magisk/KernelSU** 中刷入 App 内附带的 `airsend_daemon` 模块（激活高性能内核监听及保活）。
-    3. 在 **LSPosed** 中激活 **AirSend 专属模块**（接管系统剪贴板服务）。
-    4. **从此，两端设备如同共用一个大脑，无论是复制图文还是跨端发文件，瞬间无感抵达。**
+### Step 2：部署 Android 端
+
+**基础模式（推荐无 Root 用户）**
+
+直接安装官方 [LocalSend](https://github.com/localsend/localsend/releases)。Mac 和 Android 在同一 Wi-Fi 下即可互传文件，无需任何额外配置。
+
+**完整模式（Root 用户）**
+
+1. 在 [Releases 页面](https://github.com/Avi7ii/AirSend/releases/latest) 下载并安装 AirSend 定制版 APK
+2. 在 **Magisk / KernelSU** 中刷入随 App 附带的 `airsend_daemon` 模块，**重启**
+3. 在 **LSPosed** 中启用 AirSend 模块，作用域选择 **「android」（系统框架）**，**重启**
+
+完成后，剪贴板同步、截图自动发送、Direct Share 快捷方式会自动工作，无需额外配置。
 
 ---
 
-<h2 align="center">🤝 贡献与反馈</h2>
+## 常见问题
 
-如果您也觉得 Android 和 Mac 应该是天生一对，或者讨厌臃肿的工具，请点亮一个 🌟。
+**Q：两端互相发现不了？**
+
+确认两台设备在同一 Wi-Fi 下，且路由器没有开启「AP 隔离」或「无线客户端隔离」功能（部分路由器默认开启此选项）。防火墙需放行 UDP 53317 和 TCP 53317。
+
+**Q：剪贴板同步的延迟是多少？**
+
+Android → Mac 方向：Xposed 拦截到复制事件后立即转发，延迟通常在 1 秒以内。Mac → Android 方向：Mac 端每 3 秒轮询一次剪贴板，最大延迟约 3 秒。
+
+**Q：不 Root 能用剪贴板同步吗？**
+
+不能。Android 10+ 明确限制后台应用读取剪贴板，只有在 `system_server` 进程中以 UID 1000 权限运行的 Xposed 模块才能绕过这一限制。
+
+**Q：收到的文件保存在哪里？**
+
+Mac 端保存在 `~/Downloads`（下载文件夹），文件名冲突时自动在文件名末尾加序号（如 `image (1).png`）。
+
+**Q：截图自动发送需要打开 App 吗？**
+
+不需要。Rust 守护进程作为 Magisk 模块在系统层面独立运行，截图监听和发送均在守护进程内完成，和 AirSend App 是否在前台无关。
+
+**Q：发送大文件时 Mac 会卡顿吗？**
+
+不会。`HTTPTransferServer` 采用流式写入（streaming I/O），接收到的数据块直接写盘，不在内存中累积缓冲，因此大文件传输对系统内存几乎没有额外压力。
+
+---
+
+## 贡献与反馈
+
+欢迎提交 Issue 反馈问题，或通过 PR 贡献代码。如果这个工具对你有帮助，点一个 🌟 是对项目最直接的支持。
 
 ---
 

@@ -73,7 +73,7 @@ AirSend 彻底摒弃了繁琐的主界面。它的全部生命力都凝结在 ma
 
 <h2 align="center">快速上手</h2>
 
-1.  从 [GitHub Releases](https://github.com/Avi7ii/AirSend/releases/tag/v1.0) 获取 `AirSend.app`。
+1.  从 [GitHub Releases](https://github.com/Avi7ii/AirSend/releases/tag/v2.0) 获取 `AirSend.app`。
 2.  拖入 `Applications` 文件夹，开启“开机自启”。
 3.  安卓手机请下载 [官方 LocalSend 客户端](https://github.com/localsend/localsend/releases) 以实现完美互通。
 4.  **从此，你甚至会忘了它的存在。** 因为当你需要发送文件时，它就在那里；当你不需要时，它就是空气。

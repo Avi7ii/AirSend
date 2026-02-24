@@ -47,6 +47,7 @@ Android/airsend_daemon/target/
 
 # Release Assets & Temp
 *.zip
+*.icns
 test_clipboard.swift
 render.swift
 TestDrag.swift

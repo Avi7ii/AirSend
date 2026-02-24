@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="m3-icon-dynamic-rose.png" width="128" height="128" alt="AirSend Icon">
+  <img src="m3-icon-dynamic-rose.png" width="200" height="200" alt="AirSend Icon">
 </p>
 
 <h1 align="center">🚀 AirSend (macOS)</h1>

@@ -57,7 +57,7 @@ Instead of taking the lazy "write once, run anywhere" approach, we performed har
 To give geek users a crystal-clear understanding of how each module performs its duty, we have mapped out an extremely precise dual-device collaboration schematic. Here, you'll see how Kotlin, the Rust Daemon, Xposed hooks, and Swift's core networking interlock like precision gears.
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'background': 'transparent', 'clusterBkg': 'transparent'}}}%%
+%%{init: {'theme': 'dark', 'themeVariables': {'background': 'transparent', 'clusterBkg': '#0d0d0d55', 'edgeLabelBackground': '#1a1a2e'}}}%%
 flowchart TB
     %% ==========================================
     %% Global Style Def (Geek Dark Theme)

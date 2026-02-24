@@ -119,8 +119,8 @@ flowchart TB
 
         %% Android Internal IPC
         %% Android Internal IPC
-        ForegroundSvc <-->|Poll Target List [UDS]| UDSServer
-        LSPosedHook <-->|Hijack Clipboard [UDS]| UDSServer
+        ForegroundSvc <-->|Poll Target List (UDS)| UDSServer
+        LSPosedHook <-->|Hijack Clipboard (UDS)| UDSServer
     end
 
     %% ==========================================

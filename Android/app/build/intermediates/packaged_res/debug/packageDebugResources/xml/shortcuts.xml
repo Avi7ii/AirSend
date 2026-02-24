@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <share-target android:targetClass="com.airsend.ShareTargetActivity">
+        <data android:mimeType="*/*" />
+        <!-- 这里定义的是点击分享菜单快捷项后传入到目标 Activity 的类别分类 -->
+        <category android:name="com.airsend.category.DIRECT_SHARE_TARGET" />
+    </share-target>
+</shortcuts>

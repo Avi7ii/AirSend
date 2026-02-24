@@ -1,0 +1,14 @@
+/Users/thom/Desktop/Localsend X/Android/airsend_daemon/target/release/deps/thiserror-bf935bc8b42f8438.d: /Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs /Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs /Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs /Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs /Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs /Users/thom/Desktop/Localsend\ X/Android/airsend_daemon/target/release/build/thiserror-daed64f8fa54280a/out/private.rs
+
+/Users/thom/Desktop/Localsend X/Android/airsend_daemon/target/release/deps/libthiserror-bf935bc8b42f8438.rlib: /Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs /Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs /Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs /Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs /Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs /Users/thom/Desktop/Localsend\ X/Android/airsend_daemon/target/release/build/thiserror-daed64f8fa54280a/out/private.rs
+
+/Users/thom/Desktop/Localsend X/Android/airsend_daemon/target/release/deps/libthiserror-bf935bc8b42f8438.rmeta: /Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs /Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs /Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs /Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs /Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs /Users/thom/Desktop/Localsend\ X/Android/airsend_daemon/target/release/build/thiserror-daed64f8fa54280a/out/private.rs
+
+/Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs:
+/Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs:
+/Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs:
+/Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs:
+/Users/thom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs:
+/Users/thom/Desktop/Localsend\ X/Android/airsend_daemon/target/release/build/thiserror-daed64f8fa54280a/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/thom/Desktop/Localsend X/Android/airsend_daemon/target/release/build/thiserror-daed64f8fa54280a/out

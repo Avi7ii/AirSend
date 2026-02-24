@@ -1,0 +1,234 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.airsend"
+4    android:versionCode="1"
+5    android:versionName="1.0" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="26"
+9        android:targetSdkVersion="34" />
+10
+11    <uses-permission android:name="android.permission.INTERNET" />
+11-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:4:5-67
+11-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:4:22-64
+12    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+12-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:5:5-81
+12-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:5:22-78
+13    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+13-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:6:5-77
+13-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:6:22-74
+14    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+14-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:7:5-87
+14-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:7:22-84
+15
+16    <permission
+16-->[androidx.core:core:1.13.1] /Users/thom/.gradle/caches/transforms-4/81e9a2860b443818c4597db9344392cf/transformed/core-1.13.1/AndroidManifest.xml:22:5-24:47
+17        android:name="com.airsend.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+17-->[androidx.core:core:1.13.1] /Users/thom/.gradle/caches/transforms-4/81e9a2860b443818c4597db9344392cf/transformed/core-1.13.1/AndroidManifest.xml:23:9-81
+18        android:protectionLevel="signature" />
+18-->[androidx.core:core:1.13.1] /Users/thom/.gradle/caches/transforms-4/81e9a2860b443818c4597db9344392cf/transformed/core-1.13.1/AndroidManifest.xml:24:9-44
+19
+20    <uses-permission android:name="com.airsend.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+20-->[androidx.core:core:1.13.1] /Users/thom/.gradle/caches/transforms-4/81e9a2860b443818c4597db9344392cf/transformed/core-1.13.1/AndroidManifest.xml:26:5-97
+20-->[androidx.core:core:1.13.1] /Users/thom/.gradle/caches/transforms-4/81e9a2860b443818c4597db9344392cf/transformed/core-1.13.1/AndroidManifest.xml:26:22-94
+21
+22    <application
+22-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:10:5-75:19
+23        android:allowBackup="true"
+23-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:11:9-35
+24        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+24-->[androidx.core:core:1.13.1] /Users/thom/.gradle/caches/transforms-4/81e9a2860b443818c4597db9344392cf/transformed/core-1.13.1/AndroidManifest.xml:28:18-86
+25        android:debuggable="true"
+26        android:extractNativeLibs="false"
+27        android:icon="@mipmap/ic_launcher"
+27-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:13:9-43
+28        android:label="AirSend"
+28-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:12:9-32
+29        android:testOnly="true"
+30        android:theme="@style/Theme.AppCompat.Light.NoActionBar" >
+30-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:14:9-65
+31
+32        <!-- LSPosed/Xposed 模块声明 -->
+33        <meta-data
+33-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:17:9-19:36
+34            android:name="xposedmodule"
+34-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:18:13-40
+35            android:value="true" />
+35-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:19:13-33
+36        <meta-data
+36-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:20:9-22:57
+37            android:name="xposeddescription"
+37-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:21:13-45
+38            android:value="AirSend 特权模块：实现系统级剪贴板自动同步" />
+38-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:22:13-54
+39        <meta-data
+39-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:23:9-25:34
+40            android:name="xposedminversion"
+40-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:24:13-44
+41            android:value="93" />
+41-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:25:13-31
+42
+43        <activity
+43-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:27:9-34:20
+44            android:name="com.airsend.MainActivity"
+44-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:28:13-41
+45            android:exported="true" >
+45-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:29:13-36
+46            <intent-filter>
+46-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:30:13-33:29
+47                <action android:name="android.intent.action.MAIN" />
+47-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:31:17-69
+47-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:31:25-66
+48
+49                <category android:name="android.intent.category.LAUNCHER" />
+49-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:32:17-77
+49-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:32:27-74
+50            </intent-filter>
+51        </activity>
+52
+53        <!-- Share Activity (No UI direct share target) -->
+54        <activity
+54-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:37:9-57:20
+55            android:name="com.airsend.ShareTargetActivity"
+55-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:38:13-48
+56            android:excludeFromRecents="true"
+56-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:40:13-46
+57            android:exported="true"
+57-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:42:13-36
+58            android:noHistory="true"
+58-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:41:13-37
+59            android:theme="@android:style/Theme.NoDisplay" >
+59-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:39:13-59
+60            <intent-filter>
+60-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:43:13-47:29
+61                <action android:name="android.intent.action.SEND" />
+61-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:44:17-69
+61-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:44:25-66
+62
+63                <category android:name="android.intent.category.DEFAULT" />
+63-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:45:17-76
+63-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:45:27-73
+64
+65                <data android:mimeType="*/*" />
+65-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:46:17-48
+65-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:46:23-45
+66            </intent-filter>
+67            <intent-filter>
+67-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:48:13-52:29
+68                <action android:name="android.intent.action.SEND_MULTIPLE" />
+68-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:49:17-78
+68-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:49:25-75
+69
+70                <category android:name="android.intent.category.DEFAULT" />
+70-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:45:17-76
+70-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:45:27-73
+71
+72                <data android:mimeType="*/*" />
+72-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:46:17-48
+72-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:46:23-45
+73            </intent-filter>
+74            <!-- 绑定 Direct Share 动态配置入口 -->
+75            <meta-data
+75-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:54:13-56:53
+76                android:name="android.app.shortcuts"
+76-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:55:17-53
+77                android:resource="@xml/shortcuts" />
+77-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:56:17-50
+78        </activity>
+79
+80        <receiver
+80-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:59:9-66:20
+81            android:name="com.airsend.BootReceiver"
+81-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:60:13-41
+82            android:enabled="true"
+82-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:61:13-35
+83            android:exported="false" >
+83-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:62:13-37
+84            <intent-filter>
+84-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:63:13-65:29
+85                <action android:name="android.intent.action.BOOT_COMPLETED" />
+85-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:64:17-79
+85-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:64:25-76
+86            </intent-filter>
+87        </receiver>
+88
+89        <!-- Foreground Service (Normal App Process) -->
+90        <service
+90-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:69:9-73:56
+91            android:name="com.airsend.AirSendService"
+91-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:70:13-43
+92            android:enabled="true"
+92-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:71:13-35
+93            android:exported="false"
+93-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:72:13-37
+94            android:foregroundServiceType="dataSync" />
+94-->/Users/thom/Desktop/Localsend X/Android/app/src/main/AndroidManifest.xml:73:13-53
+95
+96        <provider
+96-->[androidx.emoji2:emoji2:1.2.0] /Users/thom/.gradle/caches/transforms-4/846a096a2fd4ca07442973bc5d08a9b8/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:24:9-32:20
+97            android:name="androidx.startup.InitializationProvider"
+97-->[androidx.emoji2:emoji2:1.2.0] /Users/thom/.gradle/caches/transforms-4/846a096a2fd4ca07442973bc5d08a9b8/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:25:13-67
+98            android:authorities="com.airsend.androidx-startup"
+98-->[androidx.emoji2:emoji2:1.2.0] /Users/thom/.gradle/caches/transforms-4/846a096a2fd4ca07442973bc5d08a9b8/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:26:13-68
+99            android:exported="false" >
+99-->[androidx.emoji2:emoji2:1.2.0] /Users/thom/.gradle/caches/transforms-4/846a096a2fd4ca07442973bc5d08a9b8/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:27:13-37
+100            <meta-data
+100-->[androidx.emoji2:emoji2:1.2.0] /Users/thom/.gradle/caches/transforms-4/846a096a2fd4ca07442973bc5d08a9b8/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:29:13-31:52
+101                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+101-->[androidx.emoji2:emoji2:1.2.0] /Users/thom/.gradle/caches/transforms-4/846a096a2fd4ca07442973bc5d08a9b8/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:30:17-75
+102                android:value="androidx.startup" />
+102-->[androidx.emoji2:emoji2:1.2.0] /Users/thom/.gradle/caches/transforms-4/846a096a2fd4ca07442973bc5d08a9b8/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:31:17-49
+103            <meta-data
+103-->[androidx.lifecycle:lifecycle-process:2.6.2] /Users/thom/.gradle/caches/transforms-4/8a922052b45c40c4374221cf1d056414/transformed/jetified-lifecycle-process-2.6.2/AndroidManifest.xml:29:13-31:52
+104                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
+104-->[androidx.lifecycle:lifecycle-process:2.6.2] /Users/thom/.gradle/caches/transforms-4/8a922052b45c40c4374221cf1d056414/transformed/jetified-lifecycle-process-2.6.2/AndroidManifest.xml:30:17-78
+105                android:value="androidx.startup" />
+105-->[androidx.lifecycle:lifecycle-process:2.6.2] /Users/thom/.gradle/caches/transforms-4/8a922052b45c40c4374221cf1d056414/transformed/jetified-lifecycle-process-2.6.2/AndroidManifest.xml:31:17-49
+106            <meta-data
+106-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:29:13-31:52
+107                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
+107-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:30:17-85
+108                android:value="androidx.startup" />
+108-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:31:17-49
+109        </provider>
+110
+111        <receiver
+111-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:34:9-52:20
+112            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+112-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:35:13-76
+113            android:directBootAware="false"
+113-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:36:13-44
+114            android:enabled="true"
+114-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:37:13-35
+115            android:exported="true"
+115-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:38:13-36
+116            android:permission="android.permission.DUMP" >
+116-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:39:13-57
+117            <intent-filter>
+117-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:40:13-42:29
+118                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
+118-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:41:17-91
+118-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:41:25-88
+119            </intent-filter>
+120            <intent-filter>
+120-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:43:13-45:29
+121                <action android:name="androidx.profileinstaller.action.SKIP_FILE" />
+121-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:44:17-85
+121-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:44:25-82
+122            </intent-filter>
+123            <intent-filter>
+123-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:46:13-48:29
+124                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
+124-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:47:17-88
+124-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:47:25-85
+125            </intent-filter>
+126            <intent-filter>
+126-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:49:13-51:29
+127                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
+127-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:50:17-95
+127-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/thom/.gradle/caches/transforms-4/7caa008a34335f0c5d5674c4acef4b70/transformed/jetified-profileinstaller-1.3.0/AndroidManifest.xml:50:25-92
+128            </intent-filter>
+129        </receiver>
+130    </application>
+131
+132</manifest>

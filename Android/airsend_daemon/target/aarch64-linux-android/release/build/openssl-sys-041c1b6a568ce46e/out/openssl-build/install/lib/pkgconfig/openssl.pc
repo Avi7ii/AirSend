@@ -1,0 +1,9 @@
+prefix=/Users/thom/Desktop/Localsend X/Android/airsend_daemon/target/aarch64-linux-android/release/build/openssl-sys-041c1b6a568ce46e/out/openssl-build/install
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include 
+
+Name: OpenSSL
+Description: Secure Sockets Layer and cryptography libraries and tools
+Version: 3.5.5
+Requires: libssl libcrypto

@@ -1,0 +1,1 @@
+cargo:rustc-env=MIME_TYPES_GENERATED_PATH=/Users/thom/Desktop/Localsend X/Android/airsend_daemon/target/debug/build/mime_guess-c95aa56560df2619/out/mime_types_generated.rs

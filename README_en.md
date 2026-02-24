@@ -119,15 +119,15 @@ flowchart TB
 
         %% Android Internal IPC
         %% Android Internal IPC
-        ForegroundSvc <-->|Poll Target List (UDS)| UDSServer
-        LSPosedHook <-->|Hijack Clipboard (UDS)| UDSServer
+        ForegroundSvc <-->|Poll Target List via UDS| UDSServer
+        LSPosedHook <-->|Hijack Clipboard via UDS| UDSServer
     end
 
     %% ==========================================
     %% Part 3: LAN Cross-Border
     %% ==========================================
-    UDP_Disc <==>|UDP Broadcast ID\n`LocalSend Compatible`| TokioCore:::protocol_line
-    HTTP_Trans <==>|HTTPS Chunked Transfer\n`Streaming I/O`| TokioCore:::protocol_line
+    UDP_Disc <==>|UDP Broadcast ID - LocalSend Compatible| TokioCore:::protocol_line
+    HTTP_Trans <==>|HTTPS Chunked Transfer - Streaming I/O| TokioCore:::protocol_line
 
 ```
 

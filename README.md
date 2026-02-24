@@ -58,7 +58,7 @@ AirSend 彻底摒弃了繁琐的主界面。它的全部生命力都凝结在 ma
 为了让极客玩家清晰地了解各端分工，我们绘制了一份极其精密的双端协作网络脑图。在这里，你将看到 Kotlin、Rust 守护进程、Xposed 钩子以及 Swift 底层网络是如何如同精密齿轮般交织互补的。
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'background': 'transparent', 'clusterBkg': 'transparent'}}}%%
+%%{init: {'theme': 'dark', 'themeVariables': {'background': 'transparent', 'clusterBkg': '#0d0d0d55', 'edgeLabelBackground': '#1a1a2e'}}}%%
 flowchart TB
     %% ==========================================
     %% 全局样式定义 (极客暗黑风格配色参考)

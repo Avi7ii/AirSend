@@ -48,34 +48,143 @@ When you copy text on your phone, the Mac clipboard is instantly updated. No act
 
 <h2 align="center">💎 Why choose AirSend over the official client?</h2>
 
-We've optimized every pixel and line of code specifically for macOS.
-
-| Dimension            | Official Client (Flutter) | **AirSend (Native)**     | Evaluation                  |
-| :------------------- | :------------------------ | :----------------------- | :-------------------------- |
-| **RAM Usage**        | ~300MB                    | **~20MB**                | **15x** resource efficiency |
-| **Interaction Path** | Open Window -> Click Send | **0 Path (Drag & Send)** | Minimum mental load         |
-| **Startup Speed**    | Waiting for framework     | **Microsecond instant**  | Native binary advantage     |
-| **UI Style**         | Simulated, stiff          | **100% Native feel**     | Glassmorphism & physics     |
-| **Clipboard Sync**   | Manual confirm/refresh    | **Fully auto sync**      | True "invisible" tech       |
-| **App Presence**     | Occupies Dock/Desktop     | **Status bar icon only** | Ultimate for minimalists    |
+Instead of taking the lazy "write once, run anywhere" approach, we performed hardcore **system-level native rewrites** on both ends.
 
 ---
 
-<h2 align="center">✨ Key Features</h2>
+<h2 align="center">🕸️ Architecture Overview</h2>
 
-*   **🔒 Full LocalSend Compatibility**: This is the foundation. AirSend works seamlessly with official LocalSend on mobile and Windows.
-*   **⚡ Performance Beast**: Based on Apple's native `Network.framework`. Optimized concurrent socket scheduling for small files, zero disk caching during GB-level transfers.
-*   **📂 Intelligent Archiving**: It knows your files. Images and documents from your phone are automatically categorized in the background.
-*   **🚀 Ready on Launch**: Open once, and it becomes a permanent part of your macOS.
+To give geek users a crystal-clear understanding of how each module performs its duty, we have mapped out an extremely precise dual-device collaboration schematic. Here, you'll see how Kotlin, the Rust Daemon, Xposed hooks, and Swift's core networking interlock like precision gears.
+
+```mermaid
+flowchart TB
+    %% ==========================================
+    %% Global Style Def (Geek Dark Theme)
+    %% ==========================================
+    classDef mac_node fill:#1d1d1f,stroke:#007aff,stroke-width:2px,color:#fff,rx:8px,ry:8px
+    classDef android_node fill:#0d231e,stroke:#3ddc84,stroke-width:2px,color:#fff,rx:8px,ry:8px
+    classDef daemon_node fill:#2b1a13,stroke:#f86523,stroke-width:2px,color:#fff,rx:8px,ry:8px
+    classDef magic_node fill:#1e1b4b,stroke:#a855f7,stroke-width:2px,color:#fff,rx:8px,ry:8px
+    classDef protocol_line color:#eab308,stroke-width:2px,stroke-dasharray: 5 5
+
+    %% ==========================================
+    %% Part 1: macOS Receiver (The Elegant Core)
+    %% ==========================================
+    subgraph macOS_Side ["💻 macOS Side (Ultimate Native Hub)"]
+        direction TB
+        MainApp["AirSend (Menu Bar App)\n`0 UI / ~20MB RAM`"]:::mac_node
+        
+        subgraph Mac_Network ["Network.framework (Apple Underhood)"]
+            UDP_Disc["UDPDiscoveryService\n`Port: 53317 (LAN Broadcast)`"]:::mac_node
+            HTTP_Trans["HTTPTransferServer\n`TCP/0 Disk Cache/Stream Dump`"]:::mac_node
+        end
+        
+        Mac_Clipboard["macOS System Clipboard\n`NSPasteboard`"]:::mac_node
+
+        MainApp -->|Schedule| UDP_Disc
+        MainApp -->|Schedule| HTTP_Trans
+        HTTP_Trans <-->|Pull/Inject| Mac_Clipboard
+    end
+
+    %% ==========================================
+    %% Part 2: Android Sender (The God-Mode Engine)
+    %% ==========================================
+    subgraph Android_Side ["🤖 Android Side (Piercing the System)"]
+        direction TB
+        
+        %% 2.1 Kotlin App Layer
+        subgraph App_Layer ["App Layer (Kotlin Foreground Service)"]
+            ForegroundSvc["AirSendService\n`Foreground / dataSync Guardian`"]:::android_node
+            ShortcutManager["Dynamic Shortcuts\n`Direct Share Node Inject`"]:::android_node
+            ForegroundSvc -->|Update| ShortcutManager
+        end
+
+        %% 2.2 Xposed/LSPosed Layer
+        subgraph Magisk_Modules ["Privileged Mount (Magisk/KernelSU)"]
+            LSPosedHook{"Xposed Hook\n`ClipboardHook`"}:::magic_node
+            SystemClip["SystemClipboard\n`ClipboardManagerService`"]:::magic_node
+            LSPosedHook <-->|Spy / Force-Write / Anti-Loop| SystemClip
+            LSPosedHook -.->|Bypass App Layer Interp.| ForegroundSvc
+        end
+
+        %% 2.3 Rust Daemon Layer
+        subgraph Rust_Daemon ["Independent Core: Rust Daemon (arm64-v8a)"]
+            inotify["EXT4 inotify Engine\n`/data/media/0/***/Screenshots`"]:::daemon_node
+            TokioCore["Tokio Async Runtime\n`Reqwest Client (Zero Proxy)`"]:::daemon_node
+            UDSServer["Unix Domain Sockets (UDS)\n`@airsend_ipc & @airsend_app_ipc`"]:::daemon_node
+            
+            inotify -->|Physical Dump Trigger| TokioCore
+            UDSServer <-->|IPC Highspeed Bus| TokioCore
+        end
+
+        %% Android Internal IPC
+        ForegroundSvc <-->|Poll Target List (UDS)| UDSServer
+        LSPosedHook <-->|Hijack Clipboard (UDS)| UDSServer
+    end
+
+    %% ==========================================
+    %% Part 3: LAN Cross-Border
+    %% ==========================================
+    UDP_Disc <==>|UDP Broadcast ID\n`LocalSend Compatible`| TokioCore:::protocol_line
+    HTTP_Trans <==>|HTTPS Chunked Transfer\n`Streaming I/O`| TokioCore:::protocol_line
+
+```
+
+<details>
+<summary>💡 Developer's Note: Reading this graphic (Click to expand)</summary>
+<br>
+
+*   **Dual-End Communications**: The macOS endpoint and Android engine always cross the router securely via the yellow dashed path (fully adhering to standard LocalSend protocols) guaranteeing zero friction payload exchanges.
+*   **Android Triple-Core Anti-Block Structure**: Deep within its Android roots lies absolute sophistication: at the outer tier `App Layer` commands `ShortcutManager` asserting dominant Direct Share nodes; internally `Xposed Hook` spies over the Systemwide clipboard bus directly translating actions to daemon processes via UDS; and digging down into the soil, our decoupled `Rust Daemon` operates devoid of JVM boundaries relying directly on native sockets, `inotify`, and `Tokio` HTTP requests. This permits "absolute ghost-syncing" preserving phenomenal battery drain performance without user interface clutter whatsoever!
+</details>
 
 ---
 
-<h2 align="center">Quick Start</h2>
+<h3 align="center">🍎 Core Chapter 1: The Native Evolution on macOS</h3>
 
-1.  Get `AirSend.app` from [GitHub Releases](https://github.com/Avi7ii/AirSend/releases/tag/v1.0).
-2.  Drag into the `Applications` folder and enable "Launch at Login".
-3.  Android users please download the [official LocalSend client](https://github.com/localsend/localsend/releases) for seamless interoperability.
-4.  **From now on, you'll even forget it exists.** Because it's there when you need it, and it's just air when you don't.
+On Mac, we strive for **invisibility and extreme performance**. Great tools shouldn't fight for your attention.
+
+*   **Zero UI Design**: Completely discards the sluggish Flutter main interface. All its vitality is condensed into a tiny menu bar icon. **0 interaction path, drag-and-drop to send.**
+*   **Performance Beast**: Rewritten from the ground up using Apple's native `Network.framework`. Optimized concurrent socket scheduling for small files, and achieves zero disk caching during GB-level transfers.
+*   **Minimal Footprint**: RAM usage drops from the official ~300MB to merely **~20MB** (a 15x efficiency boost) with microsecond startup speed.
+*   **100% Native Feel**: Glassmorphism materials and physics-based animations. Say goodbye to the stiff feel of cross-platform components.
+*   **Intelligent Archiving**: Automatically categorizes incoming photos, documents, and archives from your phone in the background.
+
+---
+
+<h3 align="center">🤖 Core Chapter 2: The God-Mode on Android</h3>
+
+To achieve perfect "instant sync", ordinary app-level permissions simply aren't enough. We pierced through the system blockade to build exclusive, low-level modules for Android geeks:
+
+*   **Rust Daemon & Magisk Module Guardian**
+    *   **The Pain Point**: Traditional JVM-hosted Android background processes are frequently killed, and file polling drains the battery.
+    *   **The Breakthrough**: We cross-compiled the core logic into an `arm64-v8a` native binary using Rust, packaged as a **Magisk/KernelSU module**. It leverages Linux kernel-level `notify` (EXT4 physical file monitoring) to perceive changes in real-time. Freed from the app's lifecycle, it runs persistently with extremely restrained power consumption.
+*   **Xposed Clipboard Injection (LSPosed)**
+    *   **The Pain Point**: Android 10+ killed the permission to read the clipboard in the background.
+    *   **The Breakthrough**: Via the LSPosed module, we directly hooked the system's `ClipboardManagerService`. It achieves **two-way, instant** clipboard sync invisibly without any prompts, featuring a low-level Loop Prevention mechanism.
+*   **Native Share Sheet (Direct Share) Integration**
+    *   We eliminated the cumbersome "Open App -> Select Device" workflow. Your Mac now elegantly implants itself directly into Android's native Share Sheet as a direct target.
+
+---
+
+
+---
+
+<h2 align="center">⚙️ Deployment Guide</h2>
+
+**Protocol Foundation:** Fully compatible with the LocalSend protocol, meaning it can interconnect with any official client.
+
+### 🍎 Step 1: Deploy Mac Receiver
+1. Get the latest `AirSend.app` from [GitHub Releases](https://github.com/Avi7ii/AirSend/releases/latest).
+2. Drag it into the `Applications` folder and enable "Launch at Login".
+
+### 🤖 Step 2: Deploy Android Sender (Dual Mode)
+*   **🟢 Basic Mode (For Normal Users)**: Simply download the [official LocalSend client](https://github.com/localsend/localsend/releases) on your phone to get high-speed file transfer capabilities.
+*   **🔴 Geek Pro Mode (Requires Root + LSPosed)**:
+    1. Install the **AirSend Custom Android App**.
+    2. Flash the bundled `airsend_daemon` module via **Magisk/KernelSU** (Activates high-performance kernel monitoring & persistence).
+    3. Activate the **AirSend Module** in **LSPosed** (Takes over system clipboard services).
+    4. **From now on, the two devices share a single brain. Whether copying text or sending files, it arrives instantly and invisibly.**
 
 ---
 

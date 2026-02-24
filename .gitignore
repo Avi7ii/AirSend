@@ -48,8 +48,21 @@ Android/airsend_daemon/target/
 # Release Assets & Temp
 *.zip
 *.icns
-test_clipboard.swift
+# Local Misc
+*.pdf
+AirSend_Magisk_v*.zip
+localsend-upstream/
+handoff_report_throttling_final.md
+AirSend_Design.md
+ROADMAP.md
+config.yaml
+1.html
+.idea/
+extract_foreground.py
+generate_android_adaptive.sh
+generate_icons.sh
 render.swift
-TestDrag.swift
+test_clipboard.swift
 gen_svg.py
 gen_svg_clean.py
+TestDrag.swift

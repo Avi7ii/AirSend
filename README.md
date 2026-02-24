@@ -74,14 +74,14 @@ flowchart TB
     %% ==========================================
     subgraph macOS_Side ["💻 macOS 端 (极致原生的接发枢纽)"]
         direction TB
-        MainApp["AirSend (Menu Bar App)\n`0 UI / ~20MB RAM`"]:::mac_node
+        MainApp["AirSend / 0 UI / ~20MB RAM"]:::mac_node
         
         subgraph Mac_Network ["Network.framework (Apple 底层)"]
-            UDP_Disc["UDPDiscoveryService\n`Port: 53317 (局域网广播/组播)`"]:::mac_node
-            HTTP_Trans["HTTPTransferServer\n`TCP/0 磁盘缓存/流式落盘`"]:::mac_node
+            UDP_Disc["UDPDiscoveryService / 局域网广播 Port 53317"]:::mac_node
+            HTTP_Trans["HTTPTransferServer / TCP / 0 磁盘缓存"]:::mac_node
         end
         
-        Mac_Clipboard["macOS System Clipboard\n`NSPasteboard`"]:::mac_node
+        Mac_Clipboard["macOS 剪贴板 / NSPasteboard"]:::mac_node
 
         MainApp -->|调度| UDP_Disc
         MainApp -->|调度| HTTP_Trans
@@ -96,24 +96,24 @@ flowchart TB
         
         %% 2.1 Kotlin App 层
         subgraph App_Layer ["App Layer (Kotlin 前台服务)"]
-            ForegroundSvc["AirSendService\n`Foreground / dataSync 保活`"]:::android_node
-            ShortcutManager["Dynamic Shortcuts\n`原生 Share Sheet 目标注入`"]:::android_node
+            ForegroundSvc["AirSendService / dataSync 保活"]:::android_node
+            ShortcutManager["Dynamic Shortcuts / Share Sheet 注入"]:::android_node
             ForegroundSvc -->|更新| ShortcutManager
         end
 
         %% 2.2 Xposed/LSPosed 层 (核心黑客魔法)
         subgraph Magisk_Modules ["特权级挂载 (Magisk/KernelSU)"]
-            LSPosedHook{"Xposed Hook\n`ClipboardHook`"}:::magic_node
-            SystemClip["SystemClipboard\n`ClipboardManagerService`"]:::magic_node
+            LSPosedHook{"Xposed Hook / ClipboardHook"}:::magic_node
+            SystemClip["SystemClipboard / ClipboardManager"]:::magic_node
             LSPosedHook <-->|无感窃听 / 强写 / 防环| SystemClip
             LSPosedHook -.->|绕过应用层拦截| ForegroundSvc
         end
 
         %% 2.3 Rust Daemon 层 (底层性能怪兽)
         subgraph Rust_Daemon ["独立核心: Rust Daemon (arm64-v8a)"]
-            inotify["EXT4 inotify 引擎\n`/data/media/0/***/Screenshots`"]:::daemon_node
-            TokioCore["Tokio 异步运行时\n`Reqwest Client (0 代理干扰)`"]:::daemon_node
-            UDSServer["Unix Domain Sockets (UDS)\n`@airsend_ipc & @airsend_app_ipc`"]:::daemon_node
+            inotify["inotify 引擎 / Screenshots 监听"]:::daemon_node
+            TokioCore["Tokio 异步运行时 / Reqwest Client"]:::daemon_node
+            UDSServer["Unix Domain Sockets / @airsend_ipc"]:::daemon_node
             
             inotify -->|物理落盘触发| TokioCore
             UDSServer <-->|进程间高速总线| TokioCore
@@ -127,8 +127,8 @@ flowchart TB
     %% ==========================================
     %% 第三部分：局域网双端跨越
     %% ==========================================
-    UDP_Disc <==>|UDP 广播识别\n`LocalSend 协议兼容`| TokioCore:::protocol_line
-    HTTP_Trans <==>|HTTPS Chunked 传输\n`流式发送与响应`| TokioCore:::protocol_line
+    UDP_Disc <==>|UDP 广播识别 - LocalSend 协议兼容| TokioCore:::protocol_line
+    HTTP_Trans <==>|HTTPS Chunked 传输 - 流式发送| TokioCore:::protocol_line
 
 ```
 

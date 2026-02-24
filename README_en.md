@@ -73,14 +73,14 @@ flowchart TB
     %% ==========================================
     subgraph macOS_Side ["💻 macOS Side (Ultimate Native Hub)"]
         direction TB
-        MainApp["AirSend (Menu Bar App)\n`0 UI / ~20MB RAM`"]:::mac_node
+        MainApp["AirSend / 0 UI / ~20MB RAM"]:::mac_node
         
         subgraph Mac_Network ["Network.framework (Apple Underhood)"]
-            UDP_Disc["UDPDiscoveryService\n`Port: 53317 (LAN Broadcast)`"]:::mac_node
-            HTTP_Trans["HTTPTransferServer\n`TCP/0 Disk Cache/Stream Dump`"]:::mac_node
+            UDP_Disc["UDPDiscoveryService / Port 53317"]:::mac_node
+            HTTP_Trans["HTTPTransferServer / TCP / No Disk Cache"]:::mac_node
         end
         
-        Mac_Clipboard["macOS System Clipboard\n`NSPasteboard`"]:::mac_node
+        Mac_Clipboard["macOS Clipboard / NSPasteboard"]:::mac_node
 
         MainApp -->|Schedule| UDP_Disc
         MainApp -->|Schedule| HTTP_Trans
@@ -95,24 +95,24 @@ flowchart TB
         
         %% 2.1 Kotlin App Layer
         subgraph App_Layer ["App Layer (Kotlin Foreground Service)"]
-            ForegroundSvc["AirSendService\n`Foreground / dataSync Guardian`"]:::android_node
-            ShortcutManager["Dynamic Shortcuts\n`Direct Share Node Inject`"]:::android_node
+            ForegroundSvc["AirSendService / dataSync Guardian"]:::android_node
+            ShortcutManager["Dynamic Shortcuts / Direct Share Inject"]:::android_node
             ForegroundSvc -->|Update| ShortcutManager
         end
 
         %% 2.2 Xposed/LSPosed Layer
         subgraph Magisk_Modules ["Privileged Mount (Magisk/KernelSU)"]
-            LSPosedHook{"Xposed Hook\n`ClipboardHook`"}:::magic_node
-            SystemClip["SystemClipboard\n`ClipboardManagerService`"]:::magic_node
+            LSPosedHook{"Xposed Hook / ClipboardHook"}:::magic_node
+            SystemClip["SystemClipboard / ClipboardManager"]:::magic_node
             LSPosedHook <-->|Spy / Force-Write / Anti-Loop| SystemClip
             LSPosedHook -.->|Bypass App Layer Interp.| ForegroundSvc
         end
 
         %% 2.3 Rust Daemon Layer
         subgraph Rust_Daemon ["Independent Core: Rust Daemon (arm64-v8a)"]
-            inotify["EXT4 inotify Engine\n`/data/media/0/***/Screenshots`"]:::daemon_node
-            TokioCore["Tokio Async Runtime\n`Reqwest Client (Zero Proxy)`"]:::daemon_node
-            UDSServer["Unix Domain Sockets (UDS)\n`@airsend_ipc & @airsend_app_ipc`"]:::daemon_node
+            inotify["inotify / Screenshots Watcher"]:::daemon_node
+            TokioCore["Tokio Async / Reqwest Client"]:::daemon_node
+            UDSServer["Unix Domain Sockets / @airsend_ipc"]:::daemon_node
             
             inotify -->|Physical Dump Trigger| TokioCore
             UDSServer <-->|IPC Highspeed Bus| TokioCore

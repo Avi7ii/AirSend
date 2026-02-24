@@ -1,0 +1,14 @@
+# AirSend SELinux 熔断规则
+# 允许系统服务 (如 system_server) 连接
+allow system_server su unix_stream_socket connectto
+allow system_server magisk unix_stream_socket connectto
+allow system_server default_android_service service_manager find
+allow system_server init unix_stream_socket connectto
+allow system_server kernel unix_stream_socket connectto
+
+# 允许普通 App 进程 (untrusted_app 域) 连接
+# 针对不同 targetSDK，需要覆盖 untrusted_app 和 untrusted_app_all
+allow untrusted_app su unix_stream_socket connectto
+allow untrusted_app magisk unix_stream_socket connectto
+allow untrusted_app_all su unix_stream_socket connectto
+allow untrusted_app_all magisk unix_stream_socket connectto

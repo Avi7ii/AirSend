@@ -1,0 +1,26 @@
+[package]
+name = "airsend_daemon"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# 🔋 精简 tokio features（原 "full"）
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time", "sync", "macros"] }
+localsend = "0.2.2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+bytes = "1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+futures-util = "0.3"
+uuid = { version = "1", features = ["v4"] }
+openssl = { version = "0.10", features = ["vendored"] }
+reqwest = { version = "0.12", features = ["json"] }
+notify = "6.1.1"
+
+
+[patch.crates-io]
+native-dialog = { path = "../patches/native-dialog-stub" }
+localsend = { path = "../patches/localsend" }

@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    
+    <filter id="m3-shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#3D0014" flood-opacity="0.15" />
+      <feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#3D0014" flood-opacity="0.1" />
+    </filter>
+
+    <filter id="m3-shadow-high" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="24" stdDeviation="32" flood-color="#3D0014" flood-opacity="0.22" />
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" fill="none" />
+  
+  
+  <g transform="translate(512, 512)">
+    <g transform="scale(0.7)">
+      
+      
+      
+      
+      <g transform="rotate(0)"><rect x="40" y="-380" width="180" height="480" rx="90" fill="#962846" filter="url(#m3-shadow)" /></g>
+      <g transform="rotate(90)"><rect x="40" y="-380" width="180" height="480" rx="90" fill="#D9486C" filter="url(#m3-shadow)" /></g>
+      <g transform="rotate(180)"><rect x="40" y="-380" width="180" height="480" rx="90" fill="#FF8EAB" filter="url(#m3-shadow)" /></g>
+      <g transform="rotate(270)"><rect x="40" y="-380" width="180" height="480" rx="90" fill="#5C0D24" filter="url(#m3-shadow)" /></g>
+
+      
+      
+      
+      <g transform="rotate(45)">
+        <g transform="rotate(0)"><rect x="-160" y="-280" width="140" height="400" rx="70" fill="#FFC2D4" filter="url(#m3-shadow)" /></g>
+        <g transform="rotate(90)"><rect x="-160" y="-280" width="140" height="400" rx="70" fill="#7A1A37" filter="url(#m3-shadow)" /></g>
+        <g transform="rotate(180)"><rect x="-160" y="-280" width="140" height="400" rx="70" fill="#B32E50" filter="url(#m3-shadow)" /></g>
+        <g transform="rotate(270)"><rect x="-160" y="-280" width="140" height="400" rx="70" fill="#FF9EBD" filter="url(#m3-shadow)" /></g>
+      </g>
+
+      
+      
+      
+      
+      
+      <g transform="rotate(45)" filter="url(#m3-shadow-high)">
+        <rect x="-100" y="-100" width="200" height="200" rx="60" fill="#420616" />
+        <rect x="-40" y="-40" width="80" height="80" rx="32" fill="#FFC2D4" />
+      </g>
+      
+
+      
+      
+      
+      
+      <g transform="translate(-320, -320) rotate(15)" filter="url(#m3-shadow)"><path d="M 0,-40 Q 0,0 40,0 Q 0,0 0,40 Q 0,0 -40,0 Q 0,0 0,-40 Z" fill="#D9486C" /></g>
+      <g transform="translate(320, -320) rotate(-15)" filter="url(#m3-shadow)"><path d="M 0,-30 Q 0,0 30,0 Q 0,0 0,30 Q 0,0 -30,0 Q 0,0 0,-30 Z" fill="#FF8EAB" /></g>
+      <g transform="translate(-320, 320) rotate(-15)" filter="url(#m3-shadow)"><path d="M 0,-50 Q 0,0 50,0 Q 0,0 0,50 Q 0,0 -50,0 Q 0,0 0,-50 Z" fill="#FFB3C6" /></g>
+      <g transform="translate(320, 320) rotate(15)" filter="url(#m3-shadow)"><path d="M 0,-36 Q 0,0 36,0 Q 0,0 0,36 Q 0,0 -36,0 Q 0,0 0,-36 Z" fill="#962846" /></g>
+
+    </g>
+  </g>
+</svg>

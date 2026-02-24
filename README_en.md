@@ -59,76 +59,102 @@ To give geek users a crystal-clear understanding of how each module performs its
 ```mermaid
 %%{init: {'theme': 'dark', 'themeVariables': {'background': 'transparent', 'clusterBkg': '#0d0d0d55', 'edgeLabelBackground': '#1a1a2e'}}}%%
 flowchart TB
-    %% ==========================================
-    %% Global Style Def (Geek Dark Theme)
-    %% ==========================================
-    classDef mac_node fill:#1d1d1f,stroke:#007aff,stroke-width:2px,color:#fff,rx:8px,ry:8px
-    classDef android_node fill:#0d231e,stroke:#3ddc84,stroke-width:2px,color:#fff,rx:8px,ry:8px
-    classDef daemon_node fill:#2b1a13,stroke:#f86523,stroke-width:2px,color:#fff,rx:8px,ry:8px
-    classDef magic_node fill:#1e1b4b,stroke:#a855f7,stroke-width:2px,color:#fff,rx:8px,ry:8px
-    classDef protocol_line color:#eab308,stroke-width:2px,stroke-dasharray: 5 5
+    classDef mac_node fill:#1d1d1f,stroke:#007aff,stroke-width:2px,color:#fff
+    classDef android_node fill:#0d231e,stroke:#3ddc84,stroke-width:2px,color:#fff
+    classDef daemon_node fill:#2b1a13,stroke:#f86523,stroke-width:2px,color:#fff
+    classDef magic_node fill:#1e1b4b,stroke:#a855f7,stroke-width:2px,color:#fff
+    classDef protocol_line color:#eab308,stroke-width:3px,stroke-dasharray: 5 5
 
     %% ==========================================
-    %% Part 1: macOS Receiver (The Elegant Core)
+    %% Part 1: macOS Side
     %% ==========================================
     subgraph macOS_Side ["💻 macOS Side (Ultimate Native Hub)"]
         direction TB
-        MainApp["AirSend / 0 UI / ~20MB RAM"]:::mac_node
-        
-        subgraph Mac_Network ["Network.framework (Apple Underhood)"]
-            UDP_Disc["UDPDiscoveryService / Port 53317"]:::mac_node
-            HTTP_Trans["HTTPTransferServer / TCP / No Disk Cache"]:::mac_node
-        end
-        
-        Mac_Clipboard["macOS Clipboard / NSPasteboard"]:::mac_node
 
-        MainApp -->|Schedule| UDP_Disc
-        MainApp -->|Schedule| HTTP_Trans
-        HTTP_Trans <-->|Pull/Inject| Mac_Clipboard
+        subgraph Mac_App ["App Orchestrator - AppDelegate / @MainActor"]
+            AppCore["Menu Bar App / Device Registry / Wakelock"]:::mac_node
+            DragDetect["Drag Monitor / DropZoneWindow / 1s idle - 0.1s active / 60px boundary fallback"]:::mac_node
+            AppCore --- DragDetect
+        end
+
+        subgraph Mac_Security ["Security Layer"]
+            CertMgr["CertificateManager / Self-Signed X.509 / TLS Fingerprint"]:::mac_node
+            UpdateSvc["UpdateService / GitHub API / Auto Update Check"]:::mac_node
+        end
+
+        subgraph Mac_Network ["Network.framework - Dual Engine"]
+            UDP_Disc["UDPDiscoveryService / Port 53317 / LAN Broadcast / Stop-on-Connect"]:::mac_node
+            HTTP_Trans["HTTPTransferServer NWListener Actor / TLS 1.2-1.3 / ALPN http1.1 / Per-Conn Queue"]:::mac_node
+            CertMgr -->|"Inject TLS Identity"| HTTP_Trans
+        end
+
+        subgraph Mac_Send ["Send Engines"]
+            FileSender["FileSender / HTTPS Chunked / Broadcast or Unicast"]:::mac_node
+            ClipSender["ClipboardSender / Text as clipboard.txt / Image as PNG"]:::mac_node
+        end
+
+        subgraph Mac_Clipboard ["Clipboard Engine"]
+            ClipSvc["ClipboardService 3s Poll / TIFF-PNG Priority / changeCount Guard"]:::mac_node
+            Mac_Clip["macOS Clipboard / NSPasteboard"]:::mac_node
+            ClipSvc <-->|"Read / Write + Anti-Echo"| Mac_Clip
+        end
+
+        AppCore -->|"Schedule"| UDP_Disc
+        AppCore -->|"Schedule"| HTTP_Trans
+        DragDetect -->|"Drop Event"| FileSender
+        ClipSvc -->|"Text Change"| ClipSender
+        ClipSvc -->|"Image Change"| ClipSender
+        HTTP_Trans -->|"Receive Text / Write"| Mac_Clip
+        HTTP_Trans -->|"Stream to Disk / Conflict Rename"| AppCore
     end
 
     %% ==========================================
-    %% Part 2: Android Sender (The God-Mode Engine)
+    %% Part 2: Android Side
     %% ==========================================
     subgraph Android_Side ["🤖 Android Side (Piercing the System)"]
         direction TB
-        
-        %% 2.1 Kotlin App Layer
-        subgraph App_Layer ["App Layer (Kotlin Foreground Service)"]
-            ForegroundSvc["AirSendService / dataSync Guardian"]:::android_node
-            ShortcutManager["Dynamic Shortcuts / Direct Share Inject"]:::android_node
-            ForegroundSvc -->|Update| ShortcutManager
+
+        subgraph App_Layer ["App Layer - Kotlin"]
+            BootRcv["BootReceiver / Auto-Start on Boot"]:::android_node
+            ForegroundSvc["AirSendService / Foreground / dataSync / START-STICKY"]:::android_node
+            ShortcutMgr["ShortcutManager / Dynamic Direct Share Injection"]:::android_node
+            ShareTarget["ShareTargetActivity / Silent Ghost Share Entry"]:::android_node
+            BootRcv --> ForegroundSvc
+            ForegroundSvc --> ShortcutMgr
         end
 
-        %% 2.2 Xposed/LSPosed Layer
-        subgraph Magisk_Modules ["Privileged Mount (Magisk/KernelSU)"]
-            LSPosedHook{"Xposed Hook / ClipboardHook"}:::magic_node
-            SystemClip["SystemClipboard / ClipboardManager"]:::magic_node
-            LSPosedHook <-->|Spy / Force-Write / Anti-Loop| SystemClip
-            LSPosedHook -.->|Bypass App Layer Interp.| ForegroundSvc
+        subgraph Magisk_Modules ["Xposed Layer - Runs in system-server Process"]
+            LSPosedHook{"ClipboardHook / Hook: ClipboardService.ClipboardImpl"}:::magic_node
+            AntiLoop["Anti-Loop Lock / isWritingFromSync volatile / 500ms delay"]:::magic_node
+            GodMode["God-Mode IPC Server / LocalServerSocket @airsend-app-ipc"]:::magic_node
+            SystemClip["SystemClipboard / ClipboardManagerService - UID 1000 bypass"]:::magic_node
+            LSPosedHook --> AntiLoop
+            AntiLoop <-->|"Spy / Force-Write"| SystemClip
+            GodMode -->|"Inject via ActivityThread context"| SystemClip
         end
 
-        %% 2.3 Rust Daemon Layer
-        subgraph Rust_Daemon ["Independent Core: Rust Daemon (arm64-v8a)"]
-            inotify["inotify / Screenshots Watcher"]:::daemon_node
-            TokioCore["Tokio Async / Reqwest Client"]:::daemon_node
-            UDSServer["Unix Domain Sockets / @airsend_ipc"]:::daemon_node
-            
-            inotify -->|Physical Dump Trigger| TokioCore
-            UDSServer <-->|IPC Highspeed Bus| TokioCore
+        subgraph Rust_Daemon ["Rust Daemon - arm64-v8a - Magisk Module"]
+            inotify["inotify / notify crate / EXT4 Close-Write and Rename / 1s cache delay"]:::daemon_node
+            TokioCore["Tokio Async Runtime / Reqwest Client / NO-PROXY enforcement"]:::daemon_node
+            UDSServer["Unix Domain Sockets / @airsend-ipc and @airsend-app-ipc"]:::daemon_node
+            inotify -->|"Screenshot Detected"| TokioCore
+            UDSServer <-->|"IPC Command Bus"| TokioCore
         end
 
-        %% Android Internal IPC
-        %% Android Internal IPC
-        ForegroundSvc <-->|Poll Target List via UDS| UDSServer
-        LSPosedHook <-->|Hijack Clipboard via UDS| UDSServer
+        BootRcv -.->|"Verify Daemon Alive"| UDSServer
+        ForegroundSvc <-->|"GET-PEERS / 30s poll"| UDSServer
+        LSPosedHook -->|"SEND-TEXT via @airsend-ipc"| UDSServer
+        UDSServer -->|"push-text-to-app via @airsend-app-ipc"| GodMode
     end
 
     %% ==========================================
-    %% Part 3: LAN Cross-Border
+    %% Part 3: LAN Cross-Border Flows
     %% ==========================================
-    UDP_Disc <==>|UDP Broadcast ID - LocalSend Compatible| TokioCore:::protocol_line
-    HTTP_Trans <==>|HTTPS Chunked Transfer - Streaming I/O| TokioCore:::protocol_line
+    UDP_Disc <===>|"UDP Broadcast - LocalSend Compatible Peer Discovery"| TokioCore:::protocol_line
+    TokioCore ==>|"HTTPS - Screenshot Auto-Send - inotify triggered"| HTTP_Trans:::protocol_line
+    ClipSender ==>|"HTTPS - clipboard.txt - Read and Burn on arrival"| TokioCore:::protocol_line
+    TokioCore ==>|"HTTPS - Android Clipboard to Mac NSPasteboard"| HTTP_Trans:::protocol_line
+    FileSender <==>|"HTTPS Chunked - Drag-and-Drop File Transfer"| TokioCore:::protocol_line
 
 ```
 

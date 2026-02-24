@@ -60,75 +60,102 @@ AirSend 彻底摒弃了繁琐的主界面。它的全部生命力都凝结在 ma
 ```mermaid
 %%{init: {'theme': 'dark', 'themeVariables': {'background': 'transparent', 'clusterBkg': '#0d0d0d55', 'edgeLabelBackground': '#1a1a2e'}}}%%
 flowchart TB
-    %% ==========================================
-    %% 全局样式定义 (极客暗黑风格配色参考)
-    %% ==========================================
-    classDef mac_node fill:#1d1d1f,stroke:#007aff,stroke-width:2px,color:#fff,rx:8px,ry:8px
-    classDef android_node fill:#0d231e,stroke:#3ddc84,stroke-width:2px,color:#fff,rx:8px,ry:8px
-    classDef daemon_node fill:#2b1a13,stroke:#f86523,stroke-width:2px,color:#fff,rx:8px,ry:8px
-    classDef magic_node fill:#1e1b4b,stroke:#a855f7,stroke-width:2px,color:#fff,rx:8px,ry:8px
-    classDef protocol_line color:#eab308,stroke-width:2px,stroke-dasharray: 5 5
+    classDef mac_node fill:#1d1d1f,stroke:#007aff,stroke-width:2px,color:#fff
+    classDef android_node fill:#0d231e,stroke:#3ddc84,stroke-width:2px,color:#fff
+    classDef daemon_node fill:#2b1a13,stroke:#f86523,stroke-width:2px,color:#fff
+    classDef magic_node fill:#1e1b4b,stroke:#a855f7,stroke-width:2px,color:#fff
+    classDef protocol_line color:#eab308,stroke-width:3px,stroke-dasharray: 5 5
 
     %% ==========================================
-    %% 第一部分：macOS 接收端 (The Elegant Core)
+    %% 第一部分：macOS 端
     %% ==========================================
     subgraph macOS_Side ["💻 macOS 端 (极致原生的接发枢纽)"]
         direction TB
-        MainApp["AirSend / 0 UI / ~20MB RAM"]:::mac_node
-        
-        subgraph Mac_Network ["Network.framework (Apple 底层)"]
-            UDP_Disc["UDPDiscoveryService / 局域网广播 Port 53317"]:::mac_node
-            HTTP_Trans["HTTPTransferServer / TCP / 0 磁盘缓存"]:::mac_node
-        end
-        
-        Mac_Clipboard["macOS 剪贴板 / NSPasteboard"]:::mac_node
 
-        MainApp -->|调度| UDP_Disc
-        MainApp -->|调度| HTTP_Trans
-        HTTP_Trans <-->|拉取/写入| Mac_Clipboard
+        subgraph Mac_App ["应用调度层 - AppDelegate @MainActor"]
+            AppCore["菜单栏图标 / 设备注册表 / 锐入锁"]:::mac_node
+            DragDetect["拖拽监控 / DropZoneWindow / 1s空闲-0.1s激活 / 60px边界兑底"]:::mac_node
+            AppCore --- DragDetect
+        end
+
+        subgraph Mac_Security ["安全层"]
+            CertMgr["证书管理器 / 自签 X.509 / TLS 指纹身份"]:::mac_node
+            UpdateSvc["更新服务 / GitHub API / 自动检查新版本"]:::mac_node
+        end
+
+        subgraph Mac_Network ["Network.framework - 双引擎"]
+            UDP_Disc["UDPDiscoveryService / 端口 53317 / 局域网广播 / 连接后停播"]:::mac_node
+            HTTP_Trans["HTTPTransferServer NWListener Actor / TLS 1.2-1.3 / ALPN http1.1 / 独立连接队列"]:::mac_node
+            CertMgr -->|"注入 TLS 身份"| HTTP_Trans
+        end
+
+        subgraph Mac_Send ["发送引擎"]
+            FileSender["文件发送器 / HTTPS 分块传输 / 广播或单播"]:::mac_node
+            ClipSender["剪贴板发送器 / 文字为 clipboard.txt / 图片为 PNG"]:::mac_node
+        end
+
+        subgraph Mac_Clipboard ["剪贴板引擎"]
+            ClipSvc["剪贴板服务 3s 轮询 / TIFF-PNG 优先 / changeCount 防回声"]:::mac_node
+            Mac_Clip["macOS 剪贴板 / NSPasteboard"]:::mac_node
+            ClipSvc <-->|"读取 / 写入 + 防回声"| Mac_Clip
+        end
+
+        AppCore -->|"调度"| UDP_Disc
+        AppCore -->|"调度"| HTTP_Trans
+        DragDetect -->|"拖拽落下"| FileSender
+        ClipSvc -->|"文字变化"| ClipSender
+        ClipSvc -->|"图片变化"| ClipSender
+        HTTP_Trans -->|"接收文字并写入"| Mac_Clip
+        HTTP_Trans -->|"流式落盘 / 冲突重命名"| AppCore
     end
 
     %% ==========================================
-    %% 第二部分：Android 发送端 (The God-Mode Engine)
+    %% 第二部分：Android 端
     %% ==========================================
     subgraph Android_Side ["🤖 Android 端 (击穿系统的全景视界)"]
         direction TB
-        
-        %% 2.1 Kotlin App 层
-        subgraph App_Layer ["App Layer (Kotlin 前台服务)"]
-            ForegroundSvc["AirSendService / dataSync 保活"]:::android_node
-            ShortcutManager["Dynamic Shortcuts / Share Sheet 注入"]:::android_node
-            ForegroundSvc -->|更新| ShortcutManager
+
+        subgraph App_Layer ["App 层 - Kotlin"]
+            BootRcv["开机自启接收器 / BootReceiver"]:::android_node
+            ForegroundSvc["AirSendService / 前台服务 / dataSync / START-STICKY"]:::android_node
+            ShortcutMgr["快捷方式管理器 / 动态分享菜单注入"]:::android_node
+            ShareTarget["分享目标 Activity / 静默入口"]:::android_node
+            BootRcv --> ForegroundSvc
+            ForegroundSvc --> ShortcutMgr
         end
 
-        %% 2.2 Xposed/LSPosed 层 (核心黑客魔法)
-        subgraph Magisk_Modules ["特权级挂载 (Magisk/KernelSU)"]
-            LSPosedHook{"Xposed Hook / ClipboardHook"}:::magic_node
-            SystemClip["SystemClipboard / ClipboardManager"]:::magic_node
-            LSPosedHook <-->|无感窃听 / 强写 / 防环| SystemClip
-            LSPosedHook -.->|绕过应用层拦截| ForegroundSvc
+        subgraph Magisk_Modules ["Xposed 层 - 运行于 system-server 进程"]
+            LSPosedHook{"ClipboardHook / Hook: ClipboardService.ClipboardImpl"}:::magic_node
+            AntiLoop["防死循环锁 / isWritingFromSync volatile / 500ms 延迟"]:::magic_node
+            GodMode["上帝模式 IPC 服务器 / LocalServerSocket @airsend-app-ipc"]:::magic_node
+            SystemClip["SystemClipboard / ClipboardManagerService - UID 1000 绕过焦点限制"]:::magic_node
+            LSPosedHook --> AntiLoop
+            AntiLoop <-->|"监听 / 强写"| SystemClip
+            GodMode -->|"通过 ActivityThread 上下文强写"| SystemClip
         end
 
-        %% 2.3 Rust Daemon 层 (底层性能怪兽)
-        subgraph Rust_Daemon ["独立核心: Rust Daemon (arm64-v8a)"]
-            inotify["inotify 引擎 / Screenshots 监听"]:::daemon_node
-            TokioCore["Tokio 异步运行时 / Reqwest Client"]:::daemon_node
-            UDSServer["Unix Domain Sockets / @airsend_ipc"]:::daemon_node
-            
-            inotify -->|物理落盘触发| TokioCore
-            UDSServer <-->|进程间高速总线| TokioCore
+        subgraph Rust_Daemon ["Rust 守护进程 - arm64-v8a - Magisk 模块"]
+            inotify["inotify / notify crate / EXT4 Close-Write 和 Rename 事件 / 1s 刚度延迟"]:::daemon_node
+            TokioCore["Tokio 异步运行时 / Reqwest Client / 强制斠此代理"]:::daemon_node
+            UDSServer["Unix 块套接字 / @airsend-ipc 和 @airsend-app-ipc"]:::daemon_node
+            inotify -->|"捕获截图"| TokioCore
+            UDSServer <-->|"IPC 指令总线"| TokioCore
         end
 
-        %% Android 内部的通信连线
-        ForegroundSvc <-->|轮询设备列表 UDS| UDSServer
-        LSPosedHook <-->|劫持剪贴板文字 UDS| UDSServer
+        BootRcv -.->|"确认守护进程存活"| UDSServer
+        ForegroundSvc <-->|"GET-PEERS / 30s 轮询"| UDSServer
+        LSPosedHook -->|"SEND-TEXT 通过 @airsend-ipc"| UDSServer
+        UDSServer -->|"push-text-to-app 通过 @airsend-app-ipc"| GodMode
     end
 
     %% ==========================================
     %% 第三部分：局域网双端跨越
     %% ==========================================
-    UDP_Disc <==>|UDP 广播识别 - LocalSend 协议兼容| TokioCore:::protocol_line
-    HTTP_Trans <==>|HTTPS Chunked 传输 - 流式发送| TokioCore:::protocol_line
+    UDP_Disc <===>|"广播发现 - LocalSend 协议兼容"| TokioCore:::protocol_line
+    TokioCore ==>|"HTTPS - 截图自动发送 - inotify 触发"| HTTP_Trans:::protocol_line
+    ClipSender ==>|"HTTPS - clipboard.txt - 到达后阅后即焚"| TokioCore:::protocol_line
+    TokioCore ==>|"HTTPS - Android 剪贴板同步到 Mac NSPasteboard"| HTTP_Trans:::protocol_line
+    FileSender <==>|"HTTPS 分块 - 拖拽文件传输"| TokioCore:::protocol_line
 
 ```
 

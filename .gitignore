@@ -35,4 +35,20 @@ logs/
 *.pem
 *.p12
 *.key
-*.conf
+# Android
+Android/.gradle/
+Android/.idea/
+Android/build/
+Android/app/build/
+Android/local.properties
+
+# Rust/Daemon
+Android/airsend_daemon/target/
+
+# Release Assets & Temp
+*.zip
+test_clipboard.swift
+render.swift
+TestDrag.swift
+gen_svg.py
+gen_svg_clean.py

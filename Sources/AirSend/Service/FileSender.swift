@@ -26,7 +26,7 @@ actor FileSender {
     private var activeSessions: Set<URLSession> = []
     private var isCancelled = false
 
-    init(fingerprint: String, localProtocol: ProtocolType = .http) {
+    init(fingerprint: String, localProtocol: ProtocolType = .https) {
         self.myFingerprint = fingerprint
         self.localProtocol = localProtocol
         let delegate = SessionDelegate()
@@ -220,10 +220,10 @@ actor FileSender {
             alias: alias,
             version: "2.1",
             deviceModel: deviceModel,
-            deviceType: deviceType,
+            deviceType: deviceType.rawValue,
             fingerprint: myFingerprint,
             port: 53317,
-            protocolType: localProtocol,
+            protocolType: localProtocol.rawValue,
             download: true
         )
         
@@ -264,7 +264,7 @@ actor FileSender {
         // Retry Loop for Prepare Phase (Handshake)
         // We ONLY retry if we fail to establish a connection (phone offline/locked).
         // Once a request is successfully waiting for a response, we stop retrying and let it wait.
-        while Date().timeIntervalSince(startTime) < 60.0 && !handshakeSuccessful {
+        while Date().timeIntervalSince(startTime) < 120.0 && !handshakeSuccessful {
             do {
                 logTransfer("📡 Attempting handshake...")
                 let (receivedData, response) = try await session.data(for: request, delegate: sessionDelegate)

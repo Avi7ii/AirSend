@@ -14,7 +14,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
     private let deviceType = DeviceType.desktop
     let protocolType: ProtocolType
     
-    init(fingerprint: String, protocolType: ProtocolType = .http) {
+    init(fingerprint: String, protocolType: ProtocolType = .https) {
         self.fingerprint = fingerprint
         self.protocolType = protocolType
     }
@@ -100,18 +100,18 @@ final class UDPDiscoveryService: @unchecked Sendable {
         broadcastListener = nil
     }
     
-    func sendAnnouncement() {
+    func sendAnnouncement(isAnnouncement: Bool = true) {
         let dto = MulticastDto(
             alias: alias,
             version: "2.1",
             deviceModel: deviceModel,
-            deviceType: deviceType,
+            deviceType: deviceType.rawValue,
             fingerprint: fingerprint,
             port: 53317,
             protocolType: protocolType,
             download: true,
-            announcement: true,
-            announce: true
+            announcement: isAnnouncement,
+            announce: isAnnouncement
         )
         
         do {
@@ -190,20 +190,20 @@ final class UDPDiscoveryService: @unchecked Sendable {
                 ip: ip,
                 port: dto.port ?? 53317,
                 deviceModel: dto.deviceModel,
-                deviceType: dto.deviceType,
+                deviceType: dto.deviceType, // 这里的 dto.deviceType 已经是 String? 了，但是 Device 构造需要 String?。
                 version: dto.version,
                 https: dto.protocolType == .https,
                 download: dto.download ?? false,
                 lastSeen: Date()
             )
             
-            FileLogger.log("✅ Discovery: Found device [\(device.alias)] at \(device.ip):\(device.port)")
+            // 🔋 日志已移至 main.swift onDeviceFound 回调中（仅新设备）
             onDeviceFound?(device)
             
             // ACTIVE RESPONSE: If this is an announcement, respond immediately so they see us too
             if dto.announcement == true || dto.announce == true {
                 FileLogger.log("📡 Discovery: Responding to announcement from [\(device.alias)]")
-                self.sendAnnouncement()
+                self.sendAnnouncement(isAnnouncement: false)
             }
             
         } catch {

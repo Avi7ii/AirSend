@@ -4,7 +4,7 @@ struct InfoDto: Codable {
     let alias: String
     let version: String
     let deviceModel: String?
-    let deviceType: DeviceType?
+    let deviceType: String?
     let fingerprint: String?
     let download: Bool?
 }
@@ -13,10 +13,10 @@ struct RegisterDto: Codable {
     let alias: String
     let version: String?
     let deviceModel: String?
-    let deviceType: DeviceType?
+    let deviceType: String?
     let fingerprint: String
     let port: Int?
-    let protocolType: ProtocolType?
+    let protocolType: String?
     let download: Bool?
     
     enum CodingKeys: String, CodingKey {

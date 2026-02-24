@@ -7,7 +7,7 @@ class UpdateMenuItemView: NSView {
     private let versionLabel = NSTextField(labelWithString: "v\(UpdateService.shared.currentVersion)")
     
     init() {
-        super.init(frame: NSRect(x: 0, y: 0, width: 280, height: 56))
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 56))
         setupUI()
     }
     

@@ -69,33 +69,38 @@ class DashedBorderView: NSView {
     }
 }
 
-// 2. Content View - Handles Drag & Hover Logic
+// 2. Content View - 透明外层容器，处理 Drag 事件（比视觅区域大 30px，就是为了让 performDragOperation 一定被调用）
 @MainActor
-class DropZoneContentView: NSVisualEffectView {
+class DropZoneContentView: NSView {
     var onDrop: (([URL]) -> Void)?
     var onDragEnter: (() -> Void)?
     var onDragExit: (() -> Void)?
+
+    /// 视觅盒子：240x180 frosted glass，是展示给用户的全部内容。
+    /// 外层 DropZoneContentView 是 300x240 透明拖放识别层。
+    let contentBox = NSVisualEffectView()
     
     weak var borderView: DashedBorderView?
     weak var iconView: NSImageView?
     weak var statusLabel: NSTextField?
     weak var progressBar: RoundedProgressView?
     weak var percentLabel: NSTextField?
-    weak var requestView: RequestOverlayView? // NEW
+    weak var requestView: RequestOverlayView?
     
     private(set) var isExpanded: Bool = false
     private(set) var isShowingSuccess: Bool = false
     private(set) var isShowingError: Bool = false
     var isPerformingDrop: Bool = false
-    var isRequesting: Bool = false // NEW
+    var isRequesting: Bool = false
+    /// Drag session 正在飞行中（已进入视图但尚未 performDragOperation 完成）
+    private(set) var isAcceptingDragSession: Bool = false
+    private var dragExitWorkItem: DispatchWorkItem?
     
-    private var requestContinuation: CheckedContinuation<Bool, Never>? // CHECK: Handling concurrency
+    private var requestContinuation: CheckedContinuation<Bool, Never>?
     
-    /// Called when user clicks the window during an active transfer (to minimize to menu)
     var onClickDuringTransfer: (() -> Void)?
     
     override func mouseDown(with event: NSEvent) {
-        // Only intercept clicks during active transfer (not during success/error/idle)
         if isPerformingDrop && !isShowingSuccess && !isShowingError && !isRequesting {
             onClickDuringTransfer?()
             return
@@ -111,13 +116,42 @@ class DropZoneContentView: NSVisualEffectView {
     required init?(coder: NSCoder) { fatalError() }
     
     private func setup() {
-        self.material = .hudWindow
-        self.state = .active
-        self.blendingMode = .behindWindow
+        // 外层：全透明，接受 drag
         self.wantsLayer = true
-        self.layer?.cornerRadius = 16
-        self.layer?.masksToBounds = true
-        self.registerForDraggedTypes([.fileURL])
+        self.registerForDraggedTypes([
+            .fileURL,
+            .URL,
+            NSPasteboard.PasteboardType("NSFilenamesPboardType")
+        ])
+        
+        // 内层视觅盒子：240x180 frosted glass
+        contentBox.material = .hudWindow
+        contentBox.state = .active
+        contentBox.blendingMode = .behindWindow
+        contentBox.wantsLayer = true
+        contentBox.layer?.cornerRadius = 16
+        contentBox.layer?.masksToBounds = true
+        contentBox.translatesAutoresizingMaskIntoConstraints = false
+        self.addSubview(contentBox)
+        
+        // top=0: contentBox 顶部与窗口顶部持平（视觅位置与原始 240x180 完全一致）
+        // 左右各 30px、底部 60px 为透明拖放容豆带
+        NSLayoutConstraint.activate([
+            contentBox.topAnchor.constraint(equalTo: topAnchor, constant: 0),
+            contentBox.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -60),
+            contentBox.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 30),
+            contentBox.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -30),
+        ])
+    }
+    
+    // 关键：hitTest 覆写
+    // drag 进行中（鼠标按下）始终返回 self，防止 contentBox 子视图劫持 drag。
+    // 否则 AppKit 会对 contentBox 调用 draggingExited，循环触发弹回。
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if NSEvent.pressedMouseButtons != 0 {
+            return self
+        }
+        return super.hitTest(point)
     }
     
     // NEW: Request Flow
@@ -218,6 +252,9 @@ class DropZoneContentView: NSVisualEffectView {
         isExpanded = false
         isPerformingDrop = false
         isRequesting = false
+        isAcceptingDragSession = false  // drop 流程结束，释放 drag session 锁
+        dragExitWorkItem?.cancel()
+        dragExitWorkItem = nil
         
         iconView?.image = NSImage(systemSymbolName: "arrow.down.doc", accessibilityDescription: "Drop")
         iconView?.contentTintColor = .labelColor
@@ -413,6 +450,12 @@ class DropZoneContentView: NSVisualEffectView {
     }
     
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        // 取消任何待执行的「退出清除」任务
+        dragExitWorkItem?.cancel()
+        dragExitWorkItem = nil
+        // 立刻锁定：drag 飞行中，禁止 hide()
+        isAcceptingDragSession = true
+        FileLogger.log("🎯 [Drag] draggingEntered DropZoneContentView. isAcceptingDragSession=true, isPerformingDrop=\(isPerformingDrop)")
         onDragEnter?()
         return .copy
     }
@@ -421,26 +464,64 @@ class DropZoneContentView: NSVisualEffectView {
         return .copy
     }
     
+    // 关闭系统级周期性 poll，减少 drag session 被系统提前中止的概率
+    var wantsPeriodicDraggingUpdates: Bool { false }
+    
     override func draggingExited(_ sender: NSDraggingInfo?) {
+        // 关键：延迟 600ms 才清除保护标志。
+        // 日志证明用户松手时鼠标极易瞬间越界触发 exit，但 performDragOperation
+        // 可能在 exit 之后的 0~300ms 内才被系统调用。
+        // 600ms > 最慢的 performDragOperation 调用延迟，足够安全。
+        FileLogger.log("🚪 [Drag] draggingExited DropZoneContentView. isPerformingDrop=\(isPerformingDrop), isAcceptingDragSession=\(isAcceptingDragSession). Scheduling 600ms cleanup.")
+        dragExitWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            // 双重保险：如果 performDragOperation 已经接管（isPerformingDrop），不要清除
+            if !self.isPerformingDrop {
+                FileLogger.log("🚪 [Drag] 600ms cleanup: clearing isAcceptingDragSession (isPerformingDrop=false)")
+                self.isAcceptingDragSession = false
+            } else {
+                FileLogger.log("🚪 [Drag] 600ms cleanup: SKIPPED (isPerformingDrop=true, drop already handled)")
+            }
+        }
+        dragExitWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: item)
         onDragExit?()
     }
     
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        // 1. Critical: Mark as performing drop IMMEDIATELY and synchronously
-        // to prevent AppDelegate's timer from hiding us.
-        self.isPerformingDrop = true
+        // 取消退出计时，确保 drag session 期间 isAcceptingDragSession 保持 true
+        dragExitWorkItem?.cancel()
+        dragExitWorkItem = nil
         
-        // 2. Read URLs correctly
-        guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty else {
+        // 同步标记：立即接管，阻止任何 hide 路径
+        self.isPerformingDrop = true
+        // isAcceptingDragSession 保持 true，直到 drop 流程完成后由 resetFromSuccess 清除
+        
+        FileLogger.log("⬇️ [Drag] performDragOperation called. isPerformingDrop=true, isAcceptingDragSession=\(isAcceptingDragSession)")
+        
+        // 读取文件 URL（优先新 API，兜底旧 API）
+        var urls: [URL]? = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL]
+        
+        if urls == nil || urls!.isEmpty {
+            FileLogger.log("⚠️ [Drag] New API returned no URLs, trying NSFilenamesPboardType fallback...")
+            urls = (sender.draggingPasteboard.propertyList(
+                forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")
+            ) as? [String])?.map { URL(fileURLWithPath: $0) }
+        }
+        
+        guard let finalURLs = urls, !finalURLs.isEmpty else {
+            FileLogger.log("❌ [Drag] performDragOperation: FAILED to read any URLs. Drag rejected.")
             self.isPerformingDrop = false
+            self.isAcceptingDragSession = false
             return false
         }
         
-        // 3. Trigger callback and standard success flow
-        onDrop?(urls)
-        
-        // Success state will be managed by AppDelegate calling showSuccess() 
-        // which now handles clearing isPerformingDrop.
+        FileLogger.log("✅ [Drag] performDragOperation: \(finalURLs.count) file(s) accepted. Calling onDrop.")
+        onDrop?(finalURLs)
         return true
     }
 }
@@ -618,6 +699,11 @@ class DropZoneWindow: NSPanel {
         dropView.isRequesting
     }
     
+    /// Drag session 正在飞行中，外部可查询（供 checkDragState 使用）
+    var isAcceptingDragSession: Bool {
+        dropView.isAcceptingDragSession
+    }
+    
     func setProgress(_ value: Double) {
         dropView.setProgress(value)
     }
@@ -651,7 +737,11 @@ class DropZoneWindow: NSPanel {
     }
     
     init() {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 240, height: 180),
+        // 窗口 300x240：比视觅内容每边大 30px。
+        // 外层透明，内层 contentBox 是 240x180 frosted glass。
+        // 这样用户在视觅边框外 30px 松手，仍在 drag 接受区内，
+        // performDragOperation 一定被调用，return true，无弹回动画。
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 300, height: 240),
                    styleMask: [.borderless, .nonactivatingPanel, .hudWindow],
                    backing: .buffered,
                    defer: false)
@@ -669,34 +759,32 @@ class DropZoneWindow: NSPanel {
         // 1. Dashed Border
         let borderView = DashedBorderView()
         borderView.translatesAutoresizingMaskIntoConstraints = false
-        dropView.addSubview(borderView)
+        dropView.contentBox.addSubview(borderView)
         dropView.borderView = borderView
         
-        // 2. Icon - THE DEFINITIVE CENTERED APPROACH
-        // We use a centered iconView with manually managed Layer anchor and position.
+        // 2. Icon
         let iconSize: CGFloat = 80
         let iconView = NSImageView(image: NSImage(systemSymbolName: "arrow.down.doc", accessibilityDescription: "Drop") ?? NSImage())
         iconView.symbolConfiguration = .init(pointSize: 42, weight: .semibold)
         iconView.contentTintColor = .labelColor
         iconView.wantsLayer = true
         iconView.translatesAutoresizingMaskIntoConstraints = false
-        
-        dropView.addSubview(iconView)
+        dropView.contentBox.addSubview(iconView)
         dropView.iconView = iconView
         
-        // 3. Label - Initialize empty, will be set by AppDelegate
+        // 3. Label
         let label = NSTextField(labelWithString: "")
         label.font = NSFont.systemFont(ofSize: 14, weight: .medium)
         label.textColor = .labelColor
         label.translatesAutoresizingMaskIntoConstraints = false
-        dropView.addSubview(label)
+        dropView.contentBox.addSubview(label)
         dropView.statusLabel = label
         
-        // 4. Custom rounded progress bar
+        // 4. Progress bar
         let progressBar = RoundedProgressView()
-        progressBar.alphaValue = 0 // Hidden by default
+        progressBar.alphaValue = 0
         progressBar.translatesAutoresizingMaskIntoConstraints = false
-        dropView.addSubview(progressBar)
+        dropView.contentBox.addSubview(progressBar)
         dropView.progressBar = progressBar
         
         // 5. Percentage label
@@ -705,45 +793,46 @@ class DropZoneWindow: NSPanel {
         percentLabel.textColor = .secondaryLabelColor
         percentLabel.alphaValue = 0
         percentLabel.translatesAutoresizingMaskIntoConstraints = false
-        dropView.addSubview(percentLabel)
+        dropView.contentBox.addSubview(percentLabel)
         dropView.percentLabel = percentLabel
         
-        // 6. Request Overlay (Hidden by default)
+        // 6. Request Overlay
         let requestView = RequestOverlayView()
         requestView.alphaValue = 0
         requestView.isHidden = true
         requestView.translatesAutoresizingMaskIntoConstraints = false
-        dropView.addSubview(requestView)
+        dropView.contentBox.addSubview(requestView)
         dropView.requestView = requestView
         
-        // Constraints
+        // 所有视觅子视图加入 contentBox（视觅盒子），而非 dropView（透明外层）
+        // 约束都相对于 contentBox，视觅效果与原先 240x180 一致。
         NSLayoutConstraint.activate([
-            borderView.topAnchor.constraint(equalTo: dropView.topAnchor, constant: 10),
-            borderView.bottomAnchor.constraint(equalTo: dropView.bottomAnchor, constant: -10),
-            borderView.leadingAnchor.constraint(equalTo: dropView.leadingAnchor, constant: 10),
-            borderView.trailingAnchor.constraint(equalTo: dropView.trailingAnchor, constant: -10),
+            borderView.topAnchor.constraint(equalTo: dropView.contentBox.topAnchor, constant: 10),
+            borderView.bottomAnchor.constraint(equalTo: dropView.contentBox.bottomAnchor, constant: -10),
+            borderView.leadingAnchor.constraint(equalTo: dropView.contentBox.leadingAnchor, constant: 10),
+            borderView.trailingAnchor.constraint(equalTo: dropView.contentBox.trailingAnchor, constant: -10),
             
-            iconView.centerXAnchor.constraint(equalTo: dropView.centerXAnchor),
-            iconView.centerYAnchor.constraint(equalTo: dropView.centerYAnchor, constant: -18),
+            iconView.centerXAnchor.constraint(equalTo: dropView.contentBox.centerXAnchor),
+            iconView.centerYAnchor.constraint(equalTo: dropView.contentBox.centerYAnchor, constant: -18),
             iconView.widthAnchor.constraint(equalToConstant: iconSize),
             iconView.heightAnchor.constraint(equalToConstant: iconSize),
             
-            progressBar.leadingAnchor.constraint(equalTo: dropView.leadingAnchor, constant: 35),
-            progressBar.trailingAnchor.constraint(equalTo: dropView.trailingAnchor, constant: -35),
+            progressBar.leadingAnchor.constraint(equalTo: dropView.contentBox.leadingAnchor, constant: 35),
+            progressBar.trailingAnchor.constraint(equalTo: dropView.contentBox.trailingAnchor, constant: -35),
             progressBar.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 8),
             progressBar.heightAnchor.constraint(equalToConstant: 6),
             
-            percentLabel.centerXAnchor.constraint(equalTo: dropView.centerXAnchor),
+            percentLabel.centerXAnchor.constraint(equalTo: dropView.contentBox.centerXAnchor),
             percentLabel.topAnchor.constraint(equalTo: progressBar.bottomAnchor, constant: 6),
             
-            label.centerXAnchor.constraint(equalTo: dropView.centerXAnchor),
+            label.centerXAnchor.constraint(equalTo: dropView.contentBox.centerXAnchor),
             label.topAnchor.constraint(equalTo: percentLabel.bottomAnchor, constant: 2),
             
-            // Request View fills content
-            requestView.topAnchor.constraint(equalTo: dropView.topAnchor),
-            requestView.bottomAnchor.constraint(equalTo: dropView.bottomAnchor),
-            requestView.leadingAnchor.constraint(equalTo: dropView.leadingAnchor),
-            requestView.trailingAnchor.constraint(equalTo: dropView.trailingAnchor)
+            // Request View 充满 contentBox
+            requestView.topAnchor.constraint(equalTo: dropView.contentBox.topAnchor),
+            requestView.bottomAnchor.constraint(equalTo: dropView.contentBox.bottomAnchor),
+            requestView.leadingAnchor.constraint(equalTo: dropView.contentBox.leadingAnchor),
+            requestView.trailingAnchor.constraint(equalTo: dropView.contentBox.trailingAnchor)
         ])
     }
     
@@ -761,6 +850,20 @@ class DropZoneWindow: NSPanel {
     }
     
     func show(under statusItem: NSStatusItem) {
+        // 关键保护：如果 drag session 正在进行中（鼠标已进入视图），
+        // 严禁做任何窗口操作（移动、makeKeyAndOrderFront 等）。
+        // makeKeyAndOrderFront 会改变窗口在 WindowServer 中的层级，
+        // 这会导致 macOS drag session 失去目标，触发 draggingExited。
+        if dropView.isAcceptingDragSession {
+            if self.alphaValue < 0.99 {
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.1
+                    self.animator().alphaValue = 1
+                }
+            }
+            return
+        }
+        
         // [LOG] Log show request
         let currentAlpha = self.alphaValue
         let isOrderedIn = self.isVisible
@@ -782,6 +885,8 @@ class DropZoneWindow: NSPanel {
         
         if let frame = targetFrame {
             let x = frame.midX - (self.frame.width / 2)
+            // 窗口高 240：上部 180px 是视觅内容，下部 60px 是透明拖放容豆带。
+            // 窗口顶部对齐 status bar 下方10px，不需要额外偏移。
             let y = frame.minY - self.frame.height - 10
             
             // OPTIMIZATION: Fix flicker by being more careful about when we reset alpha.
@@ -820,9 +925,17 @@ class DropZoneWindow: NSPanel {
     
 
     func hide() {
-        // If showing a request, do NOT hide!
-        if dropView.isRequesting { return }
-        
+        // 正在处理接收请求时禁止隐藏
+        if dropView.isRequesting {
+            FileLogger.log("🛡️ [hide] BLOCKED: isRequesting=true")
+            return
+        }
+        // Drag session 飞行中（鼠标已进入但 performDragOperation 尚未完成）禁止隐藏
+        if dropView.isAcceptingDragSession {
+            FileLogger.log("🛡️ [hide] BLOCKED: isAcceptingDragSession=true")
+            return
+        }
+        FileLogger.log("🙈 [hide] Hiding window. isPerformingDrop=\(dropView.isPerformingDrop), isShowingSuccess=\(dropView.isShowingSuccess)")
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.2
             self.animator().alphaValue = 0

@@ -18,7 +18,7 @@ struct MulticastDto: Codable {
     let alias: String
     let version: String // v2, format: major.minor
     let deviceModel: String?
-    let deviceType: DeviceType? // nullable since v2
+    let deviceType: String? // nullable since v2
     let fingerprint: String
     let port: Int? // v2
     let protocolType: ProtocolType? // v2, mapped from 'protocol'

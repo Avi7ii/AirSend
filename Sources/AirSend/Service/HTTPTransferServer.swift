@@ -28,7 +28,7 @@ actor HTTPTransferServer {
     private var currentSessionId: String?
     private var fileTokens: [String: String] = [:] // fileId -> token
     private var filesToReceive: [String: FileDto] = [:] // fileId -> FileDto
-    private var activeConnection: NWConnection? // Track active upload connection
+    private var activeConnections: [ObjectIdentifier: NWConnection] = [:] // Connection pool for concurrent transfers
 
     // Transfer State
     private var totalSessionSize: Int64 = 0
@@ -116,12 +116,12 @@ actor HTTPTransferServer {
         return (self.receivedFileCount, self.filesToReceive.count)
     }
     
-    func setUploadConnection(_ connection: NWConnection?) {
-        self.activeConnection = connection
+    func addUploadConnection(_ connection: NWConnection) {
+        self.activeConnections[ObjectIdentifier(connection)] = connection
     }
     
-    func getUploadConnection() -> NWConnection? {
-        return self.activeConnection
+    func removeUploadConnection(_ connection: NWConnection) {
+        self.activeConnections.removeValue(forKey: ObjectIdentifier(connection))
     }
     
     func getSessionSizeInfo() -> (received: Int64, total: Int64) {
@@ -135,9 +135,9 @@ actor HTTPTransferServer {
         self.fileTokens.removeAll()
         self.filesToReceive.removeAll()
         
-        let conn = self.activeConnection
-        self.activeConnection = nil
-        conn?.cancel()
+        let conns = self.activeConnections.values
+        self.activeConnections.removeAll()
+        conns.forEach { $0.cancel() }
         
         return wasActive
     }
@@ -180,9 +180,9 @@ actor HTTPTransferServer {
             if let tcpOptions = parameters.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
                 tcpOptions.noDelay = true
                 tcpOptions.enableKeepalive = true
-                tcpOptions.keepaliveIdle = 10
-                tcpOptions.keepaliveInterval = 5
-                tcpOptions.keepaliveCount = 5
+                tcpOptions.keepaliveIdle = 60    // 🔋 60s 无数据才探测（原10s）
+                tcpOptions.keepaliveInterval = 15 // 🔋 探测间隔15s（原5s）
+                tcpOptions.keepaliveCount = 3     // 🔋 3次失败断开（原5次）
             }
             
             // CONCURRENCY: Allow reuse to coexist with UDP discovery on the same port
@@ -199,9 +199,9 @@ actor HTTPTransferServer {
             if let tcpOptions = parameters.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
                 tcpOptions.noDelay = true // Disable Nagle's algorithm for instant handshake response
                 tcpOptions.enableKeepalive = true
-                tcpOptions.keepaliveIdle = 10
-                tcpOptions.keepaliveInterval = 5
-                tcpOptions.keepaliveCount = 5
+                tcpOptions.keepaliveIdle = 60    // 🔋 60s
+                tcpOptions.keepaliveInterval = 15 // 🔋 15s
+                tcpOptions.keepaliveCount = 3
             }
         }
         
@@ -320,29 +320,47 @@ actor HTTPTransferServer {
             let bodyPrefix = accumulatedData.subdata(in: bodyOffset..<accumulatedData.count)
             let contentLength = Int(requestInfo.headers["content-length"] ?? "0") ?? 0
             
-            // 2. For /upload path: stream body directly to disk (never accumulate in memory)
+            let connHeader = requestInfo.headers["connection"]?.lowercased()
+            let shouldKeepAlive = (connHeader != "close")
+            
+            let isChunked = requestInfo.headers["transfer-encoding"]?.lowercased() == "chunked"
+            
+            // 2. For /upload path: stream body directly to disk
             if requestInfo.path == "/api/localsend/v2/upload" {
-                logTransfer("📥 \(requestInfo.method) \(requestInfo.path) [streaming \(contentLength) bytes]")
-                let response = await handleUploadStreaming(
+                logTransfer("📥 \(requestInfo.method) \(requestInfo.path) [streaming \(isChunked ? "chunked" : "\(contentLength) bytes")]")
+                var response = await handleUploadStreaming(
                     requestInfo: requestInfo,
                     connection: connection,
                     bodyPrefix: bodyPrefix,
-                    contentLength: contentLength
+                    contentLength: contentLength,
+                    isChunked: isChunked
                 )
-                connection.send(content: response.serialize(), completion: .contentProcessed({ _ in
-                    connection.cancel()
+                response.shouldKeepAlive = shouldKeepAlive
+                
+                connection.send(content: response.serialize(), completion: .contentProcessed({ error in
+                    if shouldKeepAlive && error == nil {
+                        Task { [weak self] in await self?.processIncomingRequest(connection) }
+                    } else {
+                        connection.cancel()
+                    }
                 }))
                 return
             }
             
             // 3. For all other paths: accumulate body in memory (small payloads)
-            var body = bodyPrefix
-            if contentLength > 0 {
-                while body.count < contentLength {
-                    let remaining = contentLength - body.count
-                    let chunk = try await receiveChunk(from: connection, maxLength: min(remaining, 65536))
-                    if chunk.isEmpty { break }
-                    body.append(chunk)
+            var body: Data
+            var mutablePrefix = bodyPrefix
+            if isChunked {
+                body = try await receiveChunkedBody(from: connection, buffer: &mutablePrefix)
+            } else {
+                body = bodyPrefix
+                if contentLength > 0 {
+                    while body.count < contentLength {
+                        let remaining = contentLength - body.count
+                        let chunk = try await receiveChunk(from: connection, maxLength: min(remaining, 65536))
+                        if chunk.isEmpty { break }
+                        body.append(chunk)
+                    }
                 }
             }
             
@@ -355,15 +373,36 @@ actor HTTPTransferServer {
             )
             
             // 4. Routing (non-upload paths only)
-            let response = await self.route(request: request, connection: connection)
+            var response = await self.route(request: request, connection: connection)
+            response.shouldKeepAlive = shouldKeepAlive
             
             // 5. Send Response
-            connection.send(content: response.serialize(), completion: .contentProcessed({ _ in
-                connection.cancel()
+            connection.send(content: response.serialize(), completion: .contentProcessed({ error in
+                if let error = error {
+                    logTransfer("❌ Response send error: \(error)")
+                    connection.cancel()
+                    return
+                }
+                
+                if shouldKeepAlive {
+                    logTransfer("🔄 Connection kept alive. Waiting for next request...")
+                    Task { [weak self] in
+                        await self?.processIncomingRequest(connection)
+                    }
+                } else {
+                    connection.cancel()
+                }
             }))
             
         } catch {
-            logTransfer("❌ Connection error: \(error)")
+            // Check if it's a normal closure or an actual error
+            let nsError = error as NSError
+            if nsError.domain == "NWErrorDomain", nsError.code == 0 {
+                // Connection closed normally by peer
+                logTransfer("🔌 Connection closed by peer.")
+            } else {
+                logTransfer("❌ Connection error: \(error)")
+            }
             connection.cancel()
         }
     }
@@ -391,16 +430,60 @@ actor HTTPTransferServer {
                     return
                 }
                 
-                // Should not happen usually
                 continuation.resume(throwing: NSError(domain: "HTTPTransferServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "No data received"]))
             }
         }
+    }
+    
+    nonisolated private func readLine(from connection: NWConnection, buffer: inout Data) async throws -> String {
+        while true {
+            if let range = buffer.range(of: "\r\n".data(using: .utf8)!) {
+                let lineData = buffer.subdata(in: 0..<range.lowerBound)
+                buffer.removeSubrange(0..<range.upperBound)
+                return String(data: lineData, encoding: .utf8) ?? ""
+            }
+            let chunk = try await receiveChunk(from: connection)
+            if chunk.isEmpty { break }
+            buffer.append(chunk)
+        }
+        return ""
+    }
+    
+    nonisolated private func receiveChunkedBody(from connection: NWConnection, buffer: inout Data) async throws -> Data {
+        var body = Data()
+        while true {
+            let sizeLine = try await self.readLine(from: connection, buffer: &buffer)
+            let trimmedSize = sizeLine.trimmingCharacters(in: .whitespaces)
+            guard !trimmedSize.isEmpty, let size = Int(trimmedSize, radix: 16) else { break }
+            if size == 0 { 
+                _ = try await self.readLine(from: connection, buffer: &buffer) // Final CRLF
+                break 
+            }
+            
+            var chunkData = Data()
+            while chunkData.count < size {
+                if !buffer.isEmpty {
+                    let toTake = min(buffer.count, size - chunkData.count)
+                    chunkData.append(buffer.subdata(in: 0..<toTake))
+                    buffer.removeSubrange(0..<toTake)
+                } else {
+                    let next = try await self.receiveChunk(from: connection, maxLength: size - chunkData.count)
+                    if next.isEmpty { break }
+                    buffer.append(next)
+                }
+            }
+            body.append(chunkData)
+            _ = try await self.readLine(from: connection, buffer: &buffer) // Trailing CRLF
+        }
+        return body
     }
     
     private func route(request: HTTPRawRequest, connection: NWConnection) async -> HTTPRawResponse {
         logTransfer("📥 \(request.method) \(request.path)")
         
         switch request.path {
+        case "/api/localsend/v2/info":
+            return await handleInfo(request: request)
         case "/api/localsend/v2/register":
             return await handleRegister(request: request, connection: connection)
         case "/api/localsend/v2/prepare-upload":
@@ -408,11 +491,32 @@ actor HTTPTransferServer {
         case "/api/localsend/v2/cancel":
             return await handleCancel(request: request)
         default:
+            logTransfer("⚠️ [HTTPTransferServer] Unknown route: \(request.path)")
             return HTTPRawResponse(statusCode: 404, body: "Not Found".data(using: .utf8)!)
         }
     }
     
     // MARK: - Handlers
+    
+    private func handleInfo(request: HTTPRawRequest) async -> HTTPRawResponse {
+        do {
+            let responseDto = RegisterDto(
+                alias: alias,
+                version: "2.1",
+                deviceModel: deviceModel,
+                deviceType: deviceType.rawValue,
+                fingerprint: fingerprint,
+                port: 53317,
+                protocolType: isHTTPS ? ProtocolType.https.rawValue : ProtocolType.http.rawValue,
+                download: true
+            )
+            
+            let data = try JSONEncoder().encode(responseDto)
+            return HTTPRawResponse(statusCode: 200, body: data)
+        } catch {
+            return HTTPRawResponse(statusCode: 500, body: "Encoding Error".data(using: .utf8)!)
+        }
+    }
     
     private func handleRegister(request: HTTPRawRequest, connection: NWConnection) async -> HTTPRawResponse {
         do {
@@ -441,7 +545,7 @@ actor HTTPTransferServer {
                     deviceModel: dto.deviceModel,
                     deviceType: dto.deviceType,
                     version: dto.version ?? "2.0",
-                    https: dto.protocolType == .https,
+                    https: dto.protocolType == ProtocolType.https.rawValue,
                     download: dto.download ?? false,
                     lastSeen: Date()
                 )
@@ -452,10 +556,10 @@ actor HTTPTransferServer {
                 alias: alias,
                 version: "2.1",
                 deviceModel: deviceModel,
-                deviceType: deviceType,
+                deviceType: deviceType.rawValue,
                 fingerprint: fingerprint,
                 port: 53317,
-                protocolType: isHTTPS ? .https : .http,
+                protocolType: isHTTPS ? ProtocolType.https.rawValue : ProtocolType.http.rawValue,
                 download: true
             )
             
@@ -530,7 +634,8 @@ actor HTTPTransferServer {
         requestInfo: HTTPRequestParser.HeaderInfo,
         connection: NWConnection,
         bodyPrefix: Data,
-        contentLength: Int
+        contentLength: Int,
+        isChunked: Bool
     ) async -> HTTPRawResponse {
         let query = requestInfo.queryParams
         guard let sessionId = query["sessionId"],
@@ -539,7 +644,7 @@ actor HTTPTransferServer {
             return HTTPRawResponse(statusCode: 400, body: "Bad Request".data(using: .utf8)!)
         }
         
-        let sessionState = await getSessionState()
+        let sessionState = await self.getSessionState()
         
         if sessionId != sessionState.id || sessionState.tokens[fileId] != token {
             return HTTPRawResponse(statusCode: 403, body: "Forbidden".data(using: .utf8)!)
@@ -550,17 +655,18 @@ actor HTTPTransferServer {
         }
         
         // Store active connection for cancellation
-        await setUploadConnection(connection)
+        await self.addUploadConnection(connection)
         
         defer { 
-            Task { await self.setUploadConnection(nil) }
+            Task { await self.removeUploadConnection(connection) }
         }
 
         // --- PATH LOGIC START ---
         
         // 1. Get Base Directory (Custom or Downloads)
-        let baseDir = await getBaseDirectory()
-        var destinationUrl = baseDir.appendingPathComponent(fileDto.fileName)
+        let baseDir = await self.getBaseDirectory()
+        let safeFileName = (fileDto.fileName as NSString).lastPathComponent
+        var destinationUrl = baseDir.appendingPathComponent(safeFileName)
         
         // 2. Conflict Resolution: Rename if exists (e.g. "file (1).txt")
         var counter = 1
@@ -583,58 +689,77 @@ actor HTTPTransferServer {
             defer { try? fileHandle.close() }
             
             var receivedBytes = 0
-            
-            // Write the body prefix (data already read during header parsing)
-            if !bodyPrefix.isEmpty {
-                fileHandle.write(bodyPrefix)
-                receivedBytes += bodyPrefix.count
-                _ = await updateIncrementProgress(bytes: Int64(bodyPrefix.count))
-            }
-            
-            // Stream remaining data directly to disk in chunks
-            // Stream remaining data directly to disk in chunks
-            // Reverted to 64KB to prevent main actor blocking and high latency
-            // BACK TO PERFORMANCE: 64KB chunks, no artificial delays.
-            // The 15ms gaps were fighting a symptom (restarts), not the cause.
+            var mutableBuffer = bodyPrefix
             let bufferSize = 65536 
             var lastProgressUpdate = Date()
             var lastReportedProgress: Double = 0
             
-            while receivedBytes < contentLength {
-                let remaining = contentLength - receivedBytes
-                // Read up to 1MB at a time
-                let chunk = try await receiveChunk(from: connection, maxLength: min(remaining, bufferSize))
-                if chunk.isEmpty { 
-                    logTransfer("⚠️ [HTTPTransferServer] Stream ended prematurely (Empty chunk). Requesting cancel.")
-                    throw NSError(domain: "HTTPTransferServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Stream ended unexpectedly"])
-                }
-                // CRITICAL REFACTOR: Write to disk on a detached task to unblock the Actor.
-                // This allows handleCancel() to be processed even during heavy writing.
-                let writeData = chunk
-                try await Task.detached(priority: .medium) {
-                    // FileHandle is thread-safe
-                    try fileHandle.write(contentsOf: writeData)
-                }.value
-                
-                receivedBytes += Int(chunk.count)
-                let progressInfo = await updateIncrementProgress(bytes: Int64(chunk.count))
-                
-                // NO MORE SLEEP. NO MORE THROTTLING. 
-                // Context-per-Connection + Fixed Certificate Loop handles stability.
-                
-                // Otherwise: NO MORE HandshakeMonitor. Context-per-Connection handles the rest.
-                // But we still need this physical gap to unblock the shared Wi-Fi medium.
-                
-                // Throttle Progress Reporting (Update every 0.1s or 1%)
-                // This prevents UI thread flooding during high-speed transfers
-                if progressInfo.total > 0 {
-                    let progress = Double(progressInfo.received) / Double(progressInfo.total)
-                    let timeSinceLast = Date().timeIntervalSince(lastProgressUpdate)
+            var chunkStreamEndedNormally = false
+            
+            if isChunked {
+                while true {
+                    let sizeLine = try await readLine(from: connection, buffer: &mutableBuffer)
+                    let hexStr = sizeLine.components(separatedBy: ";")[0].trimmingCharacters(in: .whitespaces)
+                    guard !hexStr.isEmpty, let size = Int(hexStr, radix: 16) else { break }
                     
-                    if timeSinceLast > 0.1 || (progress - lastReportedProgress) > 0.01 || progress >= 1.0 {
-                        await triggerProgress(progress)
-                        lastProgressUpdate = Date()
-                        lastReportedProgress = progress
+                    if size == 0 { 
+                        _ = try await readLine(from: connection, buffer: &mutableBuffer) // Final CRLF
+                        chunkStreamEndedNormally = true
+                        break 
+                    }
+                    
+                    var totalReadThisChunk = 0
+                    while totalReadThisChunk < size {
+                        let toTake = min(mutableBuffer.count, size - totalReadThisChunk)
+                        if toTake > 0 {
+                            let chunk = mutableBuffer.subdata(in: 0..<toTake)
+                            try await Task.detached(priority: .medium) { try fileHandle.write(contentsOf: chunk) }.value
+                            mutableBuffer.removeSubrange(0..<toTake)
+                            totalReadThisChunk += toTake
+                            receivedBytes += toTake
+                            let progressInfo = await self.updateIncrementProgress(bytes: Int64(toTake))
+                            if progressInfo.total > 0 {
+                                let progress = Double(progressInfo.received) / Double(progressInfo.total)
+                                let timeSinceLast = Date().timeIntervalSince(lastProgressUpdate)
+                                if timeSinceLast > 0.1 || (progress - lastReportedProgress) > 0.01 || progress >= 1.0 {
+                                    await self.triggerProgress(progress)
+                                    lastProgressUpdate = Date(); lastReportedProgress = progress
+                                }
+                            }
+                        } else {
+                            let next = try await self.receiveChunk(from: connection, maxLength: min(size - totalReadThisChunk, bufferSize))
+                            if next.isEmpty { throw NSError(domain: "HTTPTransferServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Stream ended in chunk"]) }
+                            mutableBuffer.append(next)
+                        }
+                    }
+                    _ = try await readLine(from: connection, buffer: &mutableBuffer) // Skip trailing CRLF
+                }
+            } else {
+                // Write initial bodyPrefix first
+                if !mutableBuffer.isEmpty {
+                    let prefixCount = mutableBuffer.count
+                    try fileHandle.write(contentsOf: mutableBuffer)
+                    receivedBytes += prefixCount
+                    _ = await self.updateIncrementProgress(bytes: Int64(prefixCount))
+                    mutableBuffer.removeAll()
+                }
+                
+                while receivedBytes < contentLength {
+                    let remaining = contentLength - receivedBytes
+                    let chunk = try await receiveChunk(from: connection, maxLength: min(remaining, bufferSize))
+                    if chunk.isEmpty { break }
+                    
+                    try await Task.detached(priority: .medium) { try fileHandle.write(contentsOf: chunk) }.value
+                    receivedBytes += chunk.count
+                    let progressInfo = await self.updateIncrementProgress(bytes: Int64(chunk.count))
+                    
+                    if progressInfo.total > 0 {
+                        let progress = Double(progressInfo.received) / Double(progressInfo.total)
+                        let timeSinceLast = Date().timeIntervalSince(lastProgressUpdate)
+                        if timeSinceLast > 0.1 || (progress - lastReportedProgress) > 0.01 || progress >= 1.0 {
+                            await self.triggerProgress(progress)
+                            lastProgressUpdate = Date(); lastReportedProgress = progress
+                        }
                     }
                 }
             }
@@ -645,28 +770,41 @@ actor HTTPTransferServer {
             let isText = fileDto.fileName.hasSuffix(".txt") || fileDto.fileType == "text/plain"
             if isText, receivedBytes < 1_000_000 {
                 if let textContent = try? String(contentsOf: destinationUrl, encoding: .utf8) {
-                    await triggerTextReceived(textContent)
+                    // 1. 把文本打入 Mac 系统剪贴板
+                    await self.triggerTextReceived(textContent)
+                    
+                    // ==========================================
+                    // 🚀 核心改造：阅后即焚，实现绝对的无痕流转
+                    // ==========================================
+                    if fileDto.fileName == "clipboard.txt" {
+                        do {
+                            try FileManager.default.removeItem(at: destinationUrl)
+                            logTransfer("🧹 [AirSend 中枢] 剪贴板临时文件 \(fileDto.fileName) 已被抹除，无痕同步完成")
+                        } catch {
+                            logTransfer("⚠️ 抹除临时文件失败: \(error)")
+                        }
+                    }
                 }
             }
             
             // Report Final Progress (100%) ensures UI hits 100% even for small files
-            let finalProgress = await getSessionSizeInfo()
+            let finalProgress = await self.getSessionSizeInfo()
             if finalProgress.total > 0 {
-                await triggerProgress(1.0)
+                await self.triggerProgress(1.0)
             }
             
             // Check for Session Completion
-            let counts = await incrementFileCount()
+            let counts = await self.incrementFileCount()
             
             // CRITICAL FIX: Verify we received the full file
-            if receivedBytes < contentLength {
-                logTransfer("❌ [HTTPTransferServer] File incomplete! Expected \(contentLength), got \(receivedBytes). Transfer truncated.")
-                await triggerTransferComplete(success: false, message: "Transfer truncated (Network lost?)")
+            if (!isChunked && receivedBytes < contentLength) || (isChunked && !chunkStreamEndedNormally) {
+                logTransfer("❌ [HTTPTransferServer] File incomplete or chunk stream aborted! Expected \(contentLength), got \(receivedBytes). Transfer truncated.")
+                await self.triggerTransferComplete(success: false, message: "Transfer truncated")
                 return HTTPRawResponse(statusCode: 400, body: Data())
             }
             
             if counts.current >= counts.expected {
-                await triggerTransferComplete(success: true, message: nil)
+                await self.triggerTransferComplete(success: true, message: nil as String?)
             }
             
             return HTTPRawResponse(statusCode: 200, body: Data())
@@ -751,12 +889,14 @@ struct HTTPRawResponse {
     let statusCode: Int
     let body: Data
     
+    var shouldKeepAlive: Bool = false
+    
     func serialize() -> Data {
         var str = "HTTP/1.1 \(statusCode) \(statusPhrase)\r\n"
         str += "Content-Length: \(body.count)\r\n"
         str += "Content-Type: application/json\r\n"
         str += "Server: HeadlessLocalSend-macOS\r\n"
-        str += "Connection: close\r\n"
+        str += "Connection: \(shouldKeepAlive ? "keep-alive" : "close")\r\n"
         str += "\r\n"
         
         var data = str.data(using: .utf8)!
@@ -831,9 +971,12 @@ struct HTTPRequestParser {
         for i in 1..<lines.count {
             let line = lines[i]
             if line.isEmpty { break }
-            let comps = line.components(separatedBy: ": ")
-            if comps.count == 2 {
-                headers[comps[0].lowercased()] = comps[1].trimmingCharacters(in: .whitespaces)
+            
+            // RFC 7230: Header name is followed by a colon, optional whitespace, and the field value.
+            if let colonIndex = line.firstIndex(of: ":") {
+                let key = line[..<colonIndex].trimmingCharacters(in: .whitespaces).lowercased()
+                let value = line[line.index(after: colonIndex)...].trimmingCharacters(in: .whitespaces)
+                headers[key] = value
             }
         }
         
@@ -844,9 +987,11 @@ struct HTTPRequestParser {
         if pathComps.count > 1 {
             let queryItems = pathComps[1].components(separatedBy: "&")
             for item in queryItems {
-                let kv = item.components(separatedBy: "=")
+                let kv = item.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
                 if kv.count == 2 {
-                    query[kv[0]] = kv[1]
+                    let key = kv[0].removingPercentEncoding ?? kv[0]
+                    let value = kv[1].removingPercentEncoding ?? kv[1]
+                    query[key] = value
                 }
             }
         }

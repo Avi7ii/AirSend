@@ -6,7 +6,7 @@ struct Device: Identifiable, Equatable, Hashable, Codable {
     let ip: String
     let port: Int
     let deviceModel: String?
-    let deviceType: DeviceType?
+    let deviceType: String?
     let version: String
     let https: Bool
     let download: Bool

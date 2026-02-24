@@ -23,10 +23,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     var dropZoneWindow: DropZoneWindow!
     private var hasStartedTransfer = false
     private var isMinimizedToMenu = false
+    private var isRequestingInBackground = false
     private var currentTransferProgress: Double = 0
     private var currentTransferTarget: String = ""
     private var transferProgressMenuItem: NSMenuItem?
     private var menuScanTimer: Timer?
+    
+    // 🔋 功耗优化：广播与清理定时器（连接设备后停止）
+    private var broadcastTimer: Timer?
+    private var cleanupTimer: Timer?
     
     // Wakelock & Launch at Login
     private var wakelockAssertionID: IOPMAssertionID = 0
@@ -79,6 +84,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             }
             updateMenu()
             updateWindowStatus()
+            updateDiscoveryTimers() // 🔋 连接后停止广播
         }
     }
     
@@ -288,82 +294,122 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     func startDragMonitoring() {
         lastDragCount = NSPasteboard(name: .drag).changeCount
         
-        // Check every 0.1s for drag activity and mouse position
-        dragMonitorTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+        // 🔋 空闲态 1.0s 慢检，检测到 drag 后切 0.1s 快检
+        setDragTimerInterval(1.0)
+    }
+    
+    private func setDragTimerInterval(_ interval: TimeInterval) {
+        dragMonitorTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.checkDragState()
             }
         }
+        timer.tolerance = interval * 0.5 // 🔋 允许 macOS 合并定时器唤醒
+        dragMonitorTimer = timer
     }
     
     func checkDragState() {
         let currentCount = NSPasteboard(name: .drag).changeCount
         if currentCount != lastDragCount {
-            // Drag started
+            // 检测到新的 drag，更新计数并标记状态
             lastDragCount = currentCount
             isDragging = true
+            // 🔋 升速到 0.1s（仅在空闲态时切换，避免重复 invalidate）
+            if dragMonitorTimer?.timeInterval != 0.1 {
+                setDragTimerInterval(0.1)
+            }
         }
         
-        // If we think we are dragging, check if mouse is up (drag ended)
+        // 如果正在拖拽，检查鼠标是否松手
         if isDragging {
             let pressedButtons = NSEvent.pressedMouseButtons
             if pressedButtons == 0 {
-                // Drag ended (mouse released)
+                // 用户松手了
                 let mouseLoc = NSEvent.mouseLocation
                 let windowFrame = dropZoneWindow.frame
                 let isMouseInWindow = NSMouseInRect(mouseLoc, windowFrame, false)
-
-                if isMouseInWindow {
-                    // Start a short timeout. If system fails to trigger performDragOperation
-                    // within 0.5s, we force hide to prevent "stuck" window.
+                
+                isDragging = false
+                // 🔋 降速回 1.0s
+                setDragTimerInterval(1.0)
+                
+                // ━━━ 终极兜底：Drag Pasteboard 直读 ━━━
+                // 问题根源：用户通过窗口时 enter/exit 抖动，松手时鼠标已在窗口外，
+                // AppKit 不会调用 performDragOperation。
+                // 方案：检测到松手时，若鼠标在窗口附近（60px 缓冲区）且曾进入过窗口，
+                // 直接从 NSPasteboard(name: .drag) 读取文件，绕开 AppKit 边界判定。
+                let hadDragNearWindow = isDragInsideWindow
+                    || dropZoneWindow.isAcceptingDragSession
+                    || isMouseInWindow
+                let expandedFrame = windowFrame.insetBy(dx: -60, dy: -60)
+                let isNearWindow = expandedFrame.contains(mouseLoc)
+                
+                if hadDragNearWindow && isNearWindow && !dropZoneWindow.isPerformingDrop {
+                    let pboard = NSPasteboard(name: .drag)
+                    let opts: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+                    if let urls = pboard.readObjects(forClasses: [NSURL.self], options: opts) as? [URL],
+                       !urls.isEmpty {
+                        FileLogger.log("🎣 [DragFallback] Pasteboard 兜底捕获：\(urls.count) 个文件。mouseLoc=\(mouseLoc), inWindow=\(isMouseInWindow)")
+                        dropZoneWindow.isPerformingDrop = true
+                        isDragInsideWindow = false
+                        didPerformDrop(urls: urls)
+                        return
+                    } else {
+                        FileLogger.log("⚠️ [DragFallback] Pasteboard 无文件（松手位置：\(mouseLoc)，窗口：\(windowFrame)）")
+                    }
+                }
+                
+                // 原有流程：若 drop 即将发生（AppKit 还未决定），等待 performDragOperation
+                let isDropImminent = isMouseInWindow
+                    || dropZoneWindow.isAcceptingDragSession
+                    || isDragInsideWindow
+                
+                if isDropImminent {
                     dropTimeoutWorkItem?.cancel()
                     let item = DispatchWorkItem { [weak self] in
                         Task { @MainActor in
                             guard let self = self else { return }
-                            if !self.dropZoneWindow.isShowingSuccess && !self.dropZoneWindow.isPerformingDrop {
-                                print("🚨 App: Drop timeout reached, force hiding.")
+                            if !self.dropZoneWindow.isShowingSuccess
+                                && !self.dropZoneWindow.isPerformingDrop
+                                && !self.dropZoneWindow.isAcceptingDragSession {
+                                FileLogger.log("🚨 App: Drop timeout (1.5s)，force hiding.")
                                 self.dropZoneWindow.hide()
                             }
                         }
                     }
                     self.dropTimeoutWorkItem = item
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
-                    
-                    isDragging = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: item)
                     return
                 }
-
-                isDragging = false
+                
+                // 窗口外松手，正常隐藏
                 dropZoneWindow.hide()
                 return
             }
+
             
-            // Unified Logic:
-            // 1. STATE PRIORITY: If we are INSIDE the window (via DragEnter/Exit events), force SHOW.
+            // 统一逻辑：鼠标按下期间的展示控制
+            // 1. 状态优先：如果我们在窗口内（通过 DragEnter/Exit 事件），强制显示
             if isDragInsideWindow {
                 if dropZoneWindow.alphaValue < 1 {
                     updateWindowStatus()
                     dropZoneWindow.show(under: statusItem)
                 }
-                // NOTE: We used to 'return' here, which blocked the scaling logic below!
-                // We must continue to check mouse location to drive 'isIconExpanded'.
             }
 
-            // 2. Proximity & Safe Zone Logic (Centralized Control)
+            // 2. 近距离 & Safe Zone 逻辑
             if let button = statusItem.button, let window = button.window {
                 let mouseLoc = NSEvent.mouseLocation
                 let windowFrame = dropZoneWindow.frame
                 
-                // Condition A: Mathematically INSIDE the window rectangle
                 let isMouseInWindow = NSMouseInRect(mouseLoc, windowFrame, false)
                 
-                // Condition B: Icon Proximity
                 let buttonFrame = window.frame
                 let buttonCenter = CGPoint(x: buttonFrame.midX, y: buttonFrame.midY)
                 let distance = hypot(mouseLoc.x - buttonCenter.x, mouseLoc.y - buttonCenter.y)
                 let isNearIcon = distance < 80
                 
-                // Condition C: Safe Zone Hysteresis (120px buffer)
                 let isInSafeZone: Bool
                 if dropZoneWindow.alphaValue > 0 {
                     let safeZone = windowFrame.insetBy(dx: -120, dy: -120)
@@ -372,25 +418,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     isInSafeZone = false
                 }
                 
-                // --- EXECUTION OF LOGIC ---
-                
-                // 1. Icon State: Only expand if INSIDE the literal window
-                // If showing success, we don't change expansion state
                 if !dropZoneWindow.isShowingSuccess {
                     dropZoneWindow.isIconExpanded = isMouseInWindow
-                    dropZoneWindow.isBorderHighlighted = isMouseInWindow // Also highlight border only when inside
+                    dropZoneWindow.isBorderHighlighted = isMouseInWindow
                 }
                 
-                // 2. Visibility Policy
-                // CRITICAL: Window should stay visible if:
-                // - Mouse is inside/near icon
-                // - We are currently performing a drop (transferring/requesting)
-                // - We are showing success pulse
-                // - We are showing an error message
-                // BUT NOT if user has intentionally minimized to menu bar
                 let shouldStayVisible = !isMinimizedToMenu && (
-                    isMouseInWindow || isNearIcon || isInSafeZone || 
-                    dropZoneWindow.isShowingSuccess || dropZoneWindow.isShowingError || dropZoneWindow.isPerformingDrop
+                    isMouseInWindow || isNearIcon || isInSafeZone ||
+                    dropZoneWindow.isShowingSuccess || dropZoneWindow.isShowingError ||
+                    dropZoneWindow.isPerformingDrop || dropZoneWindow.isAcceptingDragSession
                 )
                 if shouldStayVisible {
                     if dropZoneWindow.alphaValue < 1 {
@@ -398,9 +434,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                         dropZoneWindow.show(under: statusItem)
                     }
                 } else {
-                    // Departure: Final Fade Out
                     if dropZoneWindow.alphaValue > 0 {
-                         dropZoneWindow.hide()
+                        dropZoneWindow.hide()
                     }
                 }
             }
@@ -464,16 +499,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         Task {
             let app = self
             
-            // 5s Grace period timer: if no response in 5s, hide to background
+            // 8s Grace period timer: if no response in 8s, hide to background
             let autoHideTask = Task {
-                try? await Task.sleep(nanoseconds: 5 * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: 8 * 1_000_000_000)
                 if !Task.isCancelled {
                     await MainActor.run {
                         // If still requesting and haven't started actual sending
                         if !app.hasStartedTransfer && app.dropZoneWindow.isPerformingDrop {
                             logTransfer("⏱️ Grace period expired: Hiding to background...")
                             app.dropZoneWindow.hide()
+                            app.isRequestingInBackground = true
                             app.updateStatusItemIcon(showDot: true) // Show dot when in background
+                            app.updateMenu() // Refresh menu to show "Requesting" item
                         }
                     }
                 }
@@ -486,9 +523,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 if !Task.isCancelled {
                     await MainActor.run {
                         if self.dropZoneWindow.isPerformingDrop && !self.dropZoneWindow.isShowingSuccess {
-                            logTransfer("🚨 App: Transfer timeout, closing.")
+                            logTransfer("🚨 App: Transfer timeout (120s), closing.")
+                            Task {
+                                await self.fileSender.cancelCurrentTransfer()
+                            }
+                            self.isRequestingInBackground = false
                             self.dropZoneWindow.isPerformingDrop = false
                             self.dropZoneWindow.hide()
+                            self.updateStatusItemIcon(showDot: false) // Clear dot on timeout
+                            self.updateMenu()
                         }
                     }
                 }
@@ -498,6 +541,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 logTransfer("🛑 [App] fileSender.onCancelled callback triggered (Async).")
                 DispatchQueue.main.async {
                     app.disableWakelock()
+                    app.isRequestingInBackground = false
+                    app.updateStatusItemIcon(showDot: false) // Clear dot on cancellation
+                    app.updateMenu()
                     logTransfer("🛑 [App] fileSender.onCancelled handling on MainActor. PerformingDrop: \(app.dropZoneWindow.isPerformingDrop), ShowingSuccess: \(app.dropZoneWindow.isShowingSuccess)")
                     if app.dropZoneWindow.isPerformingDrop && !app.dropZoneWindow.isShowingSuccess {
                         logTransfer("🚨 [App] Showing Cancelled error on DropZoneWindow.")
@@ -520,20 +566,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     guard !app.dropZoneWindow.isShowingSuccess else { return }
                     
                     app.hasStartedTransfer = true
+                    app.isRequestingInBackground = false
                     app.isMinimizedToMenu = false
                     app.currentTransferProgress = 0
+                    app.updateMenu() // Remove requesting item
                     app.dropZoneWindow.resetFromSuccess() // Clear "Requesting" state
                     let targetName = targets.first?.alias ?? "device"
                     app.currentTransferTarget = targetName
                     app.dropZoneWindow.setStatusText("Sending to \(targetName)...")
                     app.dropZoneWindow.isPerformingDrop = true 
                     
-                    // Only show window if it was NOT hidden by the 5s timer 
+                    // Only show window if it was NOT hidden by the 3s timer 
                     // (User said "挂后台", so we respect the background state if it already went there)
                     if app.dropZoneWindow.alphaValue > 0.1 {
                         app.dropZoneWindow.show(under: app.statusItem)
                     } else {
                         logTransfer("📲 Transfer started in background mode.")
+                        app.updateStatusItemIcon(showDot: true) // Ensure dot is visible during background transfer
                     }
                 }
             }
@@ -577,6 +626,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 if allSuccessful {
                     logTransfer("✅ Final Success: Showing popup.")
                     app.isMinimizedToMenu = false
+                    app.isRequestingInBackground = false
+                    app.updateStatusItemIcon(showDot: false) // Clear dot on success
+                    app.updateMenu()
                     dropZoneWindow.setStatusText("Sent!")
                     dropZoneWindow.showSuccess()
                     
@@ -609,6 +661,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     }
                     
                     app.isMinimizedToMenu = false
+                    app.isRequestingInBackground = false
+                    app.updateStatusItemIcon(showDot: false) // Clear dot on error
+                    app.updateMenu()
                     dropZoneWindow.showError(message: msg)
                     
                     // Always show error popup, even if minimized to menu
@@ -630,11 +685,65 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
     
     func startClipboardService() {
-        // Stop automatic sending on clipboard change as per user request.
-        // We still start the service so that lastChangeCount is maintained,
-        // which helps in setContent() to avoid race conditions if we ever
-        // re-enable monitoring.
-        clipboardService.onNewContent = nil
+        // 重新接上剪贴板变化的回调
+        clipboardService.onNewContent = { [weak self] newText in
+            guard let self = self else { return }
+            
+            // 1. 判断当前选中的目标设备
+            let targets: [Device]
+            if self.selectedDeviceId == "broadcast" {
+                targets = Array(self.devices.values)
+            } else if let selected = self.devices[self.selectedDeviceId] {
+                targets = [selected]
+            } else {
+                targets = []
+            }
+            
+            guard !targets.isEmpty else {
+                print("📋 剪贴板已更新，但没有可用的目标设备")
+                return
+            }
+            
+            print("📋 检测到剪贴板变化 (\(newText.count) 字符)，准备自动发送给 \(targets.count) 个设备")
+            
+            // 2. 遍历目标设备并发起异步发送
+            for device in targets {
+                Task {
+                    do {
+                        try await self.clipboardSender.sendText(newText, to: device)
+                        print("✅ 成功发送剪贴板到: \(device.alias)")
+                    } catch {
+                        print("❌ 发送剪贴板到 \(device.alias) 失败: \(error)")
+                    }
+                }
+            }
+        }
+        
+        // 🚀 新增图片剪贴板监听
+        clipboardService.onNewImage = { [weak self] imageData in
+            guard let self = self else { return }
+            
+            let targets: [Device]
+            if self.selectedDeviceId == "broadcast" { targets = Array(self.devices.values) } 
+            else if let selected = self.devices[self.selectedDeviceId] { targets = [selected] } 
+            else { targets = [] }
+            
+            guard !targets.isEmpty else { return }
+            print("🖼 检测到剪贴板图片 (\(imageData.count) bytes)，准备发送...")
+            
+            for device in targets {
+                Task {
+                    do {
+                        try await self.clipboardSender.sendImage(imageData, to: device)
+                        print("✅ 成功发送剪贴板图片到: \(device.alias)")
+                    } catch {
+                        print("❌ 发送图片失败: \(error)")
+                    }
+                }
+            }
+        }
+        
+        // 启动轮询
         clipboardService.start()
     }
     
@@ -735,18 +844,67 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     func startDiscovery() {
         discoveryService.onDeviceFound = { [weak self] device in
             DispatchQueue.main.async {
-                self?.devices[device.id] = device
-                self?.updateMenu()
+                guard let self = self else { return }
+                
+                // Track if this is a truly new device (id not in keys)
+                let isNewDevice = self.devices[device.id] == nil
+                
+                // Update device state (important for heartbeat/lastSeen)
+                self.devices[device.id] = device
+                
+                // Only trigger expensive UI rebuild if it's a new discovery
+                if isNewDevice {
+                    logTransfer("✅ Discovery: Found device [\(device.alias)] at \(device.ip):\(device.port)")
+                    self.updateMenu()
+                }
             }
         }
         
         discoveryService.start()
         
-        // Send announcement every 5 seconds
-        Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.discoveryService.sendAnnouncement()
+        // 🔋 发送一次初始广播，然后交由 updateDiscoveryTimers() 管理后续定时
+        discoveryService.sendAnnouncement()
+        updateDiscoveryTimers()
+    }
+    
+    // 🔋 连接感知的定时器管理
+    func updateDiscoveryTimers() {
+        if selectedDeviceId != "broadcast" {
+            // ⚡ 已连接特定设备 → 完全停止广播和清理（直到用户切回 broadcast 或点 Rescan）
+            broadcastTimer?.invalidate(); broadcastTimer = nil
+            cleanupTimer?.invalidate(); cleanupTimer = nil
+            logTransfer("🔋 Discovery: 已连接设备，停止定时广播和清理")
+        } else if broadcastTimer == nil {
+            // 未连接 → 30s 广播 + 60s 清理（合并减少唤醒）
+            broadcastTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    self?.discoveryService.sendAnnouncement()
+                }
             }
+            broadcastTimer?.tolerance = 15.0 // 🔋
+            cleanupTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    self?.cleanupOfflineDevices()
+                }
+            }
+            cleanupTimer?.tolerance = 30.0 // 🔋
+            logTransfer("🔋 Discovery: 广播模式，30s 广播 + 60s 清理")
+        }
+    }
+    
+    private func cleanupOfflineDevices() {
+        let now = Date()
+        var hasChanges = false
+        let timeout: TimeInterval = 60.0 // 🔋 放宽超时到 60s（广播间隔 30s 的 2 倍）
+        for (id, device) in self.devices {
+            if now.timeIntervalSince(device.lastSeen) > timeout {
+                logTransfer("🧹 Cleanup: Device [\(device.alias)] timed out and removed.")
+                self.devices.removeValue(forKey: id)
+                hasChanges = true
+            }
+        }
+        if hasChanges {
+            self.updateMenu()
         }
     }
     
@@ -762,6 +920,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             statusItem.menu = menu
         }
         
+        if isRequestingInBackground {
+            let infoItem = NSMenuItem()
+            infoItem.view = RequestIndicatorView(message: "Waiting for phone...")
+            infoItem.isEnabled = false
+            menu.addItem(infoItem)
+            menu.addItem(NSMenuItem.separator())
+        }
+
         // 1. Core Action
         menu.addItem(NSMenuItem(title: "Send Clipboard", action: #selector(sendClipboard), keyEquivalent: "s"))
         menu.addItem(NSMenuItem.separator())
@@ -913,6 +1079,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         
         self.devices = nextDevices
         
+        // 🔋 手动扫描时强制重启广播定时器
+        broadcastTimer?.invalidate(); broadcastTimer = nil
+        updateDiscoveryTimers()
+        
         discoveryService.triggerScan()
         
         // Prevent menu from closing and show immediate feedback
@@ -1000,7 +1170,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     ip: ip,
                     port: 53317,
                     deviceModel: "Remote Device",
-                    deviceType: .desktop,
+                    deviceType: "desktop",
                     version: "2.1",
                     https: false,
                     download: true,
@@ -1170,6 +1340,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     @objc func toggleAutoUpdate(_ sender: NSMenuItem) {
         isAutoUpdateEnabled.toggle()
         print("🚨 App: Auto-update toggled to [\(isAutoUpdateEnabled)]")
+    }
+}
+
+// MARK: - UI Helpers
+
+class RequestIndicatorView: NSView {
+    private let titleLabel = NSTextField(labelWithString: "")
+    
+    init(message: String) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        setupUI(message: message)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    private func setupUI(message: String) {
+        titleLabel.stringValue = message
+        titleLabel.font = .systemFont(ofSize: 12.5)
+        titleLabel.textColor = .secondaryLabelColor
+        titleLabel.alignment = .center
+        titleLabel.frame = NSRect(x: 0, y: 4, width: 240, height: 18)
+        addSubview(titleLabel)
     }
 }
 

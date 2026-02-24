@@ -15,7 +15,7 @@ actor ClipboardSender {
     private let sessionDelegate: SessionDelegate // Keep strong ref
     private let localProtocol: ProtocolType
     
-    init(fingerprint: String, localProtocol: ProtocolType = .http) {
+    init(fingerprint: String, localProtocol: ProtocolType = .https) {
         self.myFingerprint = fingerprint
         self.localProtocol = localProtocol
         self.sessionDelegate = SessionDelegate()
@@ -25,17 +25,79 @@ actor ClipboardSender {
     }
 
     func sendText(_ text: String, to device: Device) async throws {
-        // Try preferred scheme first
         let preferredScheme = device.https ? "https" : "http"
         do {
             try await internalSend(text: text, to: device, scheme: preferredScheme)
         } catch {
             print("Failed with \(preferredScheme): \(error)")
-            // Fallback trial
             let fallbackScheme = (preferredScheme == "http") ? "https" : "http"
-            print("Retrying with \(fallbackScheme)...")
             try await internalSend(text: text, to: device, scheme: fallbackScheme)
         }
+    }
+
+    // 🚀 新增：发送图片数据
+    func sendImage(_ imageData: Data, to device: Device) async throws {
+        let preferredScheme = device.https ? "https" : "http"
+        do {
+            try await internalSendImage(imageData: imageData, to: device, scheme: preferredScheme)
+        } catch {
+            print("Failed with \(preferredScheme): \(error)")
+            let fallbackScheme = (preferredScheme == "http") ? "https" : "http"
+            try await internalSendImage(imageData: imageData, to: device, scheme: fallbackScheme)
+        }
+    }
+
+    private func internalSendImage(imageData: Data, to device: Device, scheme: String) async throws {
+        var host = device.ip
+        if host.contains(":") && !host.hasPrefix("[") { host = "[\(host)]" }
+        let urlString = "\(scheme)://\(host):\(device.port)/api/localsend/v2/prepare-upload"
+        
+        guard let url = URL(string: urlString) else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let fileId = UUID().uuidString
+        let fileSize = Int64(imageData.count)
+        
+        // 标记为 image/png，这样 Android 端就会当成图片存盘，而不是剪贴板文本
+        let fileDto = FileDto(
+            id: fileId,
+            fileName: "Mac_Screenshot_\(Int(Date().timeIntervalSince1970)).png",
+            size: fileSize,
+            fileType: "image/png", 
+            sha256: nil,
+            preview: nil
+        )
+        
+        let infoDto = RegisterDto(alias: alias, version: "2.1", deviceModel: deviceModel, deviceType: deviceType.rawValue, fingerprint: myFingerprint, port: 53317, protocolType: localProtocol.rawValue, download: true)
+        
+        let requestDto = PrepareUploadRequestDto(info: infoDto, files: [fileId: fileDto])
+        request.httpBody = try JSONEncoder().encode(requestDto)
+        
+        let (data, response) = try await session.data(for: request)
+        if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+            let responseDto = try JSONDecoder().decode(PrepareUploadResponseDto.self, from: data)
+            if let token = responseDto.files[fileId] {
+                // 协议复用，调用现成的上传函数，只是把 body 换成 Data
+                try await uploadImageFile(imageData, to: device, fileId: fileId, token: token, sessionId: responseDto.sessionId, scheme: scheme)
+            }
+        }
+    }
+
+    private func uploadImageFile(_ imageData: Data, to device: Device, fileId: String, token: String, sessionId: String, scheme: String) async throws {
+        var host = device.ip
+        if host.contains(":") && !host.hasPrefix("[") { host = "[\(host)]" }
+        let urlString = "\(scheme)://\(host):\(device.port)/api/localsend/v2/upload?sessionId=\(sessionId)&fileId=\(fileId)&token=\(token)"
+        
+        guard let url = URL(string: urlString) else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.httpBody = imageData
+        
+        let _ = try await session.data(for: request)
     }
 
     private func internalSend(text: String, to device: Device, scheme: String) async throws {
@@ -74,10 +136,10 @@ actor ClipboardSender {
             alias: alias,
             version: "2.1",
             deviceModel: deviceModel,
-            deviceType: deviceType,
+            deviceType: deviceType.rawValue,
             fingerprint: myFingerprint,
             port: 53317,
-            protocolType: localProtocol,
+            protocolType: localProtocol.rawValue,
             download: true
         )
         

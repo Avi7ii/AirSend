@@ -1,10 +1,12 @@
 <p align="center">
-  <img src="Sources/AirSend/icon.svg" width="128" height="128" alt="AirSend Icon">
+  <img src="m3-icon-dynamic-rose.png" width="128" height="128" alt="AirSend Icon">
 </p>
 
 <h1 align="center">🚀 AirSend (macOS)</h1>
 
 <p align="center">
+  <img src="https://api.visitorbadge.io/api/visitors?path=https%3A%2F%2Fgithub.com%2FAvi7ii%2FAirSend&label=Views&labelColor=%23555555&countColor=%23blue" alt="Views">
+  <a href="https://github.com/Avi7ii/AirSend/releases"><img src="https://img.shields.io/github/downloads/Avi7ii/AirSend/total?style=social&logo=github" alt="Total Downloads"></a>
   <a href="https://github.com/Avi7ii/AirSend"><img src="https://img.shields.io/github/stars/Avi7ii/AirSend?style=social" alt="GitHub stars"></a>
   <a href="https://github.com/Avi7ii/AirSend/releases/latest"><img src="https://img.shields.io/github/v/release/Avi7ii/AirSend?color=pink&include_prereleases" alt="Latest Release"></a>
   <a href="https://github.com/Avi7ii/AirSend/actions"><img src="https://img.shields.io/github/actions/workflow/status/Avi7ii/AirSend/build.yml?branch=main" alt="Build Status"></a>

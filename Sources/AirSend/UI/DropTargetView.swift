@@ -10,40 +10,58 @@ protocol DropTargetViewDelegate: AnyObject {
 class DropTargetView: NSView {
     weak var delegate: DropTargetViewDelegate?
 
+    // 注册所有可能的文件类型：现代 fileURL、旧版 NSFilenamesPboardType、通用 URL
+    private static let acceptedTypes: [NSPasteboard.PasteboardType] = [
+        .fileURL,
+        .URL,
+        NSPasteboard.PasteboardType("NSFilenamesPboardType")
+    ]
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        registerForDraggedTypes([.fileURL])
+        registerForDraggedTypes(Self.acceptedTypes)
     }
     
     required init?(coder: NSCoder) {
         super.init(coder: coder)
-        registerForDraggedTypes([.fileURL])
+        registerForDraggedTypes(Self.acceptedTypes)
     }
     
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        FileLogger.log("🔘 [Drag] draggingEntered DropTargetView (MenuBar button)")
         delegate?.didEnterDrag()
         return .copy
     }
     
     override func draggingExited(_ sender: NSDraggingInfo?) {
-        // Do not hide immediately. The window handles its own exit if mouse leaves it.
-        // Actually, we need to coordinate. If mouse leaves button but enters window, keep open.
-        // Simplified: The delegate (AppDelegate) should decide when to hide based on where the mouse is.
-        // For now, let's keep the delegate call, but AppDelegate will need to be smarter.
-        // OR: We just don't call exit here if we are moving to the window?
-        // AppKit doesn't easily tell us "exited to window".
-        
-        // Strategy: Delegate will hide with a delay, cancellable if entered window.
+        FileLogger.log("🔘 [Drag] draggingExited DropTargetView (MenuBar button)")
         delegate?.didExitDrag()
     }
     
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard let pboard = sender.draggingPasteboard.propertyList(forType: NSPasteboard.PasteboardType(rawValue: "NSFilenamesPboardType")) as? [String] else {
-            return false
+        FileLogger.log("🔘 [Drag] performDragOperation DropTargetView (MenuBar button) called")
+        
+        // 优先使用现代 API 读取文件 URL
+        if let urls = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL], !urls.isEmpty {
+            FileLogger.log("✅ [Drag] DropTargetView: \\(urls.count) file(s) via new API")
+            delegate?.didPerformDrop(urls: urls)
+            return true
         }
         
-        let urls = pboard.map { URL(fileURLWithPath: $0) }
-        delegate?.didPerformDrop(urls: urls)
-        return true
+        // 兜底：旧版 NSFilenamesPboardType
+        if let paths = sender.draggingPasteboard.propertyList(
+            forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")
+        ) as? [String], !paths.isEmpty {
+            FileLogger.log("✅ [Drag] DropTargetView: \\(paths.count) file(s) via NSFilenamesPboardType fallback")
+            let urls = paths.map { URL(fileURLWithPath: $0) }
+            delegate?.didPerformDrop(urls: urls)
+            return true
+        }
+        
+        FileLogger.log("❌ [Drag] DropTargetView: performDragOperation failed - no URLs found")
+        return false
     }
 }

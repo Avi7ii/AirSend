@@ -22,12 +22,12 @@ class DeviceMenuItemView: NSView {
     
     private var deviceId: String = ""
     private var canForget: Bool = false
-    private let forgetButtonRect = NSRect(x: 226, y: 12, width: 16, height: 16)
+    private let forgetButtonRect = NSRect(x: 186, y: 12, width: 16, height: 16)
     
     init(device: Device, state: ConnectionState = .idle, canForget: Bool = false) {
         self.deviceId = device.id
         self.canForget = canForget
-        super.init(frame: NSRect(x: 0, y: 0, width: 280, height: 40))
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 40))
         setupUI(device: device)
         self.state = state
         updateUI()
@@ -41,9 +41,9 @@ class DeviceMenuItemView: NSView {
         // Icon (Left Aligned)
         let iconName: String
         switch device.deviceType {
-        case .mobile: iconName = "iphone"
-        case .desktop: iconName = "desktopcomputer"
-        case .tablet: iconName = "ipad"
+        case "mobile": iconName = "iphone"
+        case "desktop": iconName = "desktopcomputer"
+        case "tablet": iconName = "ipad"
         default: iconName = "questionmark.circle"
         }
         iconView.image = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)
@@ -54,14 +54,14 @@ class DeviceMenuItemView: NSView {
         // Title (Millimeter-level precision centering: Block height 32/40)
         titleLabel.stringValue = device.alias
         titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
-        titleLabel.frame = NSRect(x: 44, y: 21, width: 170, height: 15)
+        titleLabel.frame = NSRect(x: 44, y: 21, width: 130, height: 15)
         addSubview(titleLabel)
         
         // Subtitle (Increased gap to 5px, Y=4 for absolute center)
         subtitleLabel.stringValue = device.deviceModel ?? ""
         subtitleLabel.font = .systemFont(ofSize: 10)
         subtitleLabel.textColor = .secondaryLabelColor
-        subtitleLabel.frame = NSRect(x: 44, y: 4, width: 170, height: 12)
+        subtitleLabel.frame = NSRect(x: 44, y: 4, width: 130, height: 12)
         addSubview(subtitleLabel)
         
         // Forget Button (X) - Only if allowed
@@ -76,14 +76,14 @@ class DeviceMenuItemView: NSView {
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
-        spinner.frame = NSRect(x: 254, y: 12, width: 16, height: 16)
+        spinner.frame = NSRect(x: 214, y: 12, width: 16, height: 16)
         addSubview(spinner)
         
         // Checkmark (Right Aligned) - Heavy weight, no circle to ensure distinction from X
         let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .heavy)
         checkmarkView.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)?.withSymbolConfiguration(config)
         checkmarkView.contentTintColor = .controlAccentColor
-        checkmarkView.frame = NSRect(x: 254, y: 12, width: 16, height: 16)
+        checkmarkView.frame = NSRect(x: 214, y: 12, width: 16, height: 16)
         checkmarkView.isHidden = true
         addSubview(checkmarkView)
     }

@@ -33,7 +33,7 @@ AirSend 是一套专为 **Mac + Android** 用户设计的跨平台互联工具�
 
 ---
 
-## ⚖️ 和官方 LocalSend 的区别
+<h2 align="center"> ⚖️ 和官方 LocalSend 的区别 </h2>
 
 <div align="center">
 

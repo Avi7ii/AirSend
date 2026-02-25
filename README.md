@@ -18,7 +18,7 @@
   <a href="README_en.md">English</a> | <b>简体中文</b>
 </p>
 
-<h2 align="center">这是什么？</h2>
+<h2 align="center">🤔 这是什么？</h2>
 
 AirSend 是一套专为 **Mac + Android** 用户设计的跨平台互联工具，核心目标是：**让文件传输和剪贴板同步像 AirDrop 一样顺手，而不需要两台 Apple 设备。**
 
@@ -30,22 +30,26 @@ AirSend 是一套专为 **Mac + Android** 用户设计的跨平台互联工具�
 
 ---
 
-## 和官方 LocalSend 的区别
+## ⚖️ 和官方 LocalSend 的区别
 
-| 对比项           | 官方 LocalSend       | AirSend                            |
-| ---------------- | -------------------- | ---------------------------------- |
-| macOS 界面       | Flutter 跨平台主窗口 | 纯 Swift 原生菜单栏，无主窗口      |
-| 内存占用         | ~300MB               | ~20MB                              |
-| 剪贴板同步       | ❌                    | ✅ 双向自动（Android ↔ Mac）        |
-| 截图自动推送     | ❌                    | ✅ Android 截图后自动发到 Mac       |
-| 图片剪贴板同步   | ❌                    | ✅ Mac 复制图片自动发到 Android     |
-| Android 后台保活 | 依赖系统进程管理     | Rust 守护进程，独立于 App 生命周期 |
-| 系统级剪贴板访问 | ❌                    | ✅（需 Root + LSPosed）             |
-| 协议兼容性       | ✅ LocalSend 标准协议 | ✅ 完全兼容 LocalSend 协议          |
+<div align="center">
+
+| 对比项           | 官方 LocalSend       | AirSend                          |
+| ---------------- | -------------------- | -------------------------------- |
+| macOS 界面       | Flutter 跨平台主窗口 | 纯 Swift 原生菜单栏，无主窗口    |
+| 内存占用         | ~300MB               | **~20MB**                        |
+| 剪贴板同步       | ❌                    | ✅ 双向自动（Android ↔ Mac）      |
+| 截图自动推送     | ❌                    | ✅ 截图秒到 Mac 下载目录          |
+| 图片剪贴板同步   | ❌                    | ✅ Mac 复制图片自动发到 Android   |
+| Android 后台保活 | 依赖系统进程管理     | Rust 守护进程，脱离 App 生命周期 |
+| 系统级剪贴板访问 | ❌                    | ✅（需 Root + LSPosed）           |
+| 协议兼容性       | ✅ LocalSend 标准协议 | ✅ 完全兼容 LocalSend 协议        |
+
+</div>
 
 ---
 
-## 主要功能
+## ✨ 主要功能
 
 ### 📁 文件传输
 
@@ -81,7 +85,9 @@ Mac 端复制截图或图片时，会优先检测剪贴板中是否存在 TIFF �
 
 ---
 
-## 系统要求
+## 📋 系统要求
+
+<div align="center">
 
 | 平台                    | 要求                                                |
 | ----------------------- | --------------------------------------------------- |
@@ -90,6 +96,8 @@ Mac 端复制截图或图片时，会优先检测剪贴板中是否存在 TIFF �
 | Android（完整功能）     | Root 权限 + Magisk 或 KernelSU + LSPosed            |
 | 网络                    | 两端设备处于同一 Wi-Fi 局域网，路由器未开启 AP 隔离 |
 | 防火墙                  | 放行 UDP 53317 和 TCP 53317                         |
+
+</div>
 
 ---
 
@@ -213,13 +221,13 @@ flowchart TB
 
 ---
 
-## macOS 端说明
+## 💻 macOS 端说明
 
-### 运行方式
+### 📌 运行方式
 
 AirSend 完全运行在菜单栏，没有 Dock 图标，没有主窗口。启动后默认开机自启（通过 `SMAppService` 实现，macOS 13+）。
 
-### 拖拽发送文件
+### 📂 拖拽发送文件
 
 将文件拖向菜单栏图标时，一个半透明的 DropZone 浮窗会自动出现。松手后立即发起 LocalSend 握手，传输进度显示在浮窗内。如果 8 秒内对方无响应，浮窗自动最小化到菜单栏（菜单栏图标出现白色小圆点），传输在后台继续进行。
 
@@ -227,7 +235,7 @@ AirSend 完全运行在菜单栏，没有 Dock 图标，没有主窗口。启动
 
 **文件接收**：收到来自 Android 的文件后，Mac 端**自动接受，无需确认弹窗**，直接以流式写入保存到下载目录。
 
-### 剪贴板监听
+### 📋 剪贴板监听
 
 Mac 端每 3 秒（合并唤醒容差 1.5 秒）轮询一次 `NSPasteboard.general.changeCount`：
 
@@ -238,7 +246,7 @@ Mac 端每 3 秒（合并唤醒容差 1.5 秒）轮询一次 `NSPasteboard.gener
 
 ---
 
-## Android 端说明
+## 🤖 Android 端说明
 
 Android 端分两种模式：
 
@@ -252,11 +260,15 @@ Android 端分两种模式：
 
 安装 AirSend 定制 App 后包含三个组件：
 
-**Kotlin 前台服务（AirSendService）**
+
+
+### ① Kotlin 前台服务（AirSendService）
 
 开机自动启动（`BootReceiver`），以 `dataSync` 类型的前台服务持续运行（兼容 Android 14+），`START_STICKY` 保活。每 30 秒向 Rust 守护进程查询一次在线设备列表，并用查询结果更新系统 Direct Share 快捷方式（仅在设备列表实际变化时才更新，避免无意义的 Binder 调用）。
 
-**Rust 守护进程（Magisk/KernelSU 模块）**
+
+
+### ② Rust 守护进程（Magisk/KernelSU 模块）
 
 以 Magisk 模块形式随系统启动，完全独立于 App 生命周期。主要职责：
 
@@ -265,7 +277,9 @@ Android 端分两种模式：
 - 通过 LocalSend 协议栈维护一份在线设备表，响应 Kotlin App 的 `GET_PEERS` 查询
 - 启动时强制清除所有代理环境变量（`NO_PROXY=*`），确保 HTTPS 请求直连 Mac，不经过 VPN 或代理工具
 
-**LSPosed 模块（Xposed）**
+
+
+### ③ LSPosed 模块（Xposed）
 
 在 `system_server` 进程中运行，Hook `ClipboardService$ClipboardImpl.setPrimaryClip`：
 
@@ -275,15 +289,15 @@ Android 端分两种模式：
 
 ---
 
-## 快速上手
+## 🚀 快速上手
 
-### Step 1：部署 Mac 端
+### 💻 Step 1：部署 Mac 端
 
 1. 前往 [Releases 页面](https://github.com/Avi7ii/AirSend/releases/latest) 下载最新的 `AirSend.app`
 2. 拖入 `/Applications` 文件夹并打开
 3. 右键菜单栏的纸飞机图标 → **「开机时启动」** → 开启
 
-### Step 2：部署 Android 端
+### 🤖 Step 2：部署 Android 端
 
 **基础模式（推荐无 Root 用户）**
 
@@ -291,35 +305,49 @@ Android 端分两种模式：
 
 **完整模式（Root 用户）**
 
-1. 在 [Releases 页面](https://github.com/Avi7ii/AirSend/releases/latest) 下载并安装 AirSend 定制版 APK
-2. 在 **Magisk / KernelSU** 中刷入随 App 附带的 `airsend_daemon` 模块，**重启**
-3. 在 **LSPosed** 中启用 AirSend 模块，作用域选择 **「android」（系统框架）**，**重启**
+1. 在 [Releases 页面](https://github.com/Avi7ii/AirSend/releases/latest) 下载最新版Magisk模块
+2. 在 **Magisk / KernelSU** 中刷入模块，**重启**
+3. 在 **LSPosed** 中启用 AirSend 模块，作用域选择 **Android系统和系统框架**，**重启**
 
 完成后，剪贴板同步、截图自动发送、Direct Share 快捷方式会自动工作，无需额外配置。
 
 ---
 
-## 常见问题
+## ❓ 常见问题
 
 **Q：两端互相发现不了？**
 
-确认两台设备在同一 Wi-Fi 下，且路由器没有开启「AP 隔离」或「无线客户端隔离」功能（部分路由器默认开启此选项）。防火墙需放行 UDP 53317 和 TCP 53317。
+确认两台设备在同一 Wi-Fi 下，且路由器没有开启「AP 隔离」或「无线客户端隔离」功能（部分路由器默认开启此选项）。防火墙需放行 UDP 53317 和 TCP 53317。并尝试在Mac菜单中点击Refresh and Rescan
+
+---
 
 **Q：剪贴板同步的延迟是多少？**
 
-Android → Mac 方向：Xposed 拦截到复制事件后立即转发，延迟通常在 1 秒以内。Mac → Android 方向：Mac 端每 3 秒轮询一次剪贴板，最大延迟约 3 秒。
+Android → Mac 方向：Xposed 拦截到复制事件后立即转发，延迟通常在 0.1 秒以内。
+
+Mac → Android 方向：Mac 端每 3 秒轮询一次剪贴板，普遍延迟在 2 秒以内。
+
+---
 
 **Q：不 Root 能用剪贴板同步吗？**
 
 不能。Android 10+ 明确限制后台应用读取剪贴板，只有在 `system_server` 进程中以 UID 1000 权限运行的 Xposed 模块才能绕过这一限制。
 
+---
+
 **Q：收到的文件保存在哪里？**
 
 Mac 端保存在 `~/Downloads`（下载文件夹），文件名冲突时自动在文件名末尾加序号（如 `image (1).png`）。
 
+Android 端照片保存在 `~/Pictures/AirSend`，其他文件保存在 `~/Downloads/AirSend`
+
+---
+
 **Q：截图自动发送需要打开 App 吗？**
 
 不需要。Rust 守护进程作为 Magisk 模块在系统层面独立运行，截图监听和发送均在守护进程内完成，和 AirSend App 是否在前台无关。
+
+---
 
 **Q：发送大文件时 Mac 会卡顿吗？**
 
@@ -327,7 +355,7 @@ Mac 端保存在 `~/Downloads`（下载文件夹），文件名冲突时自动�
 
 ---
 
-## 贡献与反馈
+<h2 align="center">🤝 贡献与反馈</h2>
 
 欢迎提交 Issue 反馈问题，或通过 PR 贡献代码。如果这个工具对你有帮助，点一个 🌟 是对项目最直接的支持。
 

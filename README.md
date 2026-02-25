@@ -52,7 +52,7 @@ AirSend 是一套专为 **Mac + Android** 用户设计的跨平台互联工具�
 
 ---
 
-## ✨ 主要功能
+<h2 align="center">✨ 主要功能 </h2>
 
 ### 📁 文件传输
 
@@ -88,7 +88,7 @@ Mac 端复制截图或图片时，会优先检测剪贴板中是否存在 TIFF �
 
 ---
 
-## 📋 系统要求
+<h2 align="center"> 📋 系统要求 </h2>
 
 <div align="center">
 
@@ -224,7 +224,7 @@ flowchart TB
 
 ---
 
-## 💻 macOS 端说明
+<h2 align="center">💻 macOS 端说明 </h2>
 
 ### 📌 运行方式
 
@@ -249,7 +249,7 @@ Mac 端每 3 秒（合并唤醒容差 1.5 秒）轮询一次 `NSPasteboard.gener
 
 ---
 
-## 🤖 Android 端说明
+<h2 align="center"> 🤖 Android 端说明 </h2>
 
 Android 端分两种模式：
 
@@ -292,7 +292,7 @@ Android 端分两种模式：
 
 ---
 
-## 🚀 快速上手
+<h2 align="center"> 🚀 快速上手 </h2>
 
 ### 💻 Step 1：部署 Mac 端
 
@@ -316,7 +316,7 @@ Android 端分两种模式：
 
 ---
 
-## ❓ 常见问题
+<h2 align="center">❓ 常见问题 </h2>
 
 **Q：两端互相发现不了？**
 
@@ -358,7 +358,7 @@ Android 端照片保存在 `~/Pictures/AirSend`，其他文件保存在 `~/Downl
 
 ---
 
-<h2 align="center">🤝 贡献与反馈</h2>
+<h2 align="center">🤝 贡献与反馈 </h2>
 
 欢迎提交 Issue 反馈问题，或通过 PR 贡献代码。如果这个工具对你有帮助，点一个 🌟 是对项目最直接的支持。
 

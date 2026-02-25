@@ -106,7 +106,7 @@ When sharing files on Android, your Mac appears directly in the system's Direct 
 The diagram below shows the role of each module on the macOS and Android sides, along with the communication links between them.
 
 ```mermaid
-%%{init: {'theme': 'dark', 'themeVariables': {'background': 'transparent', 'clusterBkg': '#0d0d0d55', 'edgeLabelBackground': '#1a1a2e'}}}%%
+%%{init: {'theme': 'dark', 'themeVariables': {'background': 'transparent', 'clusterBkg': '#0d0d0d55', 'edgeLabelBackground': '#1a1a2e', 'fontSize': '16px'}}}%%
 flowchart TB
     classDef mac_node fill:#1d1d1f,stroke:#007aff,stroke-width:2px,color:#fff
     classDef android_node fill:#0d231e,stroke:#3ddc84,stroke-width:2px,color:#fff

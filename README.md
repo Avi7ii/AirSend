@@ -106,7 +106,7 @@ Mac 端复制截图或图片时，会优先检测剪贴板中是否存在 TIFF �
 下图展示了 macOS 端和 Android 端各模块的分工以及通信链路。
 
 ```mermaid
-%%{init: {'theme': 'dark', 'themeVariables': {'background': 'transparent', 'clusterBkg': '#0d0d0d55', 'edgeLabelBackground': '#1a1a2e'}}}%%
+%%{init: {'theme': 'dark', 'themeVariables': {'background': 'transparent', 'clusterBkg': '#0d0d0d55', 'edgeLabelBackground': '#1a1a2e', 'fontSize': '16px'}}}%%
 flowchart TB
     classDef mac_node fill:#1d1d1f,stroke:#007aff,stroke-width:2px,color:#fff
     classDef android_node fill:#0d231e,stroke:#3ddc84,stroke-width:2px,color:#fff

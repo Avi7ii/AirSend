@@ -14,6 +14,7 @@
   <a href="https://www.android.com/"><img src="https://img.shields.io/badge/Platform-Android%2010%2B-green.svg" alt="Platform: Android"></a>
   <a href="https://swift.org"><img src="https://img.shields.io/badge/Swift-6.2-orange.svg" alt="Swift: 6.2"></a>
   <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Kotlin-1.9.23-purple.svg" alt="Kotlin: 1.9.23"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.93.1-black.svg" alt="Rust: 1.93.1"></a>
 </p>
 
 <p align="center">

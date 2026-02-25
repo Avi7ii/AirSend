@@ -1,4 +1,4 @@
-<p align="center">
+<img width="119" height="138" alt="image" src="https://github.com/user-attachments/assets/4e1b188c-1e4f-46cc-a82a-910865833379" /><p align="center">
   <img src="m3-icon-dynamic-rose.png" width="200" height="200" alt="AirSend Icon">
 </p>
 
@@ -33,7 +33,7 @@ It consists of two parts:
 
 ---
 
-## ⚖️ How it compares to official LocalSend
+<h2 align="center"> ⚖️ How it compares to official LocalSend </h2>
 
 <div align="center">
 
@@ -52,7 +52,7 @@ It consists of two parts:
 
 ---
 
-## ✨ Features
+<h2 align="center"> ✨ Features </h2>
 
 ### 📁 File Transfer
 
@@ -88,7 +88,8 @@ When sharing files on Android, your Mac appears directly in the system's Direct 
 
 ---
 
-## 📋 Requirements
+<h2 align="center"> 📋 Requirements </h2>
+
 
 <div align="center">
 
@@ -224,7 +225,7 @@ flowchart TB
 
 ---
 
-## 💻 macOS Side
+<h2 align="center"> 💻 macOS Side </h2>
 
 ### 📌 How It Runs
 
@@ -250,7 +251,7 @@ Mac polls `NSPasteboard.general.changeCount` every 3 seconds (wake coalescing to
 
 ---
 
-## 🤖 Android Side
+<h2 align="center"> 🤖 Android Side </h2>
 
 Android supports two modes:
 
@@ -301,7 +302,7 @@ Runs in `system_server`, hooks `ClipboardService$ClipboardImpl.setPrimaryClip`:
 
 ---
 
-## 🚀 Quick Start
+<h2 align="center"> 🚀 Quick Start </h2>
 
 ### 💻 Step 1: macOS Setup
 
@@ -325,7 +326,7 @@ After setup, clipboard sync, screenshot auto-send, and Direct Share shortcuts al
 
 ---
 
-## ❓ FAQ
+<h2 align="center"> ❓ FAQ </h2>
 
 **Q: Devices can't find each other?**
 
@@ -366,7 +367,7 @@ No. `HTTPTransferServer` uses streaming I/O — data is written to disk chunk by
 
 ---
 
-## 🤝 Contributing & Feedback
+<h2 align="center"> 🤝 Contributing & Feedback </h2>
 
 Bug reports and PRs are welcome. If this tool is useful to you, giving it a 🌟 is the most direct way to support the project.
 

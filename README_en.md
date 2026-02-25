@@ -2,7 +2,7 @@
   <img src="m3-icon-dynamic-rose.png" width="200" height="200" alt="AirSend Icon">
 </p>
 
-<h1 align="center">🚀 AirSend (macOS)</h1>
+<h1 align="center">🚀 AirSend </h1>
 
 <p align="center">
   <img src="https://komarev.com/ghpvc/?username=Avi7ii&repo=AirSend&label=Views&color=007ec6&style=social" alt="Views">

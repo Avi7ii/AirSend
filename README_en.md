@@ -1,4 +1,4 @@
-<img width="119" height="138" alt="image" src="https://github.com/user-attachments/assets/4e1b188c-1e4f-46cc-a82a-910865833379" /><p align="center">
+<p align="center">
   <img src="m3-icon-dynamic-rose.png" width="200" height="200" alt="AirSend Icon">
 </p>
 

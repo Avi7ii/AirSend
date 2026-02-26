@@ -86,6 +86,14 @@ actor FileSender {
         
         let context = try await prepareContext(urls: urls)
         
+        // 清理临时文件（必须在 sendFiles 层 defer，不能放 internalSend 里，
+        // 否则 HTTPS→HTTP 回退时临时文件会被提前删除）
+        defer {
+            for url in context.tempFiles {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+        
         // Reset progress tracking
         self.totalBytes = context.fileDtos.values.reduce(0) { $0 + $1.size }
         self.sentBytesMap = [:]
@@ -205,11 +213,7 @@ actor FileSender {
         // Pass fingerprint for verification
         sessionDelegate.expectedFingerprints[device.ip] = device.id
         
-        defer {
-            for url in context.tempFiles {
-                try? FileManager.default.removeItem(at: url)
-            }
-        }
+        // 临时文件清理已移至 sendFiles 的 defer 中，避免 HTTPS→HTTP 重试时文件被提前删除
         
         guard !fileDtos.isEmpty else {
             logTransfer("⚠️ No valid files to send")
@@ -362,6 +366,7 @@ actor FileSender {
         let resourceValues = try url.resourceValues(forKeys: [.fileSizeKey])
         let fileSize = Int64(resourceValues.fileSize ?? 0)
         
+        logTransfer("📦 File to upload: \(url.path), size: \(fileSize) bytes")
         logTransfer("⬆️ Uploading \(fileId) (\(fileSize) bytes) to \(urlString)")
         
         var request = URLRequest(url: uploadUrl)
@@ -384,6 +389,12 @@ actor FileSender {
             throw NSError(domain: "FileSender", code: -999, userInfo: [NSLocalizedDescriptionKey: "Transfer cancelled"])
         }
         
+        // 读取文件数据到内存
+        // URLSession.upload(for:fromFile:) 在某些配置下会发送 Content-Length: 0
+        let fileData = try Data(contentsOf: url)
+        logTransfer("📦 Loaded file data into memory: \(fileData.count) bytes")
+        request.httpBody = fileData
+        
         let uploadDelegate = SessionDelegate()
         uploadDelegate.expectedFingerprints = sessionDelegate.expectedFingerprints
         uploadDelegate.onProgress = { [weak self] task, totalBytesSent, totalBytesExpectedToSend in
@@ -400,11 +411,8 @@ actor FileSender {
             unregisterSession(uploadSession)
         }
         
-                // NOTE: URLSession.upload(for:fromFile:) handles streaming internally.
-                // Our SessionDelegate.onProgress will be called frequently, but that's on 
-                // the Delegate queue. To ensure this Actor remains responsive to cancelCurrentTransfer(),
-                // we don't need a manual loop here, but we ensure the delegate doesn't block.
-                let (data, response) = try await uploadSession.upload(for: request, fromFile: url)
+                // 使用 data(for:) + httpBody 发送，确保 Content-Length 正确
+                let (data, response) = try await uploadSession.data(for: request)
         
         guard let httpResponse = response as? HTTPURLResponse else {
             throw NSError(domain: "FileSender", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])
@@ -437,15 +445,33 @@ actor FileSender {
         
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
-        process.arguments = ["-r", zipUrl.path, url.lastPathComponent]
+        process.arguments = ["-r", "-y", zipUrl.path, url.lastPathComponent]
         process.currentDirectoryURL = url.deletingLastPathComponent()
         
-        try? process.run()
+        let pipe = Pipe()
+        process.standardError = pipe
+        
+        do {
+            try process.run()
+        } catch {
+            logTransfer("❌ zip process failed to launch: \(error)")
+            return nil
+        }
         process.waitUntilExit()
         
+        let stderrData = pipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrStr = String(data: stderrData, encoding: .utf8) ?? ""
+        if !stderrStr.isEmpty {
+            logTransfer("⚠️ zip stderr: \(stderrStr)")
+        }
+        
         if process.terminationStatus == 0 {
+            let attrs = try? fileManager.attributesOfItem(atPath: zipUrl.path)
+            let size = attrs?[.size] as? Int64 ?? 0
+            logTransfer("📦 zip exit: \(process.terminationStatus), output: \(zipUrl.path), size: \(size) bytes")
             return zipUrl
         }
+        logTransfer("❌ zip failed with exit code: \(process.terminationStatus)")
         return nil
     }
 }

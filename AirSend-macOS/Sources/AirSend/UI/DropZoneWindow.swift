@@ -100,6 +100,9 @@ class DropZoneContentView: NSView {
     
     var onClickDuringTransfer: (() -> Void)?
     
+    /// 全局 drag 状态：由 AppDelegate 设置，show() 据此决定是否使用 orderFront
+    var isDuringDrag: Bool = false
+    
     override func mouseDown(with event: NSEvent) {
         if isPerformingDrop && !isShowingSuccess && !isShowingError && !isRequesting {
             onClickDuringTransfer?()
@@ -134,13 +137,13 @@ class DropZoneContentView: NSView {
         contentBox.translatesAutoresizingMaskIntoConstraints = false
         self.addSubview(contentBox)
         
-        // top=0: contentBox 顶部与窗口顶部持平（视觅位置与原始 240x180 完全一致）
-        // 左右各 30px、底部 60px 为透明拖放容豆带
+        // top=0: contentBox 顶部与窗口顶部持平（视觅位置贴近 status bar）
+        // 左右各 60px、底部 90px 为透明拖放容豆带（更大的缓冲区 = 更少弹回）
         NSLayoutConstraint.activate([
             contentBox.topAnchor.constraint(equalTo: topAnchor, constant: 0),
-            contentBox.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -60),
-            contentBox.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 30),
-            contentBox.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -30),
+            contentBox.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -90),
+            contentBox.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 60),
+            contentBox.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -60),
         ])
     }
     
@@ -514,10 +517,10 @@ class DropZoneContentView: NSView {
         }
         
         guard let finalURLs = urls, !finalURLs.isEmpty else {
-            FileLogger.log("❌ [Drag] performDragOperation: FAILED to read any URLs. Drag rejected.")
+            FileLogger.log("⚠️ [Drag] performDragOperation: No URLs found, but returning true to prevent bounce-back animation.")
             self.isPerformingDrop = false
             self.isAcceptingDragSession = false
-            return false
+            return true  // 始终返回 true 以阻止弹回动画
         }
         
         FileLogger.log("✅ [Drag] performDragOperation: \(finalURLs.count) file(s) accepted. Calling onDrop.")
@@ -704,6 +707,12 @@ class DropZoneWindow: NSPanel {
         dropView.isAcceptingDragSession
     }
     
+    /// 全局拖拽状态：由 AppDelegate 在检测到 drag 时设置
+    var isDuringDrag: Bool {
+        get { dropView.isDuringDrag }
+        set { dropView.isDuringDrag = newValue }
+    }
+    
     func setProgress(_ value: Double) {
         dropView.setProgress(value)
     }
@@ -737,11 +746,11 @@ class DropZoneWindow: NSPanel {
     }
     
     init() {
-        // 窗口 300x240：比视觅内容每边大 30px。
-        // 外层透明，内层 contentBox 是 240x180 frosted glass。
-        // 这样用户在视觅边框外 30px 松手，仍在 drag 接受区内，
+        // 窗口 360x300：比视觅内容（240x180）每边大 60px，底部 90px。
+        // 外层全透明，内层 contentBox 是 240x180 frosted glass。
+        // 更大的透明缓冲区 = 用户在视觅边框外松手时仍在 drag 接受区内，
         // performDragOperation 一定被调用，return true，无弹回动画。
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 300, height: 240),
+        super.init(contentRect: NSRect(x: -9999, y: -9999, width: 360, height: 300),
                    styleMask: [.borderless, .nonactivatingPanel, .hudWindow],
                    backing: .buffered,
                    defer: false)
@@ -849,75 +858,101 @@ class DropZoneWindow: NSPanel {
         }
     }
     
-    func show(under statusItem: NSStatusItem) {
-        // 关键保护：如果 drag session 正在进行中（鼠标已进入视图），
-        // 严禁做任何窗口操作（移动、makeKeyAndOrderFront 等）。
-        // makeKeyAndOrderFront 会改变窗口在 WindowServer 中的层级，
-        // 这会导致 macOS drag session 失去目标，触发 draggingExited。
-        if dropView.isAcceptingDragSession {
-            if self.alphaValue < 0.99 {
-                NSAnimationContext.runAnimationGroup { ctx in
-                    ctx.duration = 0.1
-                    self.animator().alphaValue = 1
-                }
-            }
+    private func resolveTargetOrigin(under statusItem: NSStatusItem) -> NSPoint? {
+        if let button = statusItem.button, let windowFrame = button.window?.frame {
+            let x = windowFrame.midX - (self.frame.width / 2)
+            let y = windowFrame.minY - self.frame.height - 10
+            return NSPoint(x: x, y: y)
+        }
+        
+        FileLogger.log("⚠️ DropZoneWindow: No status item frame found. Using fallback.")
+        if let screen = NSScreen.main {
+            let frame = screen.visibleFrame
+            let fallback = NSRect(x: frame.maxX - 40, y: frame.maxY - 10, width: 22, height: 22)
+            let x = fallback.midX - (self.frame.width / 2)
+            let y = fallback.minY - self.frame.height - 10
+            return NSPoint(x: x, y: y)
+        }
+        
+        FileLogger.log("❌ DropZoneWindow: Could not determine target frame.")
+        return nil
+    }
+    
+    /// Drag 开始时预热窗口：先完成定位和 orderFront，但保持不可见。
+    /// 后续只通过 alpha 从 0 淡入，避免在拖拽飞行中做层级变更导致 draggingExited。
+    func prewarmForDrag(under statusItem: NSStatusItem) {
+        let isDragActive = dropView.isAcceptingDragSession || dropView.isDuringDrag
+        let currentAlpha = self.alphaValue
+        let isOrderedIn = self.isVisible
+        FileLogger.log("🧊 DropZoneWindow.prewarmForDrag() called. Alpha: \(currentAlpha), OrderedIn: \(isOrderedIn), isDragActive: \(isDragActive)")
+        
+        // 若窗口已可见，保持现状（例如正在显示错误/成功），避免强制变透明。
+        if isDragActive && isOrderedIn && currentAlpha > 0.5 {
             return
         }
         
-        // [LOG] Log show request
+        guard let targetOrigin = resolveTargetOrigin(under: statusItem) else { return }
+        
+        self.ignoresMouseEvents = false
+        if !isDragActive || !isOrderedIn {
+            if abs(self.frame.origin.x - targetOrigin.x) > 1 || abs(self.frame.origin.y - targetOrigin.y) > 1 {
+                self.setFrameOrigin(targetOrigin)
+            }
+        }
+        if !isOrderedIn {
+            self.orderFront(nil)  // 不用 makeKeyAndOrderFront，避免干扰 drag session
+        }
+        
+        // 只保留“在层级中但不可见”的预热状态。
+        if self.alphaValue != 0 {
+            self.alphaValue = 0
+        }
+    }
+    
+    func show(under statusItem: NSStatusItem) {
+        let isDragActive = dropView.isAcceptingDragSession || dropView.isDuringDrag
+        
+        // ━━━ drag 飞行中保护 ━━━
+        // drag 进行时，任何窗口层级变更（orderFront/makeKeyAndOrderFront/setFrameOrigin）
+        // 都可能导致 AppKit 认为 drag 目标丢失，触发 draggingExited + 弹回。
+        // 如果窗口已可见（alpha≈1），什么都不做。
+        // 如果窗口不可见，只做最小操作：定位 + orderFront + 淡入。
+        if isDragActive && self.isVisible && self.alphaValue > 0.5 {
+            return  // 窗口已可见，drag 期间不干扰
+        }
+        
+        // [LOG]
         let currentAlpha = self.alphaValue
         let isOrderedIn = self.isVisible
-        FileLogger.log("✨ DropZoneWindow.show() called. Alpha: \(currentAlpha), OrderedIn: \(isOrderedIn)")
-
-        var targetFrame: NSRect?
-        
-        if let button = statusItem.button, let windowFrame = button.window?.frame {
-             targetFrame = windowFrame
-        } else {
-             FileLogger.log("⚠️ show() warning: No status item frame found. Using fallback.")
-             if let screen = NSScreen.main {
-                 let frame = screen.visibleFrame
-                 targetFrame = NSRect(x: frame.maxX - 40, y: frame.maxY - 10, width: 22, height: 22)
-             }
-        }
+        FileLogger.log("✨ DropZoneWindow.show() called. Alpha: \(currentAlpha), OrderedIn: \(isOrderedIn), isDragActive: \(isDragActive)")
         
         self.ignoresMouseEvents = false
         
-        if let frame = targetFrame {
-            let x = frame.midX - (self.frame.width / 2)
-            // 窗口高 240：上部 180px 是视觅内容，下部 60px 是透明拖放容豆带。
-            // 窗口顶部对齐 status bar 下方10px，不需要额外偏移。
-            let y = frame.minY - self.frame.height - 10
-            
-            // OPTIMIZATION: Fix flicker by being more careful about when we reset alpha.
-            // If the window is already being shown (alpha > 0), don't snap it back to 0.
+        if let targetOrigin = resolveTargetOrigin(under: statusItem) {
             if currentAlpha < 0.01 && !isOrderedIn {
-                FileLogger.log("📍 Initial positioning at: \(x), \(y) (Resetting alpha to 0)")
-                self.setFrameOrigin(NSPoint(x: x, y: y))
+                // 窗口完全不可见：定位 → orderFront → 淡入
+                FileLogger.log("📍 Initial positioning at: \(targetOrigin.x), \(targetOrigin.y)")
+                self.setFrameOrigin(targetOrigin)
                 self.alphaValue = 0
-                self.makeKeyAndOrderFront(nil)
+                self.orderFront(nil)  // 不用 makeKeyAndOrderFront，避免干扰 drag session
             } else {
-                // Window is already visible or animating, just ensure it's in the right place.
-                if abs(self.frame.origin.x - x) > 1 || abs(self.frame.origin.y - y) > 1 {
-                    FileLogger.log("📍 Moving visible window to: \(x), \(y) (Current Alpha: \(currentAlpha))")
-                    self.setFrameOrigin(NSPoint(x: x, y: y))
+                // 窗口已可见或正在动画
+                if !isDragActive {
+                    // 非 drag 期间才移动位置（避免 drag 期间 setFrameOrigin 打断 session）
+                    if abs(self.frame.origin.x - targetOrigin.x) > 1 || abs(self.frame.origin.y - targetOrigin.y) > 1 {
+                        self.setFrameOrigin(targetOrigin)
+                    }
                 }
-                
-                // If it was ordered out but had alpha, bring it back
                 if !isOrderedIn {
-                    FileLogger.log("👁️ Window was hidden but had alpha, ordering front.")
-                    self.makeKeyAndOrderFront(nil)
+                    self.orderFront(nil)
                 }
             }
-        } else {
-             FileLogger.log("❌ show() failed: Could not determine target frame.")
         }
         
-        // Ensure we animate to 1 if not already there
+        // 淡入动画
         if self.alphaValue < 0.99 {
-            FileLogger.log("✨ Animating Alpha \(currentAlpha) -> 1")
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.2
+                context.duration = isDragActive ? 0.1 : 0.2
                 self.animator().alphaValue = 1
             }
         }
@@ -935,6 +970,19 @@ class DropZoneWindow: NSPanel {
             FileLogger.log("🛡️ [hide] BLOCKED: isAcceptingDragSession=true")
             return
         }
+        // 全局 drag 进行中：仅做 soft hide（alpha=0），不做 orderOut。
+        // 这样可以在拖拽中按距离逻辑隐藏窗口，同时避免层级变更打断 drag session。
+        if dropView.isDuringDrag {
+            if self.alphaValue <= 0.01 {
+                return
+            }
+            FileLogger.log("🙈 [hide] Drag active: soft hide (alpha only, keep ordered in)")
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.1
+                self.animator().alphaValue = 0
+            })
+            return
+        }
         FileLogger.log("🙈 [hide] Hiding window. isPerformingDrop=\(dropView.isPerformingDrop), isShowingSuccess=\(dropView.isShowingSuccess)")
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.2
@@ -942,13 +990,17 @@ class DropZoneWindow: NSPanel {
         }) { [weak self] in
             Task { @MainActor in
                 guard let self = self else { return }
-                if self.alphaValue == 0 {
+                // 关键保护：completion 可能延迟执行，如果此时 show() 已重新显示窗口
+                // （alphaValue > 0 或 isDuringDrag），则不执行 orderOut。
+                // 这防止了 hide 的异步 orderOut 与 show 的 orderFront 竞争导致弹回。
+                if self.alphaValue == 0 && !self.dropView.isDuringDrag {
                     self.orderOut(nil)
                     // Only reset state when NOT actively transferring
-                    // (During transfer, hide is just a visual hide for "minimize to menu")
                     if !self.dropView.isPerformingDrop {
                         self.dropView.resetFromSuccess()
                     }
+                } else {
+                    FileLogger.log("🛡️ [hide completion] SKIPPED orderOut: alpha=\(self.alphaValue), isDuringDrag=\(self.dropView.isDuringDrag)")
                 }
             }
         }

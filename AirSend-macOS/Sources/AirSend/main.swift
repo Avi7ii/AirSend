@@ -315,9 +315,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             // 检测到新的 drag，更新计数并标记状态
             lastDragCount = currentCount
             isDragging = true
+            dropZoneWindow.isDuringDrag = true  // 同步到 DropZoneWindow，让 show() 使用 orderFront
             // 🔋 升速到 0.1s（仅在空闲态时切换，避免重复 invalidate）
             if dragMonitorTimer?.timeInterval != 0.1 {
                 setDragTimerInterval(0.1)
+            }
+            
+            // ━━━ 关键：立刻预热窗口（不可见） ━━━
+            // 必须在 drag 到达窗口区域之前就完成窗口操作（定位、orderFront），
+            // 但保持 alpha=0，不提前打扰用户。
+            // 后续仅在 near-icon/safe-zone 触发 show()，只做 alpha 淡入，
+            // 避免 drag 飞行中执行 orderFront 导致 draggingExited 弹回。
+            if !dropZoneWindow.isPerformingDrop && !dropZoneWindow.isShowingSuccess {
+                updateWindowStatus()
+                dropZoneWindow.prewarmForDrag(under: statusItem)
             }
         }
         
@@ -331,6 +342,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 let isMouseInWindow = NSMouseInRect(mouseLoc, windowFrame, false)
                 
                 isDragging = false
+                dropZoneWindow.isDuringDrag = false  // 同步：drag 结束
                 // 🔋 降速回 1.0s
                 setDragTimerInterval(1.0)
                 
@@ -980,7 +992,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         advancedMenu.autoenablesItems = false
         
         advancedMenu.addItem(NSMenuItem(title: "Add Device by IP...", action: #selector(addDeviceByIP), keyEquivalent: "a"))
-        advancedMenu.addItem(NSMenuItem(title: "Rescan and Refresh", action: #selector(scanForDevices(_:)), keyEquivalent: "r"))
         advancedMenu.addItem(NSMenuItem(title: "Clear Discovered Devices", action: #selector(clearDeviceHistory), keyEquivalent: ""))
         advancedMenu.addItem(NSMenuItem(title: "Reset Identity", action: #selector(resetIdentity(_:)), keyEquivalent: ""))
         
@@ -1006,6 +1017,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         menu.addItem(updateItem)
         
         menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "Rescan and Refresh", action: #selector(scanForDevices(_:)), keyEquivalent: "r"))
         menu.addItem(NSMenuItem(title: "Quit AirSend", action: #selector(quit), keyEquivalent: "q"))
     }
     
@@ -1372,5 +1384,4 @@ let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
 app.run()
-
 

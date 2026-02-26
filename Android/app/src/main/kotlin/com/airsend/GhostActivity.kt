@@ -35,10 +35,11 @@ class GhostActivity : AppCompatActivity() {
         
         when (intent.action) {
             Intent.ACTION_SEND -> {
-                if ("text/plain" == intent.type) {
-                    handleSendText(intent)
+                val streamUri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                if (streamUri != null) {
+                    processUriAndSend(streamUri)
                 } else {
-                    handleSendFile(intent)
+                    handleSendText(intent)
                 }
             }
             Intent.ACTION_SEND_MULTIPLE -> {

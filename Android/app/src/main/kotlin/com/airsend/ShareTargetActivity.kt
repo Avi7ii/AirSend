@@ -52,14 +52,16 @@ class ShareTargetActivity : Activity() {
 
         when (intent.action) {
             Intent.ACTION_SEND -> {
-                if ("text/plain" == intent.type) {
-                    val text = intent.getStringExtra(Intent.EXTRA_TEXT)
-                    if (text != null) {
-                        sendToRustDaemon("SEND_TEXT_TO:$targetId:$text")
-                    }
+                val streamUri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                if (streamUri != null) {
+                    processUriAndSend(streamUri, targetId)
                 } else {
-                    val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
-                    if (uri != null) processUriAndSend(uri, targetId)
+                    val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+                    if (!text.isNullOrEmpty()) {
+                        sendToRustDaemon("SEND_TEXT_TO:$targetId:$text")
+                    } else {
+                        Log.w(TAG, "ACTION_SEND ignored: no EXTRA_STREAM and no EXTRA_TEXT. type=${intent.type}")
+                    }
                 }
             }
             Intent.ACTION_SEND_MULTIPLE -> {

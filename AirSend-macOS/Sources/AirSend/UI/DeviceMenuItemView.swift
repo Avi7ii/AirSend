@@ -52,13 +52,24 @@ class DeviceMenuItemView: NSView {
         addSubview(iconView)
         
         // Title (Millimeter-level precision centering: Block height 32/40)
-        titleLabel.stringValue = device.alias
+        let displayTitle: String
+        let displaySubtitle: String
+        
+        if device.alias.lowercased() == "rustsend", let model = device.deviceModel, !model.isEmpty {
+            displayTitle = model
+            displaySubtitle = "rustsend"
+        } else {
+            displayTitle = device.alias
+            displaySubtitle = device.deviceModel ?? ""
+        }
+        
+        titleLabel.stringValue = displayTitle
         titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
         titleLabel.frame = NSRect(x: 44, y: 21, width: 130, height: 15)
         addSubview(titleLabel)
         
         // Subtitle (Increased gap to 5px, Y=4 for absolute center)
-        subtitleLabel.stringValue = device.deviceModel ?? ""
+        subtitleLabel.stringValue = displaySubtitle
         subtitleLabel.font = .systemFont(ofSize: 10)
         subtitleLabel.textColor = .secondaryLabelColor
         subtitleLabel.frame = NSRect(x: 44, y: 4, width: 130, height: 12)

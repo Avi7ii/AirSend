@@ -1,7 +1,7 @@
 id=airsend_daemon
 name=AirSend Daemon
-version=v2.0.2
-versionCode=202
+version=v2.2
+versionCode=220
 author=thom
 description=AirSend 系统级跨端协同守护进程。提供高性能 UDS 通信及网络传输，支持开机自启及不死运行。
 updateJson=

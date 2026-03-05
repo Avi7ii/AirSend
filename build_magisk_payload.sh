@@ -23,6 +23,36 @@ fail() {
   exit 1
 }
 
+cleanup_renamed_duplicates() {
+  local target="$1"
+  local dir
+  local base
+  dir="$(dirname "$target")"
+  base="$(basename "$target")"
+  [[ -d "$dir" ]] || return 0
+
+  # Remove Finder-style duplicates like "airsend_daemon 2" or "AirSend 3.apk".
+  find "$dir" -maxdepth 1 -type f -name "$base *" -delete
+}
+
+replace_file_atomic() {
+  local src="$1"
+  local dst="$2"
+  local mode="$3"
+  local dir
+  local tmp
+
+  dir="$(dirname "$dst")"
+  mkdir -p "$dir"
+
+  cleanup_renamed_duplicates "$dst"
+
+  tmp="$dir/.tmp.$(basename "$dst").$$"
+  install -m "$mode" "$src" "$tmp"
+  mv -f "$tmp" "$dst"
+  chmod "$mode" "$dst"
+}
+
 ensure_prereqs() {
   command -v cargo >/dev/null 2>&1 || fail "cargo not found"
   command -v install >/dev/null 2>&1 || fail "install not found"
@@ -73,9 +103,8 @@ build_daemon() {
   local daemon_src="$DAEMON_DIR/target/aarch64-linux-android/release/airsend_daemon"
   [[ -f "$daemon_src" ]] || fail "daemon output not found: $daemon_src"
 
-  install -Dm755 "$daemon_src" "$DAEMON_DST"
-  chmod 0755 "$DAEMON_DST"
-  log "Daemon copied to: $DAEMON_DST"
+  replace_file_atomic "$daemon_src" "$DAEMON_DST" 0755
+  log "Daemon replaced at: $DAEMON_DST"
 }
 
 resolve_apk_task() {
@@ -120,9 +149,8 @@ build_apk() {
   # Keep only one APK in the module app directory.
   mkdir -p "$APK_DST_DIR"
   find "$APK_DST_DIR" -maxdepth 1 -type f -name "*.apk" -delete
-  install -Dm644 "$apk_src" "$APK_DST"
-  chmod 0644 "$APK_DST"
-  log "APK copied to: $APK_DST"
+  replace_file_atomic "$apk_src" "$APK_DST" 0644
+  log "APK replaced at: $APK_DST"
 }
 
 package_magisk_module() {

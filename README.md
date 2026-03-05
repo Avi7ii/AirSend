@@ -6,8 +6,8 @@
 
 <p align="center">
   <img src="https://komarev.com/ghpvc/?username=Avi7ii&repo=AirSend&label=Views&color=007ec6&style=social" alt="Views">
-  <a href="https://github.com/Avi7ii/AirSend/releases"><img src="https://img.shields.io/github/downloads/avi7ii/AirSend/total?style=social&logo=github" alt="Total Downloads"></a>
-  <a href="https://github.com/Avi7ii/AirSend"><img src="https://img.shields.io/github/stars/avi7ii/AirSend?style=social" alt="GitHub stars"></a>
+  <a href="https://github.com/Avi7ii/AirSend/releases"><img src="https://img.shields.io/github/downloads/avi7ii/AirSend/total" alt="Total Downloads"></a>
+  <a href="https://github.com/Avi7ii/AirSend"><img src="https://img.shields.io/github/stars/avi7ii/AirSend" alt="GitHub stars"></a>
   <a href="https://github.com/Avi7ii/AirSend/releases/latest"><img src="https://img.shields.io/github/v/release/Avi7ii/AirSend?color=pink&include_prereleases" alt="Latest Release"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://developer.apple.com/macos/"><img src="https://img.shields.io/badge/Platform-macOS%2013%2B-blue.svg" alt="Platform: macOS"></a>

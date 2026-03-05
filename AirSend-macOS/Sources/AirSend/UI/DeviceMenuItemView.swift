@@ -20,13 +20,27 @@ class DeviceMenuItemView: NSView {
         }
     }
     
-    private var deviceId: String = ""
+    private var actionKey: String = ""
+    private var forgetKey: String = ""
     private var canForget: Bool = false
+    private var displayTitleOverride: String?
+    private var displaySubtitleOverride: String?
     private let forgetButtonRect = NSRect(x: 186, y: 12, width: 16, height: 16)
     
-    init(device: Device, state: ConnectionState = .idle, canForget: Bool = false) {
-        self.deviceId = device.id
+    init(
+        device: Device,
+        actionKey: String,
+        state: ConnectionState = .idle,
+        canForget: Bool = false,
+        forgetKey: String? = nil,
+        displayTitle: String? = nil,
+        displaySubtitle: String? = nil
+    ) {
+        self.actionKey = actionKey
+        self.forgetKey = forgetKey ?? actionKey
         self.canForget = canForget
+        self.displayTitleOverride = displayTitle
+        self.displaySubtitleOverride = displaySubtitle
         super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 40))
         setupUI(device: device)
         self.state = state
@@ -44,20 +58,25 @@ class DeviceMenuItemView: NSView {
         case "mobile": iconName = "iphone"
         case "desktop": iconName = "desktopcomputer"
         case "tablet": iconName = "ipad"
-        default: iconName = "questionmark.circle"
+        case "headless", "server", "unknown": iconName = "iphone"
+        default: iconName = "iphone"
         }
-        iconView.image = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)
+        let iconConfig = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
+        iconView.image = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)?
+            .withSymbolConfiguration(iconConfig)
         iconView.contentTintColor = .labelColor
-        iconView.frame = NSRect(x: 12, y: 10, width: 20, height: 20)
+        iconView.imageAlignment = .alignCenter
+        iconView.imageScaling = .scaleProportionallyDown
+        iconView.frame = NSRect(x: 13, y: 9, width: 22, height: 22)
         addSubview(iconView)
         
         // Title (Millimeter-level precision centering: Block height 32/40)
         let displayTitle: String
         let displaySubtitle: String
         
-        if device.alias.lowercased() == "rustsend", let model = device.deviceModel, !model.isEmpty {
-            displayTitle = model
-            displaySubtitle = "rustsend"
+        if let title = displayTitleOverride {
+            displayTitle = title
+            displaySubtitle = displaySubtitleOverride ?? (device.deviceModel ?? "")
         } else {
             displayTitle = device.alias
             displaySubtitle = device.deviceModel ?? ""
@@ -65,14 +84,14 @@ class DeviceMenuItemView: NSView {
         
         titleLabel.stringValue = displayTitle
         titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
-        titleLabel.frame = NSRect(x: 44, y: 21, width: 130, height: 15)
+        titleLabel.frame = NSRect(x: 43, y: 21, width: 132, height: 15)
         addSubview(titleLabel)
         
         // Subtitle (Increased gap to 5px, Y=4 for absolute center)
         subtitleLabel.stringValue = displaySubtitle
         subtitleLabel.font = .systemFont(ofSize: 10)
         subtitleLabel.textColor = .secondaryLabelColor
-        subtitleLabel.frame = NSRect(x: 44, y: 4, width: 130, height: 12)
+        subtitleLabel.frame = NSRect(x: 43, y: 4, width: 132, height: 12)
         addSubview(subtitleLabel)
         
         // Forget Button (X) - Only if allowed
@@ -119,7 +138,7 @@ class DeviceMenuItemView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         if let enclosingMenuItem = self.enclosingMenuItem, enclosingMenuItem.isHighlighted {
             // MacOS style rounded selection - increased corner radius and reduced inset for "fuller" look
-            let selectionRect = bounds.insetBy(dx: 2, dy: 1)
+            let selectionRect = bounds.insetBy(dx: 6, dy: 1)
             let path = NSBezierPath(roundedRect: selectionRect, xRadius: 8, yRadius: 8)
             NSColor.selectedContentBackgroundColor.set()
             path.fill()
@@ -148,17 +167,17 @@ class DeviceMenuItemView: NSView {
         
         // Check if click is on the Forget (X) button (only if it exists)
         if canForget && forgetButtonRect.insetBy(dx: -8, dy: -8).contains(point) {
-            print("❌ View: Forget Button clicked for device [\(deviceId)]")
+            print("❌ View: Forget Button clicked for device [\(forgetKey)]")
             if let delegate = NSApp.delegate as? AppDelegate {
-                delegate.forgetDevice(id: deviceId)
+                delegate.forgetDevice(id: forgetKey)
             }
             return
         }
         
         // Normal behavior: Find AppDelegate to trigger logic without closing menu
         if let delegate = NSApp.delegate as? AppDelegate {
-            print("🖱️ View: Manual click detected for device [\(deviceId)]")
-            delegate.handleDeviceClick(id: deviceId, closeMenu: false)
+            print("🖱️ View: Manual click detected for device [\(actionKey)]")
+            delegate.handleDeviceClick(id: actionKey, closeMenu: false)
         }
     }
 }

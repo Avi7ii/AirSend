@@ -254,14 +254,47 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private func groupMap() -> [String: DeviceGroupViewModel] {
         Dictionary(uniqueKeysWithValues: buildDeviceGroups().map { ($0.key, $0) })
     }
+
+    private func groupKeyComponents(_ key: String) -> (alias: String, model: String, type: String)? {
+        let parts = key.split(separator: "|", omittingEmptySubsequences: false)
+        guard parts.count >= 3 else { return nil }
+        return (String(parts[0]), String(parts[1]), String(parts[2]))
+    }
+
+    private func recoverSelectedGroupIfPossible(from groups: [DeviceGroupViewModel], reason: String) {
+        guard selectedDeviceGroupKey != broadcastSelectionKey else { return }
+        if groups.contains(where: { $0.key == selectedDeviceGroupKey }) { return }
+        guard let selectedParts = groupKeyComponents(selectedDeviceGroupKey) else { return }
+
+        let aliasTypeMatches = groups
+            .filter { group in
+                guard let parts = groupKeyComponents(group.key) else { return false }
+                return parts.alias == selectedParts.alias && parts.type == selectedParts.type
+            }
+            .sorted { $0.primary.lastSeen > $1.primary.lastSeen }
+
+        if let remapped = aliasTypeMatches.first, remapped.key != selectedDeviceGroupKey {
+            logTransfer("🔁 Selection recovered (\(reason)): \(selectedDeviceGroupKey) -> \(remapped.key)")
+            selectedDeviceGroupKey = remapped.key
+            return
+        }
+
+        if groups.count == 1, let only = groups.first, only.key != selectedDeviceGroupKey {
+            logTransfer("🔁 Selection recovered (\(reason)) to sole online target: \(only.key)")
+            selectedDeviceGroupKey = only.key
+        }
+    }
     
     private func selectedPrimaryDevice() -> Device? {
         guard selectedDeviceGroupKey != broadcastSelectionKey else { return nil }
-        return groupMap()[selectedDeviceGroupKey]?.primary
+        let groups = buildDeviceGroups()
+        recoverSelectedGroupIfPossible(from: groups, reason: "selected-primary")
+        return groups.first(where: { $0.key == selectedDeviceGroupKey })?.primary
     }
     
     private func targetGroupsForCurrentSelection() -> [DeviceGroupViewModel] {
         let groups = buildDeviceGroups()
+        recoverSelectedGroupIfPossible(from: groups, reason: "send-targets")
         if selectedDeviceGroupKey == broadcastSelectionKey {
             return groups
         }
@@ -270,10 +303,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     
     private func rememberSuccessfulDevice(_ device: Device) {
         let key = deviceGroupKey(for: device)
+        touchDeviceLastSeen(device.id)
         if preferredDeviceIdsByGroup[key] != device.id {
             preferredDeviceIdsByGroup[key] = device.id
             updateMenu()
         }
+    }
+
+    private func touchDeviceLastSeen(_ deviceId: String) {
+        guard let existing = devices[deviceId] else { return }
+        let refreshed = Device(
+            id: existing.id,
+            alias: existing.alias,
+            ip: existing.ip,
+            port: existing.port,
+            deviceModel: existing.deviceModel,
+            deviceType: existing.deviceType,
+            version: existing.version,
+            https: existing.https,
+            download: existing.download,
+            lastSeen: Date()
+        )
+        devices[deviceId] = refreshed
     }
     
     private func dropStalePreferredDeviceIds() {
@@ -324,10 +375,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         if dropZoneWindow.isShowingSuccess || dropZoneWindow.isShowingError || dropZoneWindow.isPerformingDrop {
             return
         }
-        
+
+        let groups = buildDeviceGroups()
+        recoverSelectedGroupIfPossible(from: groups, reason: "window-status")
+
         if selectedDeviceGroupKey == broadcastSelectionKey {
             dropZoneWindow.setStatusText("Broadcast to All")
-        } else if let device = selectedPrimaryDevice() {
+        } else if let device = groups.first(where: { $0.key == selectedDeviceGroupKey })?.primary {
             dropZoneWindow.setStatusText("Send to \(displayName(for: device))")
         } else {
             // Selected device is offline/missing
@@ -424,6 +478,35 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     var isDragging: Bool = false
     var isDragInsideWindow: Bool = false // State Priority
     private var dropTimeoutWorkItem: DispatchWorkItem?
+    private var hasFreshDragPayloadChange: Bool = false
+    private let idleDragTimerInterval: TimeInterval = 1.0
+    private let nearIconTriggerRadius: CGFloat = 140
+
+    private func statusButtonScreenFrame() -> NSRect? {
+        guard let button = statusItem.button, let window = button.window else { return nil }
+        let frameInWindow = button.convert(button.bounds, to: nil)
+        return window.convertToScreen(frameInWindow)
+    }
+
+    private func hasFilePayloadInDragPasteboard() -> Bool {
+        guard NSEvent.pressedMouseButtons != 0 else { return false }
+        let pboard = NSPasteboard(name: .drag)
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        if let urls = pboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL], !urls.isEmpty {
+            return true
+        }
+        if let paths = pboard.propertyList(forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")) as? [String], !paths.isEmpty {
+            return true
+        }
+        return false
+    }
+
+    private func filterValidLocalDropURLs(_ urls: [URL]) -> [URL] {
+        urls.filter { url in
+            guard url.isFileURL else { return false }
+            return FileManager.default.fileExists(atPath: url.path)
+        }
+    }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Create the status item in the menu bar
@@ -522,8 +605,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     func startDragMonitoring() {
         lastDragCount = NSPasteboard(name: .drag).changeCount
         
-        // 🔋 空闲态 1.0s 慢检，检测到 drag 后切 0.1s 快检
-        setDragTimerInterval(1.0)
+        // 空闲态 1.0s 慢检，检测到 drag 后切 0.1s 快检
+        setDragTimerInterval(idleDragTimerInterval)
     }
     
     private func setDragTimerInterval(_ interval: TimeInterval) {
@@ -539,9 +622,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     
     func checkDragState() {
         let currentCount = NSPasteboard(name: .drag).changeCount
-        if currentCount != lastDragCount {
+        let hasPayload = hasFilePayloadInDragPasteboard()
+        let detectedByChangeCount = (currentCount != lastDragCount)
+        // Only activate by polling when this drag pasteboard has a fresh changeCount edge
+        // and it contains local file payload.
+        if detectedByChangeCount && hasPayload {
             // 检测到新的 drag，更新计数并标记状态
             lastDragCount = currentCount
+            hasFreshDragPayloadChange = true
             isDragging = true
             dropZoneWindow.isDuringDrag = true  // 同步到 DropZoneWindow，让 show() 使用 orderFront
             // 🔋 升速到 0.1s（仅在空闲态时切换，避免重复 invalidate）
@@ -559,6 +647,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 dropZoneWindow.prewarmForDrag(under: statusItem)
             }
         }
+
+        // 兜底：若窗口可见但没有被标记为 dragging，且鼠标已释放，清理卡住状态。
+        if !isDragging,
+           NSEvent.pressedMouseButtons == 0,
+           dropZoneWindow.alphaValue > 0.01,
+           !dropZoneWindow.isAcceptingDragSession,
+           !dropZoneWindow.isPerformingDrop,
+           !dropZoneWindow.isShowingSuccess,
+           !dropZoneWindow.isShowingError {
+            dropZoneWindow.isDuringDrag = false
+            dropZoneWindow.isIconExpanded = false
+            dropZoneWindow.isBorderHighlighted = false
+            dropZoneWindow.hide()
+        }
         
         // 如果正在拖拽，检查鼠标是否松手
         if isDragging {
@@ -571,8 +673,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 
                 isDragging = false
                 dropZoneWindow.isDuringDrag = false  // 同步：drag 结束
-                // 🔋 降速回 1.0s
-                setDragTimerInterval(1.0)
+                // 降速回空闲监测频率
+                setDragTimerInterval(idleDragTimerInterval)
                 
                 // ━━━ 终极兜底：Drag Pasteboard 直读 ━━━
                 // 问题根源：用户通过窗口时 enter/exit 抖动，松手时鼠标已在窗口外，
@@ -586,14 +688,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 let isNearWindow = expandedFrame.contains(mouseLoc)
                 
                 if hadDragNearWindow && isNearWindow && !dropZoneWindow.isPerformingDrop {
+                    if !hasFreshDragPayloadChange {
+                        FileLogger.log("⚠️ [DragFallback] Skipped: no fresh drag payload change observed.")
+                        dropZoneWindow.hide()
+                        hasFreshDragPayloadChange = false
+                        return
+                    }
                     let pboard = NSPasteboard(name: .drag)
                     let opts: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
                     if let urls = pboard.readObjects(forClasses: [NSURL.self], options: opts) as? [URL],
                        !urls.isEmpty {
-                        FileLogger.log("🎣 [DragFallback] Pasteboard 兜底捕获：\(urls.count) 个文件。mouseLoc=\(mouseLoc), inWindow=\(isMouseInWindow)")
+                        let validURLs = filterValidLocalDropURLs(urls)
+                        if validURLs.isEmpty {
+                            FileLogger.log("⚠️ [DragFallback] Ignored non-local/non-existent payload.")
+                            dropZoneWindow.hide()
+                            return
+                        }
+                        FileLogger.log("🎣 [DragFallback] Pasteboard 兜底捕获：\(validURLs.count) 个文件。mouseLoc=\(mouseLoc), inWindow=\(isMouseInWindow)")
                         dropZoneWindow.isPerformingDrop = true
                         isDragInsideWindow = false
-                        didPerformDrop(urls: urls)
+                        didPerformDrop(urls: validURLs)
                         return
                     } else {
                         FileLogger.log("⚠️ [DragFallback] Pasteboard 无文件（松手位置：\(mouseLoc)，窗口：\(windowFrame)）")
@@ -624,6 +738,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 }
                 
                 // 窗口外松手，正常隐藏
+                hasFreshDragPayloadChange = false
                 dropZoneWindow.hide()
                 return
             }
@@ -639,16 +754,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             }
 
             // 2. 近距离 & Safe Zone 逻辑
-            if let button = statusItem.button, let window = button.window {
+            if let buttonFrame = statusButtonScreenFrame() {
                 let mouseLoc = NSEvent.mouseLocation
                 let windowFrame = dropZoneWindow.frame
                 
                 let isMouseInWindow = NSMouseInRect(mouseLoc, windowFrame, false)
                 
-                let buttonFrame = window.frame
                 let buttonCenter = CGPoint(x: buttonFrame.midX, y: buttonFrame.midY)
                 let distance = hypot(mouseLoc.x - buttonCenter.x, mouseLoc.y - buttonCenter.y)
-                let isNearIcon = distance < 80
+                let isNearIcon = distance < nearIconTriggerRadius
                 
                 let isInSafeZone: Bool
                 if dropZoneWindow.alphaValue > 0 {
@@ -689,6 +803,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         // Cancel any pending hide
         hideWorkItem?.cancel()
         hideWorkItem = nil
+
+        // Some drag sources don't update NSPasteboard.changeCount in time.
+        // Latch drag-active state as soon as AppKit tells us drag entered.
+        isDragging = true
+        dropZoneWindow.isDuringDrag = true
+        lastDragCount = NSPasteboard(name: .drag).changeCount
+        if dragMonitorTimer?.timeInterval != 0.1 {
+            setDragTimerInterval(0.1)
+        }
         
         if !dropZoneWindow.isPerformingDrop && !dropZoneWindow.isShowingSuccess {
             updateWindowStatus()
@@ -697,7 +820,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
     
     func didExitDrag() {
-        // No-op: Visibility is handled by checkDragState
+        // Fail-safe: clean stale drag state if the button is already released.
+        if NSEvent.pressedMouseButtons == 0,
+           !dropZoneWindow.isAcceptingDragSession,
+           !dropZoneWindow.isPerformingDrop,
+           !dropZoneWindow.isShowingSuccess,
+           !dropZoneWindow.isShowingError {
+            isDragging = false
+            hasFreshDragPayloadChange = false
+            dropZoneWindow.isDuringDrag = false
+            if dragMonitorTimer?.timeInterval != idleDragTimerInterval {
+                setDragTimerInterval(idleDragTimerInterval)
+            }
+            dropZoneWindow.hide()
+        }
     }
     
     private func scheduleHide(delay: TimeInterval = 0.2) {
@@ -772,12 +908,38 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     
     func didPerformDrop(urls: [URL]) {
         isDragInsideWindow = false
+        isDragging = false
+        hasFreshDragPayloadChange = false
+        dropZoneWindow.isDuringDrag = false
+        if dragMonitorTimer?.timeInterval != idleDragTimerInterval {
+            setDragTimerInterval(idleDragTimerInterval)
+        }
+        let validURLs = filterValidLocalDropURLs(urls)
+        guard !validURLs.isEmpty else {
+            logTransfer("⚠️ Drop ignored: payload is not a valid local file list.")
+            dropZoneWindow.resetFromSuccess()
+            dropZoneWindow.showError(message: "Drop files only")
+            dropZoneWindow.show(under: statusItem)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                if self.dropZoneWindow.isShowingError {
+                    self.dropZoneWindow.hide()
+                }
+            }
+            return
+        }
         
         let targets = targetGroupsForCurrentSelection()
         
         guard !targets.isEmpty else {
-            print("No devices to send to.")
-            dropZoneWindow.hide()
+            logTransfer("⚠️ Drop aborted: no target groups available for current selection.")
+            dropZoneWindow.resetFromSuccess()
+            dropZoneWindow.showError(message: "Device Offline")
+            dropZoneWindow.show(under: statusItem)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                if self.dropZoneWindow.isShowingError {
+                    self.dropZoneWindow.hide()
+                }
+            }
             return
         }
 
@@ -898,7 +1060,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             // B. Perform actual send
             for group in targets {
                 do {
-                    try await self.sendFilesWithFallback(urls, to: group)
+                    try await self.sendFilesWithFallback(validURLs, to: group)
                 } catch {
                     logTransfer("App: Error sending to group \(group.key): \(error)")
                     lastErrorMsg = error.localizedDescription
@@ -1216,8 +1378,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private func cleanupOfflineDevices() {
         let now = Date()
         var hasChanges = false
-        let timeout: TimeInterval = 60.0 // 🔋 放宽超时到 60s（广播间隔 30s 的 2 倍）
+        let timeout: TimeInterval = 120.0 // Keep selected targets from flapping offline too aggressively.
         for (id, device) in self.devices {
+            let groupKey = deviceGroupKey(for: device)
+            if selectedDeviceGroupKey != broadcastSelectionKey && groupKey == selectedDeviceGroupKey {
+                // Keep current selection candidates to avoid immediate "Target Offline" flapping.
+                continue
+            }
             if now.timeIntervalSince(device.lastSeen) > timeout {
                 logTransfer("🧹 Cleanup: Device [\(device.alias)] timed out and removed.")
                 self.devices.removeValue(forKey: id)
@@ -1571,7 +1738,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     port: 53317,
                     deviceModel: "Remote Device",
                     deviceType: "desktop",
-                    version: "2.3.1",
+                    version: "2.4",
                     https: false,
                     download: true,
                     lastSeen: Date()

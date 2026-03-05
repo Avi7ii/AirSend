@@ -13,7 +13,6 @@ class DropTargetView: NSView {
     // 注册所有可能的文件类型：现代 fileURL、旧版 NSFilenamesPboardType、通用 URL
     private static let acceptedTypes: [NSPasteboard.PasteboardType] = [
         .fileURL,
-        .URL,
         NSPasteboard.PasteboardType("NSFilenamesPboardType")
     ]
 

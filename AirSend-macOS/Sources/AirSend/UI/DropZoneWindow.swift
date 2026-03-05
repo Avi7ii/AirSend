@@ -123,7 +123,6 @@ class DropZoneContentView: NSView {
         self.wantsLayer = true
         self.registerForDraggedTypes([
             .fileURL,
-            .URL,
             NSPasteboard.PasteboardType("NSFilenamesPboardType")
         ])
         
@@ -282,6 +281,20 @@ class DropZoneContentView: NSView {
         requestView?.isHidden = true
         requestContinuation?.resume(returning: false) // Safety: ensure any pending continuation is released
         requestContinuation = nil
+    }
+
+    func clearStaleDragSessionIfNeeded() {
+        guard isAcceptingDragSession,
+              NSEvent.pressedMouseButtons == 0,
+              !isPerformingDrop else { return }
+        FileLogger.log("🧯 [Drag] Clearing stale drag session flag (mouse released).")
+        isAcceptingDragSession = false
+        dragExitWorkItem?.cancel()
+        dragExitWorkItem = nil
+        if !isShowingSuccess {
+            contract()
+            isBorderHighlighted = false
+        }
     }
     
     // --- Hover Logic ---
@@ -458,6 +471,10 @@ class DropZoneContentView: NSView {
         dragExitWorkItem = nil
         // 立刻锁定：drag 飞行中，禁止 hide()
         isAcceptingDragSession = true
+        if !isShowingSuccess {
+            expand()
+            isBorderHighlighted = true
+        }
         FileLogger.log("🎯 [Drag] draggingEntered DropZoneContentView. isAcceptingDragSession=true, isPerformingDrop=\(isPerformingDrop)")
         onDragEnter?()
         return .copy
@@ -483,6 +500,10 @@ class DropZoneContentView: NSView {
             if !self.isPerformingDrop {
                 FileLogger.log("🚪 [Drag] 600ms cleanup: clearing isAcceptingDragSession (isPerformingDrop=false)")
                 self.isAcceptingDragSession = false
+                if !self.isShowingSuccess {
+                    self.contract()
+                    self.isBorderHighlighted = false
+                }
             } else {
                 FileLogger.log("🚪 [Drag] 600ms cleanup: SKIPPED (isPerformingDrop=true, drop already handled)")
             }
@@ -859,9 +880,11 @@ class DropZoneWindow: NSPanel {
     }
     
     private func resolveTargetOrigin(under statusItem: NSStatusItem) -> NSPoint? {
-        if let button = statusItem.button, let windowFrame = button.window?.frame {
-            let x = windowFrame.midX - (self.frame.width / 2)
-            let y = windowFrame.minY - self.frame.height - 10
+        if let button = statusItem.button, let window = button.window {
+            let frameInWindow = button.convert(button.bounds, to: nil)
+            let buttonFrame = window.convertToScreen(frameInWindow)
+            let x = buttonFrame.midX - (self.frame.width / 2)
+            let y = buttonFrame.minY - self.frame.height - 10
             return NSPoint(x: x, y: y)
         }
         
@@ -965,6 +988,8 @@ class DropZoneWindow: NSPanel {
             FileLogger.log("🛡️ [hide] BLOCKED: isRequesting=true")
             return
         }
+        // 若 drag 标志因边界抖动残留，先尝试自恢复。
+        dropView.clearStaleDragSessionIfNeeded()
         // Drag session 飞行中（鼠标已进入但 performDragOperation 尚未完成）禁止隐藏
         if dropView.isAcceptingDragSession {
             FileLogger.log("🛡️ [hide] BLOCKED: isAcceptingDragSession=true")

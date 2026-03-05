@@ -32,6 +32,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     // 🔋 功耗优化：广播与清理定时器（连接设备后停止）
     private var broadcastTimer: Timer?
     private var cleanupTimer: Timer?
+    private var isRestartingDiscovery = false
+    private var lastDiscoveryRestartAt: Date = .distantPast
+    private let discoveryRestartCooldown: TimeInterval = 2.0
     
     // Wakelock & Launch at Login
     private var wakelockAssertionID: IOPMAssertionID = 0
@@ -1119,6 +1122,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
     
     func startDiscovery() {
+        discoveryService.onTransportFailure = { [weak self] reason in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.restartDiscoveryService(reason: reason, triggerScan: true)
+            }
+        }
+        
         discoveryService.onDeviceFound = { [weak self] device in
             DispatchQueue.main.async {
                 guard let self = self else { return }
@@ -1142,6 +1152,37 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         // 🔋 发送一次初始广播，然后交由 updateDiscoveryTimers() 管理后续定时
         discoveryService.sendAnnouncement()
         updateDiscoveryTimers()
+    }
+    
+    private func restartDiscoveryService(reason: String, triggerScan: Bool) {
+        let now = Date()
+        if isRestartingDiscovery {
+            logTransfer("⏳ Discovery restart already in progress. Skip [\(reason)].")
+            return
+        }
+        if now.timeIntervalSince(lastDiscoveryRestartAt) < discoveryRestartCooldown {
+            logTransfer("⏱️ Discovery restart throttled. Skip [\(reason)].")
+            return
+        }
+        
+        isRestartingDiscovery = true
+        lastDiscoveryRestartAt = now
+        
+        let currentProtocol = discoveryService.protocolType
+        let currentFingerprint = fingerprint
+        logTransfer("♻️ Restarting discovery service: \(reason)")
+        
+        discoveryService.stop()
+        broadcastTimer?.invalidate()
+        broadcastTimer = nil
+        
+        discoveryService = UDPDiscoveryService(fingerprint: currentFingerprint, protocolType: currentProtocol)
+        startDiscovery()
+        if triggerScan {
+            discoveryService.triggerScan()
+        }
+        
+        isRestartingDiscovery = false
     }
     
     // 🔋 连接感知的定时器管理
@@ -1439,11 +1480,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         
         self.devices = nextDevices
         
-        // 🔋 手动扫描时强制重启广播定时器
-        broadcastTimer?.invalidate(); broadcastTimer = nil
-        updateDiscoveryTimers()
-        
-        discoveryService.triggerScan()
+        restartDiscoveryService(reason: "manual refresh", triggerScan: true)
         
         // Prevent menu from closing and show immediate feedback
         // The menu normally closes on action. We can pop it back up immediately
@@ -1534,7 +1571,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     port: 53317,
                     deviceModel: "Remote Device",
                     deviceType: "desktop",
-                    version: "2.3",
+                    version: "2.3.1",
                     https: false,
                     download: true,
                     lastSeen: Date()

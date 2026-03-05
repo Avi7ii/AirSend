@@ -11,8 +11,8 @@ android {
         applicationId = "com.airsend"
         minSdk = 26
         targetSdk = 34
-        versionCode = 230
-        versionName = "2.3"
+        versionCode = 231
+        versionName = "2.3.1"
     }
 
     buildTypes {

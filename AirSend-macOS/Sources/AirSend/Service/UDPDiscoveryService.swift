@@ -7,6 +7,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
     private let port: NWEndpoint.Port = 53317
     
     var onDeviceFound: ((Device) -> Void)?
+    var onTransportFailure: ((String) -> Void)?
     
     private let fingerprint: String
     private let alias = Host.current().localizedName ?? "AirSend"
@@ -21,6 +22,17 @@ final class UDPDiscoveryService: @unchecked Sendable {
     
     private var broadcastConnection: NWConnection?
     private var broadcastListener: NWListener? // Extra listener for raw broadcast
+    private var lastFailureReportAt: Date = .distantPast
+    private let failureReportCooldown: TimeInterval = 1.0
+    
+    private func reportTransportFailure(_ reason: String) {
+        let now = Date()
+        if now.timeIntervalSince(lastFailureReportAt) < failureReportCooldown {
+            return
+        }
+        lastFailureReportAt = now
+        onTransportFailure?(reason)
+    }
     
     func start() {
         let multicastHost = NWEndpoint.Host(multicastGroupAddress)
@@ -54,6 +66,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
                  self?.sendAnnouncement() 
             case .failed(let error):
                 FileLogger.log("❌ UDP Discovery (Multicast) Failed: \(error)")
+                self?.reportTransportFailure("multicast failed: \(error)")
             default:
                 break
             }
@@ -84,8 +97,16 @@ final class UDPDiscoveryService: @unchecked Sendable {
         // Use a connection without an explicit local endpoint to avoid 53317 collision
         let connection = NWConnection(host: host, port: port, using: parameters)
         
-        connection.stateUpdateHandler = { newState in
-            // FileLogger.log("Broadcast connection state: \(newState)")
+        connection.stateUpdateHandler = { [weak self] newState in
+            switch newState {
+            case .failed(let error):
+                FileLogger.log("❌ Broadcast connection failed: \(error)")
+                self?.reportTransportFailure("broadcast failed: \(error)")
+            case .waiting(let error):
+                FileLogger.log("⚠️ Broadcast connection waiting: \(error)")
+            default:
+                break
+            }
         }
         connection.start(queue: .global())
         self.broadcastConnection = connection
@@ -103,7 +124,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
     func sendAnnouncement(isAnnouncement: Bool = true) {
         let dto = MulticastDto(
             alias: alias,
-            version: "2.3",
+            version: "2.3.1",
             deviceModel: deviceModel,
             deviceType: deviceType.rawValue,
             fingerprint: fingerprint,

@@ -143,7 +143,7 @@ impl Default for DeviceInfo {
 
         Self {
             alias: "AirSend Android Module".to_string(),
-            version: "2.3".to_string(),
+            version: "2.3.1".to_string(),
             device_model: model,
             device_type: Some(DeviceType::Headless),
             fingerprint: Uuid::new_v4().to_string(),

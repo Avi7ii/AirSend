@@ -32,10 +32,12 @@ actor CertificateManager {
         }
         
         var shouldRegenerate = force
-        if !fileManager.fileExists(atPath: p12Path.path) {
+        if !fileManager.fileExists(atPath: p12Path.path) ||
+            !fileManager.fileExists(atPath: certPath.path) ||
+            !fileManager.fileExists(atPath: keyPath.path) {
             shouldRegenerate = true
-        } else if await needsRegeneration() {
-            logTransfer("🔄 Current IP configuration changed. Regenerating certificate to match new IPs...")
+        } else if !hasValidCertificateBundle() {
+            logTransfer("⚠️ Existing certificate bundle is invalid. Regenerating identity certificate...")
             shouldRegenerate = true
         }
         
@@ -50,42 +52,47 @@ actor CertificateManager {
         try await generateCertificate()
     }
     
-    // Check if current certificate covers all active IPs
-    private func needsRegeneration() async -> Bool {
-        // 1. Get current IPs
-        let currentIPs = getAllIPs()
-        if currentIPs.isEmpty { return false } // No network, no need to change yet
-        
-        // 2. Read certificate text to check SANs
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/openssl")
-        process.arguments = ["x509", "-in", certPath.path, "-text", "-noout"]
-        
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        
+    private func hasValidCertificateBundle() -> Bool {
+        // Validate PEM certificate
+        let certCheck = Process()
+        certCheck.executableURL = URL(fileURLWithPath: "/usr/bin/openssl")
+        certCheck.arguments = ["x509", "-in", certPath.path, "-noout"]
         do {
-            try process.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            
-            guard process.terminationStatus == 0, let output = String(data: data, encoding: .utf8) else {
-                return true // Can't read cert, assume broken
+            try certCheck.run()
+            certCheck.waitUntilExit()
+            if certCheck.terminationStatus != 0 {
+                return false
             }
-            
-            // 3. Check if ALL current IPs are present in the certificate
-            // Output format: "IP Address:192.168.1.24"
-            for ip in currentIPs {
-                if !output.contains("IP Address:\(ip)") {
-                    logTransfer("⚠️ IP \(ip) is missing from current certificate. Triggering regeneration.")
-                    return true
-                }
-            }
-            
-            return false // All IPs matched
-            
         } catch {
-            return true // Error reading, regenerate
+            return false
+        }
+        
+        // Validate private key
+        let keyCheck = Process()
+        keyCheck.executableURL = URL(fileURLWithPath: "/usr/bin/openssl")
+        keyCheck.arguments = ["pkey", "-in", keyPath.path, "-noout"]
+        do {
+            try keyCheck.run()
+            keyCheck.waitUntilExit()
+            if keyCheck.terminationStatus != 0 {
+                return false
+            }
+        } catch {
+            return false
+        }
+        
+        // Validate P12 bundle
+        let p12Check = Process()
+        p12Check.executableURL = URL(fileURLWithPath: "/usr/bin/openssl")
+        p12Check.arguments = [
+            "pkcs12", "-in", p12Path.path, "-passin", "pass:\(password)", "-nokeys", "-clcerts", "-noout"
+        ]
+        do {
+            try p12Check.run()
+            p12Check.waitUntilExit()
+            return p12Check.terminationStatus == 0
+        } catch {
+            return false
         }
     }
     

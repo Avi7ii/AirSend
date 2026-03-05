@@ -53,14 +53,38 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
     }
     
-    var devices: [String: Device] = [:] {
-        didSet {
-            saveDevices()
+    // Auto clipboard sync is disabled by default.
+    private var isAutoClipboardSyncEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: "auto_clipboard_sync_enabled") }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "auto_clipboard_sync_enabled")
+            updateMenu()
         }
     }
     
-    // Persistent historical devices
-    var historyDeviceIds: Set<String> {
+    private let broadcastSelectionKey = "broadcast"
+    private let selectedGroupKeyStorage = "selected_device_group_key_v2"
+    private let historyGroupKeysStorage = "history_device_group_keys_v2"
+    private let preferredGroupCandidateStorage = "preferred_device_ids_by_group_v2"
+    private let deviceConflictOnlineWindow: TimeInterval = 90.0
+    private let androidAirSendRepository = "https://github.com/Avi7ii/AirSend"
+    
+    private struct DeviceGroupViewModel {
+        let key: String
+        let primary: Device
+        let candidates: [Device]
+        let isConflict: Bool
+    }
+    
+    var devices: [String: Device] = [:] {
+        didSet {
+            saveDevices()
+            dropStalePreferredDeviceIds()
+        }
+    }
+    
+    // Legacy keys kept for one compatibility cycle.
+    private var legacyHistoryDeviceIds: Set<String> {
         get {
             let array = UserDefaults.standard.stringArray(forKey: "history_device_ids") ?? []
             return Set(array)
@@ -69,44 +93,239 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             UserDefaults.standard.set(Array(newValue), forKey: "history_device_ids")
         }
     }
-
-    // Selection state: "broadcast" or device ID
-    var selectedDeviceId: String = {
-        UserDefaults.standard.string(forKey: "selected_device_id") ?? "broadcast"
+    
+    var historyDeviceGroupKeys: Set<String> {
+        get {
+            let array = UserDefaults.standard.stringArray(forKey: historyGroupKeysStorage) ?? []
+            return Set(array)
+        }
+        set {
+            UserDefaults.standard.set(Array(newValue), forKey: historyGroupKeysStorage)
+        }
+    }
+    
+    private var preferredDeviceIdsByGroup: [String: String] = {
+        UserDefaults.standard.dictionary(forKey: "preferred_device_ids_by_group_v2") as? [String: String] ?? [:]
     }() {
         didSet {
-            print("🚨 App: selectedDeviceId changed to [\(selectedDeviceId)]")
-            UserDefaults.standard.set(selectedDeviceId, forKey: "selected_device_id")
-            if selectedDeviceId != "broadcast" {
-                var current = historyDeviceIds
-                current.insert(selectedDeviceId)
-                historyDeviceIds = current
+            UserDefaults.standard.set(preferredDeviceIdsByGroup, forKey: preferredGroupCandidateStorage)
+        }
+    }
+    
+    // Selection state: "broadcast" or group key
+    var selectedDeviceGroupKey: String = {
+        UserDefaults.standard.string(forKey: "selected_device_group_key_v2") ?? "broadcast"
+    }() {
+        didSet {
+            print("🚨 App: selectedDeviceGroupKey changed to [\(selectedDeviceGroupKey)]")
+            UserDefaults.standard.set(selectedDeviceGroupKey, forKey: selectedGroupKeyStorage)
+            if selectedDeviceGroupKey != broadcastSelectionKey {
+                var current = historyDeviceGroupKeys
+                current.insert(selectedDeviceGroupKey)
+                historyDeviceGroupKeys = current
             }
             updateMenu()
             updateWindowStatus()
-            updateDiscoveryTimers() // 🔋 连接后停止广播
+            updateDiscoveryTimers()
         }
     }
     
     // Track connection state
-    var connectingDeviceId: String? = nil {
+    var connectingSelectionKey: String? = nil {
         didSet {
-            let idString = connectingDeviceId ?? "nil"
-            print("🚨 App: connectingDeviceId changed to [\(idString)]")
+            let idString = connectingSelectionKey ?? "nil"
+            print("🚨 App: connectingSelectionKey changed to [\(idString)]")
             updateMenu()
         }
     }
-
+    
+    private func normalizeGroupComponent(_ raw: String?) -> String {
+        let value = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if value.isEmpty {
+            return "unknown"
+        }
+        let collapsed = value.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        return collapsed
+    }
+    
+    private func deviceGroupKey(for device: Device) -> String {
+        let alias = normalizeGroupComponent(device.alias)
+        let model = normalizeGroupComponent(device.deviceModel)
+        let type = normalizeGroupComponent(device.deviceType)
+        return "\(alias)|\(model)|\(type)"
+    }
+    
+    private func shortFingerprint(_ id: String) -> String {
+        String(id.suffix(6))
+    }
+    
+    private func isAndroidModuleDevice(_ device: Device) -> Bool {
+        let alias = device.alias.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let type = (device.deviceType ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if alias.contains("airsend") && (alias.contains("module") || alias.contains("android mod")) {
+            return true
+        }
+        return alias.contains("airsend") && type == "headless"
+    }
+    
+    private func normalizedAndroidModuleModelName(_ rawModel: String?) -> String {
+        let value = (rawModel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty {
+            return "Android Device"
+        }
+        
+        let lower = value.lowercased()
+        if lower == "ossi" || lower == "pkx110" || lower == "op60f5l1" {
+            return "OnePlus 13T"
+        }
+        
+        var normalized = value.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        normalized = normalized.replacingOccurrences(of: "一加", with: "OnePlus")
+        if normalized.hasPrefix("OnePlus"), normalized != "OnePlus" {
+            let suffix = normalized.dropFirst("OnePlus".count).trimmingCharacters(in: .whitespaces)
+            if !suffix.isEmpty {
+                normalized = "OnePlus \(suffix)"
+            }
+        }
+        
+        return normalized
+    }
+    
+    private func displayName(for device: Device) -> String {
+        if isAndroidModuleDevice(device) {
+            return normalizedAndroidModuleModelName(device.deviceModel)
+        }
+        return device.alias
+    }
+    
+    private func displayTitle(for group: DeviceGroupViewModel) -> String {
+        displayName(for: group.primary)
+    }
+    
+    private func displaySubtitle(for group: DeviceGroupViewModel) -> String {
+        if isAndroidModuleDevice(group.primary) {
+            return "airsend module"
+        }
+        return group.primary.deviceModel ?? ""
+    }
+    
+    private func displaySubtitle(for candidate: Device) -> String {
+        "\(candidate.ip) • \(shortFingerprint(candidate.id))"
+    }
+    
+    private func sortedCandidates(for groupKey: String, devices: [Device]) -> [Device] {
+        let preferred = preferredDeviceIdsByGroup[groupKey]
+        return devices.sorted { lhs, rhs in
+            let lhsPreferred = (lhs.id == preferred)
+            let rhsPreferred = (rhs.id == preferred)
+            if lhsPreferred != rhsPreferred { return lhsPreferred }
+            return lhs.lastSeen > rhs.lastSeen
+        }
+    }
+    
+    private func buildDeviceGroups() -> [DeviceGroupViewModel] {
+        let now = Date()
+        let grouped = Dictionary(grouping: devices.values, by: { deviceGroupKey(for: $0) })
+        let groups: [DeviceGroupViewModel] = grouped.compactMap { groupKey, candidates in
+            let sorted = sortedCandidates(for: groupKey, devices: candidates)
+            guard let primary = sorted.first else { return nil }
+            let onlineCount = sorted.filter { now.timeIntervalSince($0.lastSeen) <= deviceConflictOnlineWindow }.count
+            return DeviceGroupViewModel(
+                key: groupKey,
+                primary: primary,
+                candidates: sorted,
+                isConflict: onlineCount > 1
+            )
+        }
+        
+        return groups.sorted {
+            let lhsName = $0.primary.alias.lowercased()
+            let rhsName = $1.primary.alias.lowercased()
+            if lhsName == rhsName {
+                return $0.primary.lastSeen > $1.primary.lastSeen
+            }
+            return lhsName < rhsName
+        }
+    }
+    
+    private func groupMap() -> [String: DeviceGroupViewModel] {
+        Dictionary(uniqueKeysWithValues: buildDeviceGroups().map { ($0.key, $0) })
+    }
+    
+    private func selectedPrimaryDevice() -> Device? {
+        guard selectedDeviceGroupKey != broadcastSelectionKey else { return nil }
+        return groupMap()[selectedDeviceGroupKey]?.primary
+    }
+    
+    private func targetGroupsForCurrentSelection() -> [DeviceGroupViewModel] {
+        let groups = buildDeviceGroups()
+        if selectedDeviceGroupKey == broadcastSelectionKey {
+            return groups
+        }
+        return groups.filter { $0.key == selectedDeviceGroupKey }
+    }
+    
+    private func rememberSuccessfulDevice(_ device: Device) {
+        let key = deviceGroupKey(for: device)
+        if preferredDeviceIdsByGroup[key] != device.id {
+            preferredDeviceIdsByGroup[key] = device.id
+            updateMenu()
+        }
+    }
+    
+    private func dropStalePreferredDeviceIds() {
+        let validIds = Set(devices.keys)
+        let pruned = preferredDeviceIdsByGroup.filter { validIds.contains($0.value) }
+        if pruned.count != preferredDeviceIdsByGroup.count {
+            preferredDeviceIdsByGroup = pruned
+        }
+    }
+    
+    private func migrateSelectionAndHistoryToV2IfNeeded() {
+        let defaults = UserDefaults.standard
+        let hasV2History = defaults.object(forKey: historyGroupKeysStorage) != nil
+        let hasV2Selection = defaults.object(forKey: selectedGroupKeyStorage) != nil
+        if hasV2History && hasV2Selection {
+            return
+        }
+        
+        let legacySelection = defaults.string(forKey: "selected_device_id") ?? broadcastSelectionKey
+        let legacyHistory = legacyHistoryDeviceIds
+        var migratedHistory = hasV2History ? historyDeviceGroupKeys : Set<String>()
+        
+        for legacyId in legacyHistory {
+            if let device = devices[legacyId] {
+                migratedHistory.insert(deviceGroupKey(for: device))
+            }
+        }
+        
+        let migratedSelection: String
+        if hasV2Selection {
+            migratedSelection = defaults.string(forKey: selectedGroupKeyStorage) ?? broadcastSelectionKey
+        } else if legacySelection == broadcastSelectionKey {
+            migratedSelection = broadcastSelectionKey
+        } else if let selectedDevice = devices[legacySelection] {
+            let groupKey = deviceGroupKey(for: selectedDevice)
+            migratedSelection = groupKey
+            migratedHistory.insert(groupKey)
+        } else {
+            migratedSelection = broadcastSelectionKey
+        }
+        
+        historyDeviceGroupKeys = migratedHistory
+        selectedDeviceGroupKey = migratedSelection
+    }
+    
     func updateWindowStatus() {
         // PROTECTION: Don't overwrite during active transfer, success, or error states
         if dropZoneWindow.isShowingSuccess || dropZoneWindow.isShowingError || dropZoneWindow.isPerformingDrop {
             return
         }
         
-        if selectedDeviceId == "broadcast" {
+        if selectedDeviceGroupKey == broadcastSelectionKey {
             dropZoneWindow.setStatusText("Broadcast to All")
-        } else if let device = devices[selectedDeviceId] {
-            dropZoneWindow.setStatusText("Send to \(device.alias)")
+        } else if let device = selectedPrimaryDevice() {
+            dropZoneWindow.setStatusText("Send to \(displayName(for: device))")
         } else {
             // Selected device is offline/missing
             dropZoneWindow.setStatusText("Target Offline (Select another)")
@@ -180,12 +399,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     @objc func clearDeviceHistory() {
         print("🚨 App: Clearing device history...")
         self.devices.removeAll()
-        self.historyDeviceIds.removeAll()
-        self.selectedDeviceId = "broadcast"
+        self.historyDeviceGroupKeys.removeAll()
+        self.legacyHistoryDeviceIds.removeAll()
+        self.preferredDeviceIdsByGroup.removeAll()
+        self.selectedDeviceGroupKey = broadcastSelectionKey
         
         UserDefaults.standard.removeObject(forKey: "saved_devices")
         UserDefaults.standard.removeObject(forKey: "history_device_ids")
-        UserDefaults.standard.set("broadcast", forKey: "selected_device_id")
+        UserDefaults.standard.removeObject(forKey: "selected_device_id")
+        UserDefaults.standard.removeObject(forKey: historyGroupKeysStorage)
+        UserDefaults.standard.set(broadcastSelectionKey, forKey: selectedGroupKeyStorage)
+        UserDefaults.standard.removeObject(forKey: preferredGroupCandidateStorage)
         
         updateMenu()
         updateWindowStatus()
@@ -237,6 +461,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
         
         loadDevices()
+        migrateSelectionAndHistoryToV2IfNeeded()
         setupMenu()
         updateWindowStatus()
         
@@ -484,17 +709,68 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
     }
     
+    private func sendTextWithFallback(_ text: String, to group: DeviceGroupViewModel) async throws {
+        var lastError: Error?
+        for candidate in group.candidates {
+            do {
+                try await clipboardSender.sendText(text, to: candidate)
+                rememberSuccessfulDevice(candidate)
+                return
+            } catch {
+                lastError = error
+                logTransfer("⚠️ Text send failed for \(candidate.alias) [\(candidate.ip)] \(candidate.id): \(error)")
+            }
+        }
+        
+        if let error = lastError {
+            throw error
+        }
+        throw NSError(domain: "AirSend", code: -1, userInfo: [NSLocalizedDescriptionKey: "No candidates available"])
+    }
+    
+    private func sendImageWithFallback(_ imageData: Data, to group: DeviceGroupViewModel) async throws {
+        var lastError: Error?
+        for candidate in group.candidates {
+            do {
+                try await clipboardSender.sendImage(imageData, to: candidate)
+                rememberSuccessfulDevice(candidate)
+                return
+            } catch {
+                lastError = error
+                logTransfer("⚠️ Image send failed for \(candidate.alias) [\(candidate.ip)] \(candidate.id): \(error)")
+            }
+        }
+        
+        if let error = lastError {
+            throw error
+        }
+        throw NSError(domain: "AirSend", code: -1, userInfo: [NSLocalizedDescriptionKey: "No candidates available"])
+    }
+    
+    private func sendFilesWithFallback(_ urls: [URL], to group: DeviceGroupViewModel) async throws {
+        var lastError: Error?
+        for candidate in group.candidates {
+            do {
+                logTransfer("App: Initiating send to \(candidate.alias) [\(candidate.ip)]")
+                try await fileSender.sendFiles(urls, to: candidate)
+                rememberSuccessfulDevice(candidate)
+                return
+            } catch {
+                lastError = error
+                logTransfer("⚠️ File send failed for \(candidate.alias) [\(candidate.ip)] \(candidate.id): \(error)")
+            }
+        }
+        
+        if let error = lastError {
+            throw error
+        }
+        throw NSError(domain: "AirSend", code: -1, userInfo: [NSLocalizedDescriptionKey: "No candidates available"])
+    }
+    
     func didPerformDrop(urls: [URL]) {
         isDragInsideWindow = false
         
-        let targets: [Device]
-        if selectedDeviceId == "broadcast" {
-            targets = Array(devices.values)
-        } else if let selected = devices[selectedDeviceId] {
-            targets = [selected]
-        } else {
-            targets = []
-        }
+        let targets = targetGroupsForCurrentSelection()
         
         guard !targets.isEmpty else {
             print("No devices to send to.")
@@ -583,7 +859,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     app.currentTransferProgress = 0
                     app.updateMenu() // Remove requesting item
                     app.dropZoneWindow.resetFromSuccess() // Clear "Requesting" state
-                    let targetName = targets.first?.alias ?? "device"
+                    let targetName = targets.first.map { app.displayTitle(for: $0) } ?? "device"
                     app.currentTransferTarget = targetName
                     app.dropZoneWindow.setStatusText("Sending to \(targetName)...")
                     app.dropZoneWindow.isPerformingDrop = true 
@@ -617,12 +893,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             var lastErrorMsg = ""
             
             // B. Perform actual send
-            for device in targets {
+            for group in targets {
                 do {
-                    logTransfer("App: Initiating send to \(device.alias)...")
-                    try await self.fileSender.sendFiles(urls, to: device)
+                    try await self.sendFilesWithFallback(urls, to: group)
                 } catch {
-                    logTransfer("App: Error sending to \(device.alias): \(error)")
+                    logTransfer("App: Error sending to group \(group.key): \(error)")
                     lastErrorMsg = error.localizedDescription
                     allSuccessful = false
                 }
@@ -700,32 +975,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         // 重新接上剪贴板变化的回调
         clipboardService.onNewContent = { [weak self] newText in
             guard let self = self else { return }
+            guard self.isAutoClipboardSyncEnabled else { return }
             
-            // 1. 判断当前选中的目标设备
-            let targets: [Device]
-            if self.selectedDeviceId == "broadcast" {
-                targets = Array(self.devices.values)
-            } else if let selected = self.devices[self.selectedDeviceId] {
-                targets = [selected]
-            } else {
-                targets = []
-            }
+            let targets = self.targetGroupsForCurrentSelection()
             
             guard !targets.isEmpty else {
                 print("📋 剪贴板已更新，但没有可用的目标设备")
                 return
             }
             
-            print("📋 检测到剪贴板变化 (\(newText.count) 字符)，准备自动发送给 \(targets.count) 个设备")
+            print("📋 检测到剪贴板变化 (\(newText.count) 字符)，准备自动发送给 \(targets.count) 个设备组")
             
-            // 2. 遍历目标设备并发起异步发送
-            for device in targets {
+            for group in targets {
                 Task {
                     do {
-                        try await self.clipboardSender.sendText(newText, to: device)
-                        print("✅ 成功发送剪贴板到: \(device.alias)")
+                        try await self.sendTextWithFallback(newText, to: group)
+                        print("✅ 成功发送剪贴板到: \(group.primary.alias)")
                     } catch {
-                        print("❌ 发送剪贴板到 \(device.alias) 失败: \(error)")
+                        print("❌ 发送剪贴板到 \(group.primary.alias) 失败: \(error)")
                     }
                 }
             }
@@ -734,22 +1001,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         // 🚀 新增图片剪贴板监听
         clipboardService.onNewImage = { [weak self] imageData in
             guard let self = self else { return }
+            guard self.isAutoClipboardSyncEnabled else { return }
             
-            let targets: [Device]
-            if self.selectedDeviceId == "broadcast" { targets = Array(self.devices.values) } 
-            else if let selected = self.devices[self.selectedDeviceId] { targets = [selected] } 
-            else { targets = [] }
+            let targets = self.targetGroupsForCurrentSelection()
             
             guard !targets.isEmpty else { return }
-            print("🖼 检测到剪贴板图片 (\(imageData.count) bytes)，准备发送...")
+            print("🖼 检测到剪贴板图片 (\(imageData.count) bytes)，准备发送给 \(targets.count) 个设备组...")
             
-            for device in targets {
+            for group in targets {
                 Task {
                     do {
-                        try await self.clipboardSender.sendImage(imageData, to: device)
-                        print("✅ 成功发送剪贴板图片到: \(device.alias)")
+                        try await self.sendImageWithFallback(imageData, to: group)
+                        print("✅ 成功发送剪贴板图片到: \(group.primary.alias)")
                     } catch {
-                        print("❌ 发送图片失败: \(error)")
+                        print("❌ 发送图片到 \(group.primary.alias) 失败: \(error)")
                     }
                 }
             }
@@ -881,26 +1146,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     
     // 🔋 连接感知的定时器管理
     func updateDiscoveryTimers() {
-        if selectedDeviceId != "broadcast" {
-            // ⚡ 已连接特定设备 → 完全停止广播和清理（直到用户切回 broadcast 或点 Rescan）
+        if selectedDeviceGroupKey != broadcastSelectionKey {
+            // 已连接特定设备组：停止广播，但保留清理，避免陈旧设备累积。
             broadcastTimer?.invalidate(); broadcastTimer = nil
-            cleanupTimer?.invalidate(); cleanupTimer = nil
-            logTransfer("🔋 Discovery: 已连接设备，停止定时广播和清理")
+            logTransfer("🔋 Discovery: 已连接设备组，停止定时广播，保留清理")
         } else if broadcastTimer == nil {
-            // 未连接 → 30s 广播 + 60s 清理（合并减少唤醒）
+            // Broadcast 模式：30s 广播
             broadcastTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     self?.discoveryService.sendAnnouncement()
                 }
             }
             broadcastTimer?.tolerance = 15.0 // 🔋
+            logTransfer("🔋 Discovery: 广播模式，30s 广播")
+        }
+        
+        if cleanupTimer == nil {
             cleanupTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     self?.cleanupOfflineDevices()
                 }
             }
             cleanupTimer?.tolerance = 30.0 // 🔋
-            logTransfer("🔋 Discovery: 广播模式，30s 广播 + 60s 清理")
+            logTransfer("🔋 Discovery: 清理定时器已启用，60s 轮询")
         }
     }
     
@@ -917,6 +1185,56 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
         if hasChanges {
             self.updateMenu()
+        }
+    }
+    
+    private func groupSelectionActionKey(_ groupKey: String) -> String {
+        "group|\(groupKey)"
+    }
+    
+    private func deviceSelectionActionKey(_ deviceId: String) -> String {
+        "device|\(deviceId)"
+    }
+    
+    private func decodeSelectionActionKey(_ actionKey: String) -> (groupKey: String?, deviceId: String?) {
+        if actionKey.hasPrefix("group|") {
+            return (String(actionKey.dropFirst("group|".count)), nil)
+        }
+        if actionKey.hasPrefix("device|") {
+            return (nil, String(actionKey.dropFirst("device|".count)))
+        }
+        return (nil, nil)
+    }
+    
+    private func addGroupMenuEntries(to menu: NSMenu, group: DeviceGroupViewModel, canForget: Bool) {
+        if group.isConflict {
+            for candidate in group.candidates {
+                addDeviceItem(
+                    to: menu,
+                    device: candidate,
+                    actionKey: deviceSelectionActionKey(candidate.id),
+                    groupKey: group.key,
+                    activeDeviceIdInGroup: group.primary.id,
+                    canForget: canForget,
+                    forgetKey: group.key,
+                    displayTitle: displayTitle(for: group),
+                    displaySubtitle: displaySubtitle(for: candidate),
+                    isExpandedCandidate: true
+                )
+            }
+        } else {
+            addDeviceItem(
+                to: menu,
+                device: group.primary,
+                actionKey: groupSelectionActionKey(group.key),
+                groupKey: group.key,
+                activeDeviceIdInGroup: group.primary.id,
+                canForget: canForget,
+                forgetKey: group.key,
+                displayTitle: displayTitle(for: group),
+                displaySubtitle: displaySubtitle(for: group),
+                isExpandedCandidate: false
+            )
         }
     }
     
@@ -942,47 +1260,60 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
         // 1. Core Action
         menu.addItem(NSMenuItem(title: "Send Clipboard", action: #selector(sendClipboard), keyEquivalent: "s"))
+        let autoClipboardItem = NSMenuItem()
+        autoClipboardItem.view = AutoClipboardToggleMenuItemView(
+            title: "Auto Send Clipboard",
+            isOn: isAutoClipboardSyncEnabled,
+            onToggle: { [weak self] enabled in
+                self?.setAutoClipboardSyncEnabled(enabled, showInfoIfEnabling: true)
+            }
+        )
+        menu.addItem(autoClipboardItem)
         menu.addItem(NSMenuItem.separator())
         
+        let groups = buildDeviceGroups()
+        
         // 2. KNOWN DEVICES
-        let knownDevices = devices.values.filter { historyDeviceIds.contains($0.id) || selectedDeviceId == $0.id }
-            .sorted(by: { $0.alias < $1.alias })
+        let knownGroups = groups.filter {
+            historyDeviceGroupKeys.contains($0.key) || selectedDeviceGroupKey == $0.key
+        }
             
-        if !knownDevices.isEmpty {
+        if !knownGroups.isEmpty {
             let headerItem = NSMenuItem()
             headerItem.view = MenuSectionHeaderView(title: "KNOWN DEVICES")
             headerItem.isEnabled = false
             menu.addItem(headerItem)
             
-            for device in knownDevices {
-                addDeviceItem(to: menu, device: device, canForget: true)
+            for group in knownGroups {
+                addGroupMenuEntries(to: menu, group: group, canForget: true)
             }
             menu.addItem(NSMenuItem.separator())
         }
         
         // 3. OTHER DEVICES
-        let otherDevices = devices.values.filter { !historyDeviceIds.contains($0.id) && selectedDeviceId != $0.id }
-            .sorted(by: { $0.alias < $1.alias })
+        let otherGroups = groups.filter {
+            !historyDeviceGroupKeys.contains($0.key) && selectedDeviceGroupKey != $0.key
+        }
             
         let otherHeaderItem = NSMenuItem()
         otherHeaderItem.view = MenuSectionHeaderView(title: "OTHER DEVICES")
         otherHeaderItem.isEnabled = false
         menu.addItem(otherHeaderItem)
         
-        if otherDevices.isEmpty {
+        if otherGroups.isEmpty {
             let searchingItem = NSMenuItem(title: "  Searching nearby...", action: nil, keyEquivalent: "")
             searchingItem.isEnabled = false
             menu.addItem(searchingItem)
         } else {
-            for device in otherDevices {
-                addDeviceItem(to: menu, device: device, canForget: false)
+            for group in otherGroups {
+                addGroupMenuEntries(to: menu, group: group, canForget: false)
             }
         }
         
         // 4. BROADCAST
         let broadcastItem = NSMenuItem(title: "All Devices (Broadcast)", action: #selector(deviceSelected(_:)), keyEquivalent: "")
-        broadcastItem.representedObject = "broadcast"
-        broadcastItem.state = selectedDeviceId == "broadcast" ? .on : .off
+        broadcastItem.representedObject = broadcastSelectionKey
+        broadcastItem.state = selectedDeviceGroupKey == broadcastSelectionKey ? .on : .off
         menu.addItem(broadcastItem)
         
         menu.addItem(NSMenuItem.separator())
@@ -1021,22 +1352,45 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         menu.addItem(NSMenuItem(title: "Quit AirSend", action: #selector(quit), keyEquivalent: "q"))
     }
     
-    private func addDeviceItem(to menu: NSMenu, device: Device, canForget: Bool) {
+    private func addDeviceItem(
+        to menu: NSMenu,
+        device: Device,
+        actionKey: String,
+        groupKey: String,
+        activeDeviceIdInGroup: String,
+        canForget: Bool,
+        forgetKey: String,
+        displayTitle: String,
+        displaySubtitle: String,
+        isExpandedCandidate: Bool
+    ) {
         // IMPORTANT: No action here to prevent menu from auto-closing on click
         let deviceItem = NSMenuItem(title: device.alias, action: nil, keyEquivalent: "")
-        deviceItem.representedObject = device.id
+        deviceItem.representedObject = actionKey
         deviceItem.isEnabled = true 
         
         let connectionState: DeviceMenuItemView.ConnectionState
-        if connectingDeviceId == device.id {
+        if connectingSelectionKey == actionKey {
             connectionState = .connecting
-        } else if selectedDeviceId == device.id {
-            connectionState = .connected
+        } else if selectedDeviceGroupKey == groupKey {
+            if isExpandedCandidate {
+                connectionState = (device.id == activeDeviceIdInGroup) ? .connected : .idle
+            } else {
+                connectionState = .connected
+            }
         } else {
             connectionState = .idle
         }
         
-        deviceItem.view = DeviceMenuItemView(device: device, state: connectionState, canForget: canForget)
+        deviceItem.view = DeviceMenuItemView(
+            device: device,
+            actionKey: actionKey,
+            state: connectionState,
+            canForget: canForget,
+            forgetKey: forgetKey,
+            displayTitle: displayTitle,
+            displaySubtitle: displaySubtitle
+        )
         menu.addItem(deviceItem)
     }
     
@@ -1048,25 +1402,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     @objc func sendClipboard() {
         print("Send Clipboard clicked")
         if let str = NSPasteboard.general.string(forType: .string) {
-            let targets: [Device]
-            if selectedDeviceId == "broadcast" {
-                targets = Array(devices.values)
-            } else if let selected = devices[selectedDeviceId] {
-                targets = [selected]
-            } else {
-                targets = []
-            }
+            let targets = targetGroupsForCurrentSelection()
             
             print("Clipboard content found: \(str.count) chars")
-            print("Sending to \(targets.count) devices")
+            print("Sending to \(targets.count) device groups")
             
-            for device in targets {
-                print("Targeting device: \(device.alias) at \(device.ip)")
+            for group in targets {
+                print("Targeting group: \(group.primary.alias) with \(group.candidates.count) candidates")
                 Task {
                     do {
-                        try await clipboardSender.sendText(str, to: device)
+                        try await self.sendTextWithFallback(str, to: group)
                     } catch {
-                        print("Error sending to \(device.alias): \(error)")
+                        print("Error sending to \(group.primary.alias): \(error)")
                     }
                 }
             }
@@ -1078,13 +1425,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     @objc func scanForDevices(_ sender: NSMenuItem) {
         print("Manual scan triggered - cleaning up offline other devices")
         
-        // Cleanup logic: Keep only history devices or the currently selected one
-        let historyIds = self.historyDeviceIds
-        let selectedId = self.selectedDeviceId
+        // Cleanup logic: Keep only history groups or the currently selected group
+        let historyGroups = self.historyDeviceGroupKeys
+        let selectedGroup = self.selectedDeviceGroupKey
         
         var nextDevices: [String: Device] = [:]
         for (id, device) in devices {
-            if historyIds.contains(id) || selectedId == id {
+            let groupKey = deviceGroupKey(for: device)
+            if historyGroups.contains(groupKey) || selectedGroup == groupKey {
                 nextDevices[id] = device
             }
         }
@@ -1138,7 +1486,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 self.clipboardSender = ClipboardSender(fingerprint: newFingerprint, localProtocol: targetProtocol)
                 
                 // Clear discovered devices to force fresh discovery
-                let keptDevices = devices.filter { historyDeviceIds.contains($0.key) || selectedDeviceId == $0.key }
+                let keptDevices = devices.filter {
+                    let groupKey = self.deviceGroupKey(for: $0.value)
+                    return self.historyDeviceGroupKeys.contains(groupKey) || self.selectedDeviceGroupKey == groupKey
+                }
                 self.devices = keptDevices
                 
                 startDiscovery()
@@ -1183,14 +1534,43 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     port: 53317,
                     deviceModel: "Remote Device",
                     deviceType: "desktop",
-                    version: "2.1",
+                    version: "2.3",
                     https: false,
                     download: true,
                     lastSeen: Date()
                 )
                 self.devices[manualDevice.id] = manualDevice
-                self.selectedDeviceId = manualDevice.id
+                self.selectedDeviceGroupKey = self.deviceGroupKey(for: manualDevice)
+                self.preferredDeviceIdsByGroup[self.selectedDeviceGroupKey] = manualDevice.id
             }
+        }
+    }
+    
+    private func setAutoClipboardSyncEnabled(_ enabled: Bool, showInfoIfEnabling: Bool) {
+        if isAutoClipboardSyncEnabled != enabled {
+            isAutoClipboardSyncEnabled = enabled
+        }
+        
+        guard enabled, showInfoIfEnabling else {
+            return
+        }
+        
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Auto Clipboard Sync Requires AirSend on Android"
+        alert.informativeText = """
+        The official LocalSend app can receive clipboard content manually, but background auto-send is only supported with the AirSend Android build.
+        
+        This setup requires root-level integration (Magisk + LSPosed). It is intended for users with Android modding experience.
+        
+        Repository: \(androidAirSendRepository)
+        """
+        alert.addButton(withTitle: "Open Repository")
+        alert.addButton(withTitle: "Continue")
+        
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn, let url = URL(string: androidAirSendRepository) {
+            NSWorkspace.shared.open(url)
         }
     }
     
@@ -1211,7 +1591,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         menuScanTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 // Stop scanning if a specific device is selected or being connected
-                if self?.selectedDeviceId != "broadcast" || self?.connectingDeviceId != nil {
+                if self?.selectedDeviceGroupKey != self?.broadcastSelectionKey || self?.connectingSelectionKey != nil {
                     print("📡 Menu: Active selection/connection detected, stopping aggressive scan.")
                     self?.menuScanTimer?.invalidate()
                     self?.menuScanTimer = nil
@@ -1231,29 +1611,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
     
     @objc func deviceSelected(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String else { 
+        guard let selectionKey = sender.representedObject as? String else {
             print("🚨 Selector ERROR: Missing ID in representedObject")
             return 
         }
         
-        print("🚨 Selector: User clicked device ID [\(id)]")
+        print("🚨 Selector: User clicked selection [\(selectionKey)]")
         
-        if id == "broadcast" {
-            self.selectedDeviceId = id
+        if selectionKey == broadcastSelectionKey {
+            self.selectedDeviceGroupKey = broadcastSelectionKey
             return
         }
         
-        // For physical devices, we handle it via handleDeviceClick now 
-        // derived from the custom view for smoother stay-open behavior.
-        handleDeviceClick(id: id, closeMenu: true)
+        // For physical devices, we handle it via handleDeviceClick now
+        handleDeviceClick(id: selectionKey, closeMenu: true)
     }
 
     func handleDeviceClick(id: String, closeMenu: Bool) {
         print("🚨 App: Handling device click for [\(id)], closeMenu: \(closeMenu)")
         
-        if connectingDeviceId == id { return }
+        if connectingSelectionKey == id { return }
         
-        self.connectingDeviceId = id
+        self.connectingSelectionKey = id
         
         // If it's a manual selection that SHOULD close the menu (like from broadcast), 
         // we let it. But for Wi-Fi style, we stay open.
@@ -1261,8 +1640,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         // Simulate connection delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             print("🚨 App: Connection successful for [\(id)]")
-            self.connectingDeviceId = nil
-            self.selectedDeviceId = id
+            self.connectingSelectionKey = nil
+            
+            if id == self.broadcastSelectionKey {
+                self.selectedDeviceGroupKey = self.broadcastSelectionKey
+                return
+            }
+            
+            let decoded = self.decodeSelectionActionKey(id)
+            if let groupKey = decoded.groupKey {
+                self.selectedDeviceGroupKey = groupKey
+            } else if let deviceId = decoded.deviceId, let device = self.devices[deviceId] {
+                let groupKey = self.deviceGroupKey(for: device)
+                self.preferredDeviceIdsByGroup[groupKey] = deviceId
+                self.selectedDeviceGroupKey = groupKey
+            } else if let legacyDevice = self.devices[id] {
+                let groupKey = self.deviceGroupKey(for: legacyDevice)
+                self.preferredDeviceIdsByGroup[groupKey] = legacyDevice.id
+                self.selectedDeviceGroupKey = groupKey
+            } else {
+                self.selectedDeviceGroupKey = self.broadcastSelectionKey
+            }
             
             if closeMenu {
                 // If it was a deep action, maybe close now. 
@@ -1275,15 +1673,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     func forgetDevice(id: String) {
         print("🚨 App: Forgetting device [\(id)]")
         
+        let decoded = decodeSelectionActionKey(id)
+        let groupKey: String
+        if let directGroupKey = decoded.groupKey {
+            groupKey = directGroupKey
+        } else if let deviceId = decoded.deviceId, let device = devices[deviceId] {
+            groupKey = deviceGroupKey(for: device)
+        } else if let legacyDevice = devices[id] {
+            groupKey = deviceGroupKey(for: legacyDevice)
+        } else {
+            groupKey = id
+        }
+        
         // 1. Remove from history ONLY
         // We do NOT remove from 'devices' dictionary so it remains visible in "Other Devices"
-        var currentHistory = historyDeviceIds
-        currentHistory.remove(id)
-        historyDeviceIds = currentHistory
+        var currentHistory = historyDeviceGroupKeys
+        currentHistory.remove(groupKey)
+        historyDeviceGroupKeys = currentHistory
+        preferredDeviceIdsByGroup.removeValue(forKey: groupKey)
         
         // 2. If it was selected, fallback to broadcast
-        if selectedDeviceId == id {
-            selectedDeviceId = "broadcast"
+        if selectedDeviceGroupKey == groupKey {
+            selectedDeviceGroupKey = broadcastSelectionKey
         }
         
         // 3. Update UI
@@ -1384,4 +1795,3 @@ let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
 app.run()
-

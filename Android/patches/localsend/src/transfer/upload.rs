@@ -196,6 +196,8 @@ pub async fn register_upload(
     let session_id = &params.session_id;
     let file_id = &params.file_id;
     let token = &params.token;
+    
+    println!("📥 [register_upload] Received body: {} bytes, fileId: {}, sessionId: {}", body.len(), file_id, session_id);
 
     // Get session and validate
     let mut sessions_lock = sessions.lock().await;

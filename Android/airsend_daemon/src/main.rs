@@ -267,38 +267,86 @@ async fn process_command(cmd: &str, state: &AppState) -> Result<()> {
 }
 
 async fn send_data(state: &AppState, target_id_opt: Option<String>, data: &str, is_text: bool) -> Result<()> {
-    let mut retries = 0;
-    // 💡 提取出 target_id 和 target_addr
-    let (target_id, target_addr) = loop {
-        {
-            let peers = state.client.peers.lock().await;
-            if let Some(tid) = &target_id_opt {
-                if let Some((addr, _)) = peers.get(tid) {
+    if let Some(tid) = target_id_opt {
+        let mut retries = 0;
+        let (target_id, target_addr) = loop {
+            {
+                let peers = state.client.peers.lock().await;
+                if let Some((addr, _)) = peers.get(&tid) {
                     tracing::info!("🔍 指定发送: [{}] {}", tid, addr);
                     break (tid.clone(), addr.to_string());
                 }
-            } else {
-                if let Some((id, (addr, _))) = peers.iter().next() {
-                    tracing::info!("🔍 UDP 缓存命中! 发现目标自动抓取: [{}] {}", id, addr);
-                    break (id.clone(), addr.to_string());
+            }
+            if retries >= 10 {
+                anyhow::bail!("Target not found: {}", tid);
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            retries += 1;
+        };
+        return send_to_target(state, &target_id, &target_addr, data, is_text).await;
+    }
+
+    // 自动模式：遍历所有候选 peer，避免卡死在陈旧 IP 上。
+    let mut rounds = 0;
+    let mut last_error: Option<anyhow::Error> = None;
+    loop {
+        let candidates: Vec<(String, String)> = {
+            let peers = state.client.peers.lock().await;
+            peers
+                .iter()
+                .map(|(id, (addr, _))| (id.clone(), addr.to_string()))
+                .collect()
+        };
+
+        if candidates.is_empty() {
+            if rounds >= 10 {
+                anyhow::bail!("No target found");
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            rounds += 1;
+            continue;
+        }
+
+        tracing::info!("🔎 自动发送候选数量: {}", candidates.len());
+        for (target_id, target_addr) in candidates {
+            tracing::info!("🔍 UDP 缓存命中! 自动尝试目标: [{}] {}", target_id, target_addr);
+            match send_to_target(state, &target_id, &target_addr, data, is_text).await {
+                Ok(_) => return Ok(()),
+                Err(err) => {
+                    tracing::warn!("⚠️ 目标 [{}] 发送失败: {}", target_id, err);
+                    last_error = Some(err);
+                    // 清理失效目标，避免后续继续命中老 IP。
+                    let mut peers = state.client.peers.lock().await;
+                    peers.remove(&target_id);
                 }
             }
         }
-        if retries >= 10 { anyhow::bail!("No target found"); }
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        retries += 1;
-    };
 
+        if rounds >= 2 {
+            return Err(last_error.unwrap_or_else(|| anyhow::anyhow!("No reachable target found")));
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        rounds += 1;
+    }
+}
+
+async fn send_to_target(
+    state: &AppState,
+    target_id: &str,
+    target_addr: &str,
+    data: &str,
+    is_text: bool,
+) -> Result<()> {
     if is_text {
         tracing::info!("🚀 正在向 [{}] {} 发起 HTTPS 握手...", target_id, target_addr);
         // 🚨 关键修复 1：传入 target_id 而不是 target_addr
-        if let Err(e) = send_text_protocol(&state.client, &target_id, data).await {
+        if let Err(e) = send_text_protocol(&state.client, target_id, data).await {
             tracing::error!("❌ HTTPS 发送彻底失败，底层错误链:\n{:#?}", e);
-            return Err(e.into());
+            return Err(e);
         }
     } else {
         // 🚨 关键修复 2：send_file 同样需要 target_id 作为参数
-        state.client.send_file(target_id, PathBuf::from(data)).await?;
+        state.client.send_file(target_id.to_string(), PathBuf::from(data)).await?;
     }
     tracing::info!("✅ 发送成功！");
     Ok(())

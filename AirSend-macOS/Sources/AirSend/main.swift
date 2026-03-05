@@ -624,14 +624,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         let currentCount = NSPasteboard(name: .drag).changeCount
         let hasPayload = hasFilePayloadInDragPasteboard()
         let detectedByChangeCount = (currentCount != lastDragCount)
-        // Only activate by polling when this drag pasteboard has a fresh changeCount edge
-        // and it contains local file payload.
-        if detectedByChangeCount && hasPayload {
+        // Some drag sources don't reliably bump changeCount at drag start.
+        // Probe payload directly as a fallback so first-approach detection still works.
+        let detectedByPayloadProbe = !isDragging && !detectedByChangeCount && hasPayload
+
+        // Activate when:
+        // 1) a fresh changeCount edge with file payload is observed, OR
+        // 2) payload probe confirms a file drag even before changeCount updates.
+        if (detectedByChangeCount && hasPayload) || detectedByPayloadProbe {
             // 检测到新的 drag，更新计数并标记状态
             lastDragCount = currentCount
             hasFreshDragPayloadChange = true
             isDragging = true
             dropZoneWindow.isDuringDrag = true  // 同步到 DropZoneWindow，让 show() 使用 orderFront
+            if detectedByPayloadProbe {
+                FileLogger.log("🧲 [DragDetect] Activated by payload probe (no changeCount edge yet).")
+            }
             // 🔋 升速到 0.1s（仅在空闲态时切换，避免重复 invalidate）
             if dragMonitorTimer?.timeInterval != 0.1 {
                 setDragTimerInterval(0.1)
@@ -689,10 +697,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 
                 if hadDragNearWindow && isNearWindow && !dropZoneWindow.isPerformingDrop {
                     if !hasFreshDragPayloadChange {
-                        FileLogger.log("⚠️ [DragFallback] Skipped: no fresh drag payload change observed.")
-                        dropZoneWindow.hide()
-                        hasFreshDragPayloadChange = false
-                        return
+                        FileLogger.log("⚠️ [DragFallback] No fresh changeCount edge. Probing pasteboard directly.")
                     }
                     let pboard = NSPasteboard(name: .drag)
                     let opts: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
@@ -701,6 +706,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                         let validURLs = filterValidLocalDropURLs(urls)
                         if validURLs.isEmpty {
                             FileLogger.log("⚠️ [DragFallback] Ignored non-local/non-existent payload.")
+                            hasFreshDragPayloadChange = false
                             dropZoneWindow.hide()
                             return
                         }
@@ -728,6 +734,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                                 && !self.dropZoneWindow.isPerformingDrop
                                 && !self.dropZoneWindow.isAcceptingDragSession {
                                 FileLogger.log("🚨 App: Drop timeout (1.5s)，force hiding.")
+                                self.hasFreshDragPayloadChange = false
                                 self.dropZoneWindow.hide()
                             }
                         }
@@ -807,6 +814,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         // Some drag sources don't update NSPasteboard.changeCount in time.
         // Latch drag-active state as soon as AppKit tells us drag entered.
         isDragging = true
+        hasFreshDragPayloadChange = true
         dropZoneWindow.isDuringDrag = true
         lastDragCount = NSPasteboard(name: .drag).changeCount
         if dragMonitorTimer?.timeInterval != 0.1 {
@@ -1738,7 +1746,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     port: 53317,
                     deviceModel: "Remote Device",
                     deviceType: "desktop",
-                    version: "2.4",
+                    version: "2.4.1",
                     https: false,
                     download: true,
                     lastSeen: Date()

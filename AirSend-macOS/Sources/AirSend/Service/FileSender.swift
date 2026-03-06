@@ -226,7 +226,7 @@ actor FileSender {
         
         let infoDto = RegisterDto(
             alias: alias,
-            version: "2.4.1",
+            version: "2.4.2",
             deviceModel: deviceModel,
             deviceType: deviceType.rawValue,
             fingerprint: myFingerprint,
@@ -248,7 +248,7 @@ actor FileSender {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("LocalSend/2.4.1", forHTTPHeaderField: "User-Agent")
+        request.setValue("LocalSend/2.4.2", forHTTPHeaderField: "User-Agent")
         request.setValue("close", forHTTPHeaderField: "Connection")
         request.timeoutInterval = 60.0 // Give user 60s to click "Accept"
         
@@ -377,7 +377,7 @@ actor FileSender {
         request.httpMethod = "POST"
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         request.setValue("\(fileSize)", forHTTPHeaderField: "Content-Length")
-        request.setValue("LocalSend/2.4.1", forHTTPHeaderField: "User-Agent")
+        request.setValue("LocalSend/2.4.2", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 300
         
         // Create a dedicated upload session with performance tuning

@@ -43,6 +43,24 @@ version = "0.4.2"
 [dependencies.chrono]
 version = "0.4.39"
 
+[dependencies.hyper]
+version = "1.8.1"
+features = [
+    "server",
+    "http1",
+    "http2",
+]
+
+[dependencies.hyper-util]
+version = "0.1.20"
+features = [
+    "server",
+    "tokio",
+    "http1",
+    "http2",
+    "service",
+]
+
 [dependencies.mime]
 version = "0.3.17"
 
@@ -55,6 +73,18 @@ version = "0.7.0"
 [dependencies.reqwest]
 version = "0.12.9"
 features = ["json"]
+
+[dependencies.socket2]
+version = "0.6.2"
+
+[dependencies.rustls]
+version = "0.23.36"
+default-features = false
+features = [
+    "ring",
+    "std",
+    "tls12",
+]
 
 [dependencies.serde]
 version = "1.0.216"
@@ -74,6 +104,18 @@ version = "2.0.6"
 
 [dependencies.tokio]
 version = "1.42.0"
+
+[dependencies.tokio-rustls]
+version = "0.26.4"
+default-features = false
+features = [
+    "ring",
+    "tls12",
+]
+
+[dependencies.tower]
+version = "0.5.3"
+features = ["util"]
 
 [dependencies.tower-http]
 version = "0.6.2"

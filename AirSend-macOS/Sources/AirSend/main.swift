@@ -1303,15 +1303,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 
-                // Track if this is a truly new device (id not in keys)
-                let isNewDevice = self.devices[device.id] == nil
+                let previousDevice = self.devices[device.id]
+                let isNewDevice = previousDevice == nil
+                let endpointChanged = previousDevice?.ip != device.ip
+                    || previousDevice?.port != device.port
+                    || previousDevice?.https != device.https
+                let metadataChanged = previousDevice?.alias != device.alias
+                    || previousDevice?.deviceModel != device.deviceModel
+                    || previousDevice?.deviceType != device.deviceType
+                    || previousDevice?.version != device.version
+                    || previousDevice?.download != device.download
                 
                 // Update device state (important for heartbeat/lastSeen)
                 self.devices[device.id] = device
                 
-                // Only trigger expensive UI rebuild if it's a new discovery
+                // Only rebuild UI when the device is new or its reachable endpoint changed.
                 if isNewDevice {
                     logTransfer("✅ Discovery: Found device [\(device.alias)] at \(device.ip):\(device.port)")
+                    self.updateMenu()
+                } else if endpointChanged || metadataChanged {
+                    logTransfer("🔁 Discovery: Updated device [\(device.alias)] -> \(device.ip):\(device.port)")
                     self.updateMenu()
                 }
             }
@@ -1746,7 +1757,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     port: 53317,
                     deviceModel: "Remote Device",
                     deviceType: "desktop",
-                    version: "2.4.1",
+                    version: "2.4.2",
                     https: false,
                     download: true,
                     lastSeen: Date()

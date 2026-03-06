@@ -23,6 +23,15 @@ fail() {
   exit 1
 }
 
+prepare_module_scripts() {
+  local script
+
+  for script in "$MAGISK_DIR"/service.sh "$MAGISK_DIR"/customize.sh "$MAGISK_DIR"/post-fs-data.sh; do
+    [[ -f "$script" ]] || continue
+    chmod 0755 "$script"
+  done
+}
+
 cleanup_renamed_duplicates() {
   local target="$1"
   local dir
@@ -166,6 +175,7 @@ package_magisk_module() {
 main() {
   ensure_prereqs
   detect_ndk_home
+  prepare_module_scripts
   build_daemon
   build_apk
   package_magisk_module

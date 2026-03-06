@@ -2,6 +2,12 @@ import Foundation
 import Network
 
 final class UDPDiscoveryService: @unchecked Sendable {
+    private struct DiscoveryBinding {
+        let interfaceName: String
+        let ipAddress: String
+        let nwInterface: NWInterface
+    }
+
     private var group: NWConnectionGroup?
     private let multicastGroupAddress = "224.0.0.167"
     private let port: NWEndpoint.Port = 53317
@@ -24,6 +30,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
     private var broadcastListener: NWListener? // Extra listener for raw broadcast
     private var lastFailureReportAt: Date = .distantPast
     private let failureReportCooldown: TimeInterval = 1.0
+    private lazy var discoveryBinding: DiscoveryBinding? = Self.resolveDiscoveryBinding()
     
     private func reportTransportFailure(_ reason: String) {
         let now = Date()
@@ -39,9 +46,14 @@ final class UDPDiscoveryService: @unchecked Sendable {
         let multicastPort = NWEndpoint.Port(integerLiteral: 53317)
         let multicastEndpoint = NWEndpoint.hostPort(host: multicastHost, port: multicastPort)
         
-        // ... (Existing Multicast Logic)
         let parameters = NWParameters.udp
         parameters.allowLocalEndpointReuse = true
+        if let binding = discoveryBinding {
+            parameters.requiredInterface = binding.nwInterface
+            FileLogger.log("📡 Discovery bound to \(binding.interfaceName) (\(binding.ipAddress))")
+        } else {
+            FileLogger.log("⚠️ Discovery interface auto-selection failed; using system default")
+        }
         
         // Define the multicast group
         guard let groupDescriptor = try? NWMulticastGroup(for: [multicastEndpoint]) else {
@@ -88,13 +100,14 @@ final class UDPDiscoveryService: @unchecked Sendable {
     }
     
     private func setupBroadcast() {
-        // Use a generic UDP configuration without binding to a local port
         let host = NWEndpoint.Host("255.255.255.255")
         let port = NWEndpoint.Port(integerLiteral: 53317)
         let parameters = NWParameters.udp
         parameters.allowLocalEndpointReuse = true
+        if let binding = discoveryBinding {
+            parameters.requiredInterface = binding.nwInterface
+        }
         
-        // Use a connection without an explicit local endpoint to avoid 53317 collision
         let connection = NWConnection(host: host, port: port, using: parameters)
         
         connection.stateUpdateHandler = { [weak self] newState in
@@ -124,7 +137,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
     func sendAnnouncement(isAnnouncement: Bool = true) {
         let dto = MulticastDto(
             alias: alias,
-            version: "2.4.1",
+            version: "2.4.2",
             deviceModel: deviceModel,
             deviceType: deviceType.rawValue,
             fingerprint: fingerprint,
@@ -230,6 +243,129 @@ final class UDPDiscoveryService: @unchecked Sendable {
         } catch {
             let contentString = String(data: content, encoding: .utf8) ?? "binary data"
             FileLogger.log("❌ Discovery: Failed to decode UDP message from \(source). Error: \(error). Content: \(contentString)")
+        }
+    }
+
+    private static func resolveDiscoveryBinding() -> DiscoveryBinding? {
+        guard let preferred = preferredIPv4Interface() else {
+            return nil
+        }
+
+        let monitor = NWPathMonitor()
+        let queue = DispatchQueue(label: "AirSend.UDPDiscovery.Path")
+        let semaphore = DispatchSemaphore(value: 0)
+
+        monitor.pathUpdateHandler = { path in
+            semaphore.signal()
+        }
+        monitor.start(queue: queue)
+        _ = semaphore.wait(timeout: .now() + 1)
+        let interfaces = monitor.currentPath.availableInterfaces
+        monitor.cancel()
+
+        guard let nwInterface =
+            interfaces.first(where: { $0.name == preferred.name }) ??
+            interfaces.first(where: { $0.type == .wifi }) ??
+            interfaces.first(where: { $0.type == .wiredEthernet })
+        else {
+            return nil
+        }
+
+        return DiscoveryBinding(
+            interfaceName: preferred.name,
+            ipAddress: preferred.address,
+            nwInterface: nwInterface
+        )
+    }
+
+    private static func preferredIPv4Interface() -> (name: String, address: String)? {
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0 else {
+            return nil
+        }
+        defer { freeifaddrs(ifaddr) }
+
+        var best: (priority: Int, name: String, address: String)?
+        var ptr = ifaddr
+
+        while ptr != nil {
+            defer { ptr = ptr?.pointee.ifa_next }
+            guard
+                let interface = ptr?.pointee,
+                let addr = interface.ifa_addr,
+                addr.pointee.sa_family == UInt8(AF_INET),
+                let cString = interface.ifa_name
+            else {
+                continue
+            }
+
+            let name = String(cString: cString)
+            if shouldSkipInterface(name) {
+                continue
+            }
+
+            var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            getnameinfo(
+                addr,
+                socklen_t(addr.pointee.sa_len),
+                &hostname,
+                socklen_t(hostname.count),
+                nil,
+                socklen_t(0),
+                NI_NUMERICHOST
+            )
+            let address = String(decoding: hostname.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+            guard isPrivateLANIPv4(address) else {
+                continue
+            }
+
+            let priority = interfacePriority(name)
+            if best == nil || priority < best!.priority {
+                best = (priority, name, address)
+            }
+        }
+
+        return best.map { ($0.name, $0.address) }
+    }
+
+    private static func shouldSkipInterface(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        return lower.hasPrefix("lo")
+            || lower.hasPrefix("utun")
+            || lower.hasPrefix("awdl")
+            || lower.hasPrefix("llw")
+            || lower.hasPrefix("bridge")
+    }
+
+    private static func interfacePriority(_ name: String) -> Int {
+        let lower = name.lowercased()
+        if lower == "en0" {
+            return 0
+        }
+        if lower.hasPrefix("en") {
+            return 10
+        }
+        if lower.hasPrefix("bridge") {
+            return 20
+        }
+        return 30
+    }
+
+    private static func isPrivateLANIPv4(_ address: String) -> Bool {
+        let octets = address.split(separator: ".").compactMap { Int($0) }
+        guard octets.count == 4 else {
+            return false
+        }
+
+        switch (octets[0], octets[1]) {
+        case (10, _):
+            return true
+        case (172, 16...31):
+            return true
+        case (192, 168):
+            return true
+        default:
+            return false
         }
     }
 }

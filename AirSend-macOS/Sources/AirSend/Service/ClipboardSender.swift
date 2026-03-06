@@ -71,7 +71,7 @@ actor ClipboardSender {
             preview: nil
         )
         
-        let infoDto = RegisterDto(alias: alias, version: "2.4.1", deviceModel: deviceModel, deviceType: deviceType.rawValue, fingerprint: myFingerprint, port: 53317, protocolType: localProtocol.rawValue, download: true)
+        let infoDto = RegisterDto(alias: alias, version: "2.4.2", deviceModel: deviceModel, deviceType: deviceType.rawValue, fingerprint: myFingerprint, port: 53317, protocolType: localProtocol.rawValue, download: true)
         
         let requestDto = PrepareUploadRequestDto(info: infoDto, files: [fileId: fileDto])
         request.httpBody = try JSONEncoder().encode(requestDto)
@@ -134,7 +134,7 @@ actor ClipboardSender {
         
         let infoDto = RegisterDto(
             alias: alias,
-            version: "2.4.1",
+            version: "2.4.2",
             deviceModel: deviceModel,
             deviceType: deviceType.rawValue,
             fingerprint: myFingerprint,

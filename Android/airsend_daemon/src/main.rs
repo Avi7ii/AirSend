@@ -6,21 +6,195 @@ use notify::{Watcher, RecursiveMode, EventKind, event::ModifyKind, event::Rename
 
 use tracing_subscriber::fmt::format::FmtSpan;
 use anyhow::{Result, Context};
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-use localsend::Client;
+use localsend::{Client, TlsIdentity};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use localsend::models::file::FileMetadata;
+use localsend::models::device::DeviceInfo;
 use bytes::Bytes;
 use std::time::Duration;
 use std::process::Command;
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use tokio::sync::mpsc;
+use openssl::{
+    asn1::Asn1Time,
+    bn::{BigNum, MsbOption},
+    hash::MessageDigest,
+    nid::Nid,
+    pkey::PKey,
+    rsa::Rsa,
+    x509::{
+        extension::{AuthorityKeyIdentifier, BasicConstraints, ExtendedKeyUsage, KeyUsage, SubjectAlternativeName, SubjectKeyIdentifier},
+        X509,
+        X509NameBuilder,
+    },
+};
 
 const UDS_PATH: &str = "\0airsend_ipc";
 
 const LOG_PATH: &str = "/data/local/tmp";
 const LOG_FILE: &str = "airsend_daemon.log";
+const TLS_DIR: &str = "/data/adb/airsend";
+const TLS_CERT_PATH: &str = "/data/adb/airsend/server-cert.pem";
+const TLS_KEY_PATH: &str = "/data/adb/airsend/server-key.pem";
+
+#[derive(Clone)]
+struct PreparedTlsIdentity {
+    cert_pem: Vec<u8>,
+    key_pem: Vec<u8>,
+    fingerprint: String,
+}
+
+fn fingerprint_for_cert(cert: &X509) -> Result<String> {
+    let digest = cert.digest(MessageDigest::sha256())?;
+    Ok(digest.iter().map(|byte| format!("{:02x}", byte)).collect())
+}
+
+fn write_private_file(path: &str, bytes: &[u8], mode: u32) -> Result<()> {
+    fs::write(path, bytes).with_context(|| format!("Failed to write {}", path))?;
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))
+        .with_context(|| format!("Failed to chmod {}", path))?;
+    Ok(())
+}
+
+fn load_tls_identity() -> Result<PreparedTlsIdentity> {
+    let cert_pem = fs::read(TLS_CERT_PATH).with_context(|| format!("Failed to read {}", TLS_CERT_PATH))?;
+    let key_pem = fs::read(TLS_KEY_PATH).with_context(|| format!("Failed to read {}", TLS_KEY_PATH))?;
+    let cert = X509::from_pem(&cert_pem).context("Failed to parse TLS certificate PEM")?;
+    let fingerprint = fingerprint_for_cert(&cert)?;
+
+    Ok(PreparedTlsIdentity {
+        cert_pem,
+        key_pem,
+        fingerprint,
+    })
+}
+
+fn generate_tls_identity() -> Result<PreparedTlsIdentity> {
+    fs::create_dir_all(TLS_DIR).with_context(|| format!("Failed to create {}", TLS_DIR))?;
+    fs::set_permissions(TLS_DIR, fs::Permissions::from_mode(0o700))
+        .with_context(|| format!("Failed to chmod {}", TLS_DIR))?;
+
+    let rsa = Rsa::generate(2048).context("Failed to generate RSA key")?;
+    let pkey = PKey::from_rsa(rsa).context("Failed to wrap RSA key")?;
+
+    let mut name_builder = X509NameBuilder::new().context("Failed to create X509NameBuilder")?;
+    name_builder
+        .append_entry_by_nid(Nid::COMMONNAME, "AirSend Android Module")
+        .context("Failed to set certificate CN")?;
+    let name = name_builder.build();
+
+    let mut serial = BigNum::new().context("Failed to create serial bignum")?;
+    serial
+        .rand(64, MsbOption::MAYBE_ZERO, false)
+        .context("Failed to randomize certificate serial")?;
+    let serial = serial.to_asn1_integer().context("Failed to encode certificate serial")?;
+
+    let mut builder = X509::builder().context("Failed to create X509 builder")?;
+    builder.set_version(2).context("Failed to set X509 version")?;
+    builder
+        .set_serial_number(&serial)
+        .context("Failed to set certificate serial")?;
+    builder
+        .set_subject_name(&name)
+        .context("Failed to set subject name")?;
+    builder
+        .set_issuer_name(&name)
+        .context("Failed to set issuer name")?;
+    builder.set_pubkey(&pkey).context("Failed to set public key")?;
+
+    let not_before = Asn1Time::days_from_now(0).context("Failed to set not_before")?;
+    builder
+        .set_not_before(not_before.as_ref())
+        .context("Failed to apply not_before")?;
+    let not_after = Asn1Time::days_from_now(3650).context("Failed to set not_after")?;
+    builder
+        .set_not_after(not_after.as_ref())
+        .context("Failed to apply not_after")?;
+
+    let basic_constraints = BasicConstraints::new()
+        .critical()
+        .build()
+        .context("Failed to build BasicConstraints")?;
+    builder
+        .append_extension(basic_constraints)
+        .context("Failed to append BasicConstraints")?;
+
+    let key_usage = KeyUsage::new()
+        .digital_signature()
+        .key_encipherment()
+        .build()
+        .context("Failed to build KeyUsage")?;
+    builder
+        .append_extension(key_usage)
+        .context("Failed to append KeyUsage")?;
+
+    let extended_key_usage = ExtendedKeyUsage::new()
+        .server_auth()
+        .build()
+        .context("Failed to build ExtendedKeyUsage")?;
+    builder
+        .append_extension(extended_key_usage)
+        .context("Failed to append ExtendedKeyUsage")?;
+
+    let subject_key_identifier = SubjectKeyIdentifier::new()
+        .build(&builder.x509v3_context(None, None))
+        .context("Failed to build SubjectKeyIdentifier")?;
+    builder
+        .append_extension(subject_key_identifier)
+        .context("Failed to append SubjectKeyIdentifier")?;
+
+    let authority_key_identifier = AuthorityKeyIdentifier::new()
+        .keyid(true)
+        .build(&builder.x509v3_context(None, None))
+        .context("Failed to build AuthorityKeyIdentifier")?;
+    builder
+        .append_extension(authority_key_identifier)
+        .context("Failed to append AuthorityKeyIdentifier")?;
+
+    let subject_alt_name = SubjectAlternativeName::new()
+        .dns("localhost")
+        .ip("127.0.0.1")
+        .build(&builder.x509v3_context(None, None))
+        .context("Failed to build SubjectAlternativeName")?;
+    builder
+        .append_extension(subject_alt_name)
+        .context("Failed to append SubjectAlternativeName")?;
+
+    builder
+        .sign(&pkey, MessageDigest::sha256())
+        .context("Failed to sign certificate")?;
+
+    let cert = builder.build();
+    let cert_pem = cert.to_pem().context("Failed to encode certificate PEM")?;
+    let key_pem = pkey
+        .private_key_to_pem_pkcs8()
+        .context("Failed to encode private key PEM")?;
+    let fingerprint = fingerprint_for_cert(&cert)?;
+
+    write_private_file(TLS_CERT_PATH, &cert_pem, 0o644)?;
+    write_private_file(TLS_KEY_PATH, &key_pem, 0o600)?;
+
+    Ok(PreparedTlsIdentity {
+        cert_pem,
+        key_pem,
+        fingerprint,
+    })
+}
+
+fn load_or_create_tls_identity() -> Result<PreparedTlsIdentity> {
+    match load_tls_identity() {
+        Ok(identity) => Ok(identity),
+        Err(err) => {
+            warn!("现有 TLS 证书不可用，准备重建: {err:#}");
+            generate_tls_identity()
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -42,26 +216,48 @@ async fn main() -> Result<()> {
         .context(format!("Failed to bind abstract UDS: {:?}", UDS_PATH))?;
     info!("🚀 Successfully bound to UDS: {}", UDS_PATH);
 
+    let tls_identity = load_or_create_tls_identity().context("Failed to initialize TLS identity")?;
+    info!("🔐 TLS 设备指纹: {}", tls_identity.fingerprint);
+    let device_info = DeviceInfo::headless_with_identity(tls_identity.fingerprint.clone(), "https");
+
     // 2. 🛡️ 引入韧性轮询：等待系统网络底层设备 (wlan0/tun0) 挂载完成
     let mut client = loop {
-        match Client::default().await {
+        match Client::with_config(device_info.clone(), 53317, "/sdcard/Download/AirSend".to_string()).await {
             Ok(c) => {
                 tracing::info!("🌐 网络设备就绪，LocalSend 客户端初始化成功！");
                 break c;
             }
-            Err(_) => {
-                tracing::warn!("等待网络硬件驱动就绪 (os error 19)... 2秒后重试");
+            Err(error) => {
+                tracing::warn!("等待局域网接口就绪: {}... 2秒后重试", error);
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
         }
     };
 
     // 原有的构建 HTTP Client 逻辑保持不变
-    client.http_client = reqwest::Client::builder()
+    let mut http_client_builder = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
-        .no_proxy() // 🔪 彻底物理切断所有内置代理探测逻辑
+        .no_proxy(); // 🔪 彻底物理切断所有内置代理探测逻辑
+
+    if !client.multicast_interface.is_unspecified() {
+        http_client_builder =
+            http_client_builder.local_address(IpAddr::V4(client.multicast_interface));
+    }
+
+    if let Some(interface) = client.bind_interface.as_deref() {
+        http_client_builder = http_client_builder.interface(interface);
+        tracing::info!("🌐 出站网络绑定: {} ({})", interface, client.multicast_interface);
+    } else if !client.multicast_interface.is_unspecified() {
+        tracing::info!("🌐 出站网络绑定: {}", client.multicast_interface);
+    }
+
+    client.http_client = http_client_builder
         .build()
         .context("Failed to build insecure HTTP client")?;
+    client.tls_identity = Some(TlsIdentity {
+        cert_pem: tls_identity.cert_pem.clone(),
+        key_pem: tls_identity.key_pem.clone(),
+    });
 
     let state = Arc::new(AppState {
         client,
@@ -99,6 +295,87 @@ async fn main() -> Result<()> {
 struct AppState {
     client: Client,
     preferred_target: Mutex<Option<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum IpcCommand {
+    GetPeers,
+    SendText {
+        target_id: Option<String>,
+        text: String,
+    },
+    SendFile {
+        target_id: Option<String>,
+        path: String,
+    },
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct JsonIpcCommand {
+    op: String,
+    #[serde(default, rename = "targetId")]
+    target_id: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
+}
+
+fn parse_ipc_command(raw: &str) -> Result<IpcCommand> {
+    if let Ok(command) = serde_json::from_str::<JsonIpcCommand>(raw) {
+        return match command.op.as_str() {
+            "get_peers" => Ok(IpcCommand::GetPeers),
+            "send_text" => Ok(IpcCommand::SendText {
+                target_id: command.target_id,
+                text: command.text.ok_or_else(|| anyhow::anyhow!("Missing text payload"))?,
+            }),
+            "send_file" => Ok(IpcCommand::SendFile {
+                target_id: command.target_id,
+                path: command.path.ok_or_else(|| anyhow::anyhow!("Missing path payload"))?,
+            }),
+            _ => Err(anyhow::anyhow!("Unknown IPC op: {}", command.op)),
+        };
+    }
+
+    if raw == "GET_PEERS" {
+        return Ok(IpcCommand::GetPeers);
+    }
+
+    if let Some(text) = raw.strip_prefix("SEND_TEXT:") {
+        return Ok(IpcCommand::SendText {
+            target_id: None,
+            text: text.to_string(),
+        });
+    }
+
+    if let Some(rest) = raw.strip_prefix("SEND_TEXT_TO:") {
+        let (target_id, text) = rest
+            .split_once(':')
+            .ok_or_else(|| anyhow::anyhow!("Malformed SEND_TEXT_TO command"))?;
+        return Ok(IpcCommand::SendText {
+            target_id: Some(target_id.to_string()),
+            text: text.to_string(),
+        });
+    }
+
+    if let Some(path) = raw.strip_prefix("SEND_FILE:") {
+        return Ok(IpcCommand::SendFile {
+            target_id: None,
+            path: path.to_string(),
+        });
+    }
+
+    if let Some(rest) = raw.strip_prefix("SEND_FILE_TO:") {
+        let (target_id, path) = rest
+            .split_once(':')
+            .ok_or_else(|| anyhow::anyhow!("Malformed SEND_FILE_TO command"))?;
+        return Ok(IpcCommand::SendFile {
+            target_id: Some(target_id.to_string()),
+            path: path.to_string(),
+        });
+    }
+
+    Err(anyhow::anyhow!("Unknown IPC command"))
 }
 
 // 确保你传入了包含 LocalSend 客户端的 state
@@ -208,16 +485,15 @@ async fn handle_client(stream: UnixStream, state: Arc<AppState>) -> Result<()> {
     let mut buf_reader = BufReader::new(reader);
     let mut line = String::new();
     while buf_reader.read_line(&mut line).await? != 0 {
-        let cmd = line.trim();
+        let cmd = line.strip_suffix('\n').unwrap_or(&line);
+        let cmd = cmd.strip_suffix('\r').unwrap_or(cmd);
         if !cmd.is_empty() {
-            let state_ref = state.clone();
-            let cmd_owned = cmd.to_string();
-            
-            if cmd_owned == "GET_PEERS" {
+            match parse_ipc_command(cmd) {
+                Ok(IpcCommand::GetPeers) => {
                 #[derive(serde::Serialize)]
                 struct PeerDto { id: String, alias: String, device_model: String }
                 
-                let peers = state_ref.client.peers.lock().await;
+                let peers = state.client.peers.lock().await;
                 let mut peer_list = Vec::new();
                 for (id, (_, info)) in peers.iter() {
                     peer_list.push(PeerDto {
@@ -232,12 +508,16 @@ async fn handle_client(stream: UnixStream, state: Arc<AppState>) -> Result<()> {
                         error!("Write GET_PEERS error: {:?}", e);
                     }
                 }
-            } else {
-                tokio::spawn(async move {
-                    if let Err(e) = process_command(&cmd_owned, &state_ref).await {
-                        error!("Command failed: {} -> {:?}", cmd_owned, e);
-                    }
-                });
+                }
+                Ok(command) => {
+                    let state_ref = state.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = process_command(command, &state_ref).await {
+                            error!("Command failed: {:?}", e);
+                        }
+                    });
+                }
+                Err(e) => warn!("Invalid IPC command {:?}: {}", cmd, e),
             }
         }
         line.clear();
@@ -245,22 +525,14 @@ async fn handle_client(stream: UnixStream, state: Arc<AppState>) -> Result<()> {
     Ok(())
 }
 
-async fn process_command(cmd: &str, state: &AppState) -> Result<()> {
-    if let Some(text) = cmd.strip_prefix("SEND_TEXT:") {
-        send_data(state, None, text, true).await?;
-    } else if let Some(rest) = cmd.strip_prefix("SEND_TEXT_TO:") {
-        if let Some(idx) = rest.find(':') {
-            let target_id = &rest[..idx];
-            let text = &rest[idx+1..];
-            send_data(state, Some(target_id.to_string()), text, true).await?;
+async fn process_command(command: IpcCommand, state: &AppState) -> Result<()> {
+    match command {
+        IpcCommand::GetPeers => {}
+        IpcCommand::SendText { target_id, text } => {
+            send_data(state, target_id, &text, true).await?;
         }
-    } else if let Some(path) = cmd.strip_prefix("SEND_FILE:") {
-        send_data(state, None, path, false).await?;
-    } else if let Some(rest) = cmd.strip_prefix("SEND_FILE_TO:") {
-        if let Some(idx) = rest.find(':') {
-            let target_id = &rest[..idx];
-            let path = &rest[idx+1..];
-            send_data(state, Some(target_id.to_string()), path, false).await?;
+        IpcCommand::SendFile { target_id, path } => {
+            send_data(state, target_id, &path, false).await?;
         }
     }
     Ok(())
@@ -391,4 +663,50 @@ pub async fn push_text_to_app(text: &str) -> anyhow::Result<()> {
     
     tracing::info!("✅ 成功将文本推送到 Android App");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_ipc_command, IpcCommand};
+
+    #[test]
+    fn parses_json_text_command_with_multiline_payload() {
+        let raw = r#"{"op":"send_text","targetId":"peer-1","text":"line1\nline2\n "}"#;
+
+        let command = parse_ipc_command(raw).unwrap();
+
+        assert_eq!(
+            command,
+            IpcCommand::SendText {
+                target_id: Some("peer-1".to_string()),
+                text: "line1\nline2\n ".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_legacy_text_command_without_trimming_payload() {
+        let command = parse_ipc_command("SEND_TEXT:  padded text  ").unwrap();
+
+        assert_eq!(
+            command,
+            IpcCommand::SendText {
+                target_id: None,
+                text: "  padded text  ".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_legacy_targeted_text_command_with_colons() {
+        let command = parse_ipc_command("SEND_TEXT_TO:peer-1:https://example.com:a").unwrap();
+
+        assert_eq!(
+            command,
+            IpcCommand::SendText {
+                target_id: Some("peer-1".to_string()),
+                text: "https://example.com:a".to_string(),
+            }
+        );
+    }
 }

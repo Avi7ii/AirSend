@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.airsend.core.utils.IpcCommandEncoder
 import com.airsend.core.utils.PathUtils
 import java.io.OutputStreamWriter
 import kotlin.concurrent.thread
@@ -51,7 +52,7 @@ class GhostActivity : AppCompatActivity() {
     private fun handleSendText(intent: Intent) {
         val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return
         Log.i(TAG, "Ghost sending text: ${text.take(20)}...")
-        sendToRustDaemon("SEND_TEXT:$text")
+        sendToRustDaemon(IpcCommandEncoder.sendText(text))
         Toast.makeText(this, "正在同步文字至 Mac...", Toast.LENGTH_SHORT).show()
     }
 
@@ -71,7 +72,7 @@ class GhostActivity : AppCompatActivity() {
             // 尝试解析真实物理路径
             val realPath = PathUtils.getRealPathFromURI(this, uri)
             if (realPath != null) {
-                sendToRustDaemon("SEND_FILE:$realPath")
+                sendToRustDaemon(IpcCommandEncoder.sendFile(realPath))
             } else {
                 // 如果解析失败（例如来自加密应用），目前 Daemon 暂不支持 content:// URI
                 // 可以在此扩展：通过 ContentResolver 读取流并写入临时文件再发送

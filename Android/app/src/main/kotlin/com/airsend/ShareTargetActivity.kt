@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.widget.Toast
+import com.airsend.core.utils.IpcCommandEncoder
 import com.airsend.core.utils.PathUtils
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
@@ -58,7 +59,7 @@ class ShareTargetActivity : Activity() {
                 } else {
                     val text = intent.getStringExtra(Intent.EXTRA_TEXT)
                     if (!text.isNullOrEmpty()) {
-                        sendToRustDaemon("SEND_TEXT_TO:$targetId:$text")
+                        sendToRustDaemon(IpcCommandEncoder.sendText(text, targetId))
                     } else {
                         Log.w(TAG, "ACTION_SEND ignored: no EXTRA_STREAM and no EXTRA_TEXT. type=${intent.type}")
                     }
@@ -78,7 +79,7 @@ class ShareTargetActivity : Activity() {
             socket.soTimeout = 2000
 
             val writer = OutputStreamWriter(socket.outputStream)
-            writer.write("GET_PEERS\n")
+            writer.write(IpcCommandEncoder.getPeers() + "\n")
             writer.flush()
 
             val reader = InputStreamReader(socket.inputStream)
@@ -104,7 +105,7 @@ class ShareTargetActivity : Activity() {
         thread {
             val realPath = PathUtils.getRealPathFromURI(this, uri)
             if (realPath != null) {
-                sendToRustDaemon("SEND_FILE_TO:$targetId:$realPath")
+                sendToRustDaemon(IpcCommandEncoder.sendFile(realPath, targetId))
             } else {
                 Log.e(TAG, "Failed to resolve URI: $uri")
                 Handler(Looper.getMainLooper()).post {

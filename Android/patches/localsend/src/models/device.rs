@@ -40,6 +40,12 @@ pub enum Protocol {
 
 impl Default for DeviceInfo {
     fn default() -> Self {
+        Self::headless_with_identity(Uuid::new_v4().to_string(), "https")
+    }
+}
+
+impl DeviceInfo {
+    pub fn headless_with_identity(fingerprint: String, protocol: impl Into<String>) -> Self {
         fn collapse_spaces(value: &str) -> String {
             value.split_whitespace().collect::<Vec<_>>().join(" ")
         }
@@ -143,19 +149,17 @@ impl Default for DeviceInfo {
 
         Self {
             alias: "AirSend Android Module".to_string(),
-            version: "2.4.1".to_string(),
+            version: "2.4.2".to_string(),
             device_model: model,
             device_type: Some(DeviceType::Headless),
-            fingerprint: Uuid::new_v4().to_string(),
+            fingerprint,
             port: 53317,
-            protocol: "https".to_string(),
+            protocol: protocol.into(),
             download: true,
             announce: Some(true),
         }
     }
-}
 
-impl DeviceInfo {
     pub fn to_json(&self) -> crate::error::Result<String> {
         Ok(serde_json::to_string(self)?)
     }

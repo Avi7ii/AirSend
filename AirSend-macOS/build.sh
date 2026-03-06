@@ -26,17 +26,26 @@ fi
 
 # Remove quarantine attribute (fix "App is damaged" error)
 xattr -cr "$APP_NAME.app"
+xattr -d -r com.apple.FinderInfo "$APP_NAME.app" 2>/dev/null || true
+xattr -d -r com.apple.fileprovider.fpfs#P "$APP_NAME.app" 2>/dev/null || true
+xattr -d -r com.apple.macl "$APP_NAME.app" 2>/dev/null || true
 
 # Sign with persistent local certificate (avoids re-granting permissions on each build)
 SIGNING_IDENTITY="GetBackMyWindowsCert"
 if security find-identity -v -p codesigning | grep -q "$SIGNING_IDENTITY"; then
     # Clean extended attributes (Finder info, resource forks) which cause signing errors
     xattr -cr "$APP_NAME.app"
+    xattr -d -r com.apple.FinderInfo "$APP_NAME.app" 2>/dev/null || true
+    xattr -d -r com.apple.fileprovider.fpfs#P "$APP_NAME.app" 2>/dev/null || true
+    xattr -d -r com.apple.macl "$APP_NAME.app" 2>/dev/null || true
     codesign --force --deep --sign "$SIGNING_IDENTITY" "$APP_NAME.app"
 else
     echo "⚠️  Certificate '$SIGNING_IDENTITY' not found, using ad-hoc signing"
     # Clean extended attributes (Finder info, resource forks) which cause signing errors
     xattr -cr "$APP_NAME.app"
+    xattr -d -r com.apple.FinderInfo "$APP_NAME.app" 2>/dev/null || true
+    xattr -d -r com.apple.fileprovider.fpfs#P "$APP_NAME.app" 2>/dev/null || true
+    xattr -d -r com.apple.macl "$APP_NAME.app" 2>/dev/null || true
     # Sign the App (Ad-hoc signature for local running)
     codesign --force --deep --sign - "$APP_NAME.app"
 fi

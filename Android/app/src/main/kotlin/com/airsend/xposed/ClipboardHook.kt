@@ -14,6 +14,7 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam
+import com.airsend.core.utils.IpcCommandEncoder
 import kotlin.concurrent.thread
 
 class ClipboardHook : IXposedHookLoadPackage {
@@ -134,7 +135,7 @@ class ClipboardHook : IXposedHookLoadPackage {
                 socket.connect(LocalSocketAddress(SOCKET_NAME, LocalSocketAddress.Namespace.ABSTRACT))
                 socket.soTimeout = 2000 
                 socket.outputStream.use { out ->
-                    out.write("SEND_TEXT:$text\n".toByteArray())
+                    out.write((IpcCommandEncoder.sendText(text) + "\n").toByteArray())
                     out.flush()
                 }
             } catch (e: Exception) {

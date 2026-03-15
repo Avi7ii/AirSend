@@ -8,7 +8,7 @@ use tracing_subscriber::fmt::format::FmtSpan;
 use anyhow::{Result, Context};
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
-use localsend::{current_network_binding, ports::{DISCOVERY_PORT, TRANSFER_PORT}, Client, TlsIdentity};
+use localsend::{campus_fallback::MAX_FALLBACK_BYTES, current_network_binding, ports::{DISCOVERY_PORT, TRANSFER_PORT}, Client, TlsIdentity};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -688,6 +688,13 @@ async fn send_to_target(
         let path = PathBuf::from(data);
         if let Err(e) = state.client.send_file(target_id.to_string(), path.clone()).await {
             tracing::warn!("⚠️ 直连文件发送失败，切换 Campus 组播 fallback: {:#?}", e);
+            let metadata = tokio::fs::metadata(&path).await?;
+            if metadata.len() > MAX_FALLBACK_BYTES as u64 {
+                return Err(anyhow::anyhow!(
+                    "Direct file send failed and campus fallback only supports files up to {} bytes",
+                    MAX_FALLBACK_BYTES
+                ));
+            }
             let bytes = tokio::fs::read(&path).await?;
             let file_name = path
                 .file_name()

@@ -1,10 +1,10 @@
+pub mod campus_fallback;
 pub mod discovery;
 pub mod error;
 pub mod models;
 pub mod ports;
 pub mod server;
 pub mod transfer;
-pub mod campus_fallback;
 
 use crate::models::device::DeviceInfo;
 use crate::ports::{DISCOVERY_PORT, TRANSFER_PORT};
@@ -12,11 +12,11 @@ use socket2::SockRef;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket as StdUdpSocket};
 use std::process::Command;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::UdpSocket;
-use tokio::task::JoinHandle;
-use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 use transfer::session::Session;
 
 #[derive(Clone)]
@@ -148,7 +148,9 @@ pub(crate) fn remember_peer_entry(
         }
 
         match (&existing_info.mac_address, &device.mac_address) {
-            (Some(existing_mac), Some(new_mac)) if !existing_mac.eq_ignore_ascii_case(new_mac) => true,
+            (Some(existing_mac), Some(new_mac)) if !existing_mac.eq_ignore_ascii_case(new_mac) => {
+                true
+            }
             _ => false,
         }
     });
@@ -239,17 +241,21 @@ fn detect_network_binding_from_route() -> Option<NetworkBinding> {
                 interface = parts.next().map(str::to_string);
             }
             "src" => {
-                ipv4 = parts.next().and_then(|value| value.parse::<Ipv4Addr>().ok());
+                ipv4 = parts
+                    .next()
+                    .and_then(|value| value.parse::<Ipv4Addr>().ok());
             }
             _ => {}
         }
     }
 
     match (interface, ipv4) {
-        (Some(interface), Some(ipv4)) if is_viable_lan_binding(&interface, ipv4) => Some(NetworkBinding {
-            interface: Some(interface),
-            ipv4: Some(ipv4),
-        }),
+        (Some(interface), Some(ipv4)) if is_viable_lan_binding(&interface, ipv4) => {
+            Some(NetworkBinding {
+                interface: Some(interface),
+                ipv4: Some(ipv4),
+            })
+        }
         _ => None,
     }
 }
@@ -351,10 +357,11 @@ impl Client {
             pinned_neighbors,
             campus_fallback,
         })
-
     }
 
-    pub async fn start(&self) -> crate::error::Result<(JoinHandle<()>, JoinHandle<()>, JoinHandle<()>)> {
+    pub async fn start(
+        &self,
+    ) -> crate::error::Result<(JoinHandle<()>, JoinHandle<()>, JoinHandle<()>)> {
         let server_handle = {
             let client = self.clone();
             tokio::spawn(async move {
@@ -402,7 +409,10 @@ impl Client {
         let Some(interface) = self.bind_interface.clone() else {
             return;
         };
-        let Some(mac_address) = peer_mac.map(str::trim).filter(|value| is_valid_mac_address(value)) else {
+        let Some(mac_address) = peer_mac
+            .map(str::trim)
+            .filter(|value| is_valid_mac_address(value))
+        else {
             return;
         };
 
@@ -433,11 +443,19 @@ impl Client {
             Ok(Ok(output)) if output.status.success() => {
                 let mut pinned = self.pinned_neighbors.lock().await;
                 pinned.insert(peer_key.clone(), mac_address.to_string());
-                eprintln!("Pinned peer neighbor {} -> {} on {}", peer_key, mac_address, interface);
+                eprintln!(
+                    "Pinned peer neighbor {} -> {} on {}",
+                    peer_key, mac_address, interface
+                );
             }
             Ok(Ok(output)) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                eprintln!("Failed to pin neighbor {} -> {}: {}", peer_key, mac_address, stderr.trim());
+                eprintln!(
+                    "Failed to pin neighbor {} -> {}: {}",
+                    peer_key,
+                    mac_address,
+                    stderr.trim()
+                );
             }
             Ok(Err(err)) => eprintln!("Failed to spawn ip neigh command: {}", err),
             Err(err) => eprintln!("Neighbor pin task failed: {}", err),
@@ -447,5 +465,8 @@ impl Client {
 
 fn is_valid_mac_address(value: &str) -> bool {
     let parts: Vec<_> = value.split(':').collect();
-    parts.len() == 6 && parts.iter().all(|part| part.len() == 2 && u8::from_str_radix(part, 16).is_ok())
+    parts.len() == 6
+        && parts
+            .iter()
+            .all(|part| part.len() == 2 && u8::from_str_radix(part, 16).is_ok())
 }

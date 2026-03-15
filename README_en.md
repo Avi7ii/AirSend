@@ -47,6 +47,7 @@ It consists of two parts:
 | Android Background     | Depends on system process management | Rust daemon, independent of App lifecycle       |
 | System-Level Clipboard | ❌                                    | ✅ (Requires Root + LSPosed)                     |
 | Campus LAN path        | ❌ No manual HTTP compatibility path  | ✅ Manual HTTP compatibility mode (default off) |
+| Large campus-subnet discovery | ❌ Easy to lose visibility once multicast is suppressed | ✅ `/24` slice expansion + remembered-host keepalive |
 | Drag-and-drop UX       | Standard window drag target          | ✅ Prewarmed DropZone, anti-bounce, background minimize |
 | Protocol Compatibility | ✅ LocalSend standard                 | ✅ Fully compatible with LocalSend               |
 
@@ -75,8 +76,11 @@ AirSend 3.0.0 adds a **manual, default-off** `HTTP Compatibility Mode` specifica
 - The default remains **secure HTTPS mode**, so normal home-network usage and standard compatibility with official LocalSend stay intact
 - If devices can discover each other on a campus network but transfers keep stalling, turn on `Advanced -> Compatibility Mode (HTTP)` in the macOS menu bar
 - Once enabled, macOS exposes a plain-HTTP receive path, and the sender performs a real data-plane preflight before sending so it can choose the path that actually works on that LAN
+- If campus policy suppresses UDP multicast, AirSend can expand discovery by `/24` slices across a large subnet and also remember the last reachable device IP for lightweight re-probing and list keepalive
+- In practice, AirSend now addresses not only “device discovered but transfer unusable”, but also “after switching to campus Wi-Fi the phone is missing from the menu again”
 - This compatibility path is an extra AirSend capability built for difficult LANs; **official LocalSend does not currently provide it**
 - For home routers and mobile hotspots, leaving the default HTTPS mode on is still recommended
+- The compatibility path itself is also tighter now: no silent downgrade by default, better cancellation and timeout cleanup, small-payload fallback boundaries, and session/source binding to reduce packet mixups
 
 ### 📋 Two-Way Clipboard Sync
 
@@ -150,13 +154,13 @@ flowchart TB
         end
 
         subgraph Mac_Network ["Network.framework - Dual Engine"]
-            UDP_Disc["UDPDiscoveryService / Port 53317 / LAN Broadcast / Compatibility Discovery"]:::mac_node
+            UDP_Disc["UDPDiscoveryService / Port 53317 / LAN Broadcast / `/24` Expansion / Remembered Host Probe"]:::mac_node
             HTTP_Trans["HTTPTransferServer / HTTPS Default + HTTP Compatibility / Port 53318 / Per-Conn Queue"]:::mac_node
             CertMgr -->|"Inject TLS Identity"| HTTP_Trans
         end
 
         subgraph Mac_Send ["Send Engines"]
-            FileSender["FileSender / HTTPS Default / HTTP Preflight / Broadcast or Unicast"]:::mac_node
+            FileSender["FileSender / HTTPS Default / HTTP Preflight / Small-Payload Fallback"]:::mac_node
             ClipSender["ClipboardSender / Text as clipboard.txt / Image as PNG / Compatibility Aware"]:::mac_node
         end
 
@@ -231,9 +235,11 @@ flowchart TB
 
 - **Yellow links**: LocalSend HTTPS is the default transport path; in compatibility mode AirSend can switch the LAN data path to plain HTTP for difficult campus-style networks
 - **Blue area (macOS)**: Pure Swift, default `Network.framework` HTTPS receiver, plus a manually enabled plain-HTTP compatibility receiver for difficult LANs
+- **UDPDiscoveryService**: Beyond normal discovery, it also handles `/24` expansion on large subnets and remembered-host re-probing so the device list does not disappear so easily on campus Wi-Fi
 - **Green area (Android App)**: Kotlin foreground service, polls daemon every 30s for online devices, updates Direct Share shortcuts
 - **Purple area (Xposed)**: Runs in `system_server` process, bypasses Android 10+ background clipboard restrictions via UID 1000, also serves as the Mac→Android direction endpoint of the IPC bus
 - **Orange area (Rust Daemon)**: `arm64-v8a` native process, independent of App lifecycle, communicates via two Unix domain sockets (`@airsend_ipc` and `@airsend_app_ipc`), and handles rebinding on unstable LAN changes
+- **Campus fallback boundary**: the compatibility fallback is intended as a small-payload recovery path on difficult LANs, not as a universal large-file traversal layer
 
 </details>
 
@@ -352,6 +358,8 @@ After setup, clipboard sync, screenshot auto-send, and Direct Share shortcuts al
 
 Confirm both devices are on the same Wi-Fi and that the router doesn't have "AP Isolation" or "Client Isolation" enabled (some routers enable this by default). Firewall must allow UDP 53317 and TCP 53317-53319. Also try clicking **Rescan and Refresh** in the Mac menu.
 
+On large campus-style subnets, AirSend now first tries remembered-host recovery and then falls back to `/24` expansion probing, so the very first recovery can still take a while. Once the device is found again, later keepalive is much faster.
+
 ---
 
 **Q: On campus Wi-Fi the devices can discover each other, but every transfer times out or feels unusable. What should I do?**
@@ -361,6 +369,17 @@ If mobile hotspot or home Wi-Fi works but the campus LAN does not, the problem i
 - Home network / hotspot: keep the default HTTPS mode
 - Campus / dorm LAN: use AirSend full mode and manually enable `Advanced -> Compatibility Mode (HTTP)` on macOS
 - Official LocalSend: it currently **does not** provide this manual HTTP compatibility path
+
+---
+
+**Q: After switching to campus Wi-Fi, the phone is missing from the device list, or it appears once and disappears again. What should I do?**
+
+AirSend 3.0.0 now has two recovery layers for this:
+
+- first recovery by `/24` expansion across large subnets when multicast is suppressed
+- later keepalive by remembering the last reachable device IP and re-probing it directly
+
+So the first recovery may still take some time, but once the phone is found again the list should stay much more stable. If the campus network uses strict client isolation or fully blocks device-to-device traffic, that is beyond what local compatibility logic can fix.
 
 ---
 

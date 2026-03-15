@@ -6,17 +6,20 @@ use std::time::Duration;
 
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, Query, State};
+use axum::http::StatusCode;
 use axum::Extension;
 use axum::{response::IntoResponse, Json};
-use axum::http::StatusCode;
 
+use crate::error::{LocalSendError, Result};
+use crate::transfer::session::{Session, SessionStatus};
+use crate::{
+    models::{device::DeviceInfo, file::FileMetadata},
+    remember_peer_entry, Client,
+};
 use native_dialog::MessageDialog;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use crate::error::{LocalSendError, Result};
-use crate::transfer::session::{Session, SessionStatus};
-use crate::{models::{device::DeviceInfo, file::FileMetadata}, remember_peer_entry, Client};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,7 +36,11 @@ pub struct PrepareUploadRequest {
 }
 
 impl Client {
-    pub async fn prepare_upload(&self, peer: String, files: HashMap<String, FileMetadata>) -> Result<PrepareUploadResponse> {
+    pub async fn prepare_upload(
+        &self,
+        peer: String,
+        files: HashMap<String, FileMetadata>,
+    ) -> Result<PrepareUploadResponse> {
         if !self.peers.lock().await.contains_key(&peer) {
             return Err(LocalSendError::PeerNotFound);
         }
@@ -43,7 +50,11 @@ impl Client {
 
         let response = self
             .http_client
-            .post(&format!("{}://{}/api/localsend/v2/prepare-upload", peer.1.protocol, peer.0.clone()))
+            .post(&format!(
+                "{}://{}/api/localsend/v2/prepare-upload",
+                peer.1.protocol,
+                peer.0.clone()
+            ))
             .header("Connection", "close")
             .timeout(Duration::from_secs(12))
             .json(&PrepareUploadRequest {
@@ -67,12 +78,21 @@ impl Client {
             addr: peer.0,
         };
 
-        self.sessions.lock().await.insert(response.session_id.clone(), session);
+        self.sessions
+            .lock()
+            .await
+            .insert(response.session_id.clone(), session);
 
         Ok(response)
     }
 
-    pub async fn upload(&self, session_id: String, file_id: String, token: String, body: Bytes) -> Result<()> {
+    pub async fn upload(
+        &self,
+        session_id: String,
+        file_id: String,
+        token: String,
+        body: Bytes,
+    ) -> Result<()> {
         let sessions = self.sessions.lock().await;
         let session = sessions.get(&session_id).unwrap();
 
@@ -86,7 +106,10 @@ impl Client {
 
         let request = self
             .http_client
-            .post(&format!("{}://{}/api/localsend/v2/upload?sessionId={}&fileId={}&token={}", session.receiver.protocol, session.addr, session_id, file_id, token))
+            .post(&format!(
+                "{}://{}/api/localsend/v2/upload?sessionId={}&fileId={}&token={}",
+                session.receiver.protocol, session.addr, session_id, file_id, token
+            ))
             .header("Connection", "close")
             .timeout(Duration::from_secs(180))
             //.post(&format!("https://webhook.site/2f23a529-b687-4375-ad5f-54906ab26ac7?session_id={}&file_id={}&token={}", session_id, file_id, token))
@@ -115,7 +138,9 @@ impl Client {
         let prepare_response = self.prepare_upload(peer, files).await?;
 
         // Get file token
-        let token = prepare_response.files.get(&file_metadata.id)
+        let token = prepare_response
+            .files
+            .get(&file_metadata.id)
             .ok_or(LocalSendError::InvalidToken)?;
 
         // Read file contents
@@ -127,8 +152,9 @@ impl Client {
             prepare_response.session_id,
             file_metadata.id,
             token.clone(),
-            bytes
-        ).await?;
+            bytes,
+        )
+        .await?;
 
         Ok(())
     }
@@ -139,7 +165,10 @@ impl Client {
 
         let request = self
             .http_client
-            .post(&format!("{}://{}/api/localsend/v2/cancel?sessionId={}", session.receiver.protocol, session.addr, session_id))
+            .post(&format!(
+                "{}://{}/api/localsend/v2/cancel?sessionId={}",
+                session.receiver.protocol, session.addr, session_id
+            ))
             .header("Connection", "close")
             .timeout(Duration::from_secs(10))
             .send()
@@ -175,9 +204,11 @@ pub async fn register_prepare_upload(
     if result {
         let session_id = Uuid::new_v4().to_string();
 
-        let file_tokens: HashMap<String, String> = req.files.iter()
-                                                      .map(|(id, _)| (id.clone(), Uuid::new_v4().to_string())) // Replace with actual token logic
-                                                      .collect();
+        let file_tokens: HashMap<String, String> = req
+            .files
+            .iter()
+            .map(|(id, _)| (id.clone(), Uuid::new_v4().to_string())) // Replace with actual token logic
+            .collect();
 
         let session = Session {
             session_id: session_id.clone(),
@@ -191,11 +222,14 @@ pub async fn register_prepare_upload(
 
         sessions.lock().await.insert(session_id.clone(), session);
 
-        return (StatusCode::OK,
-                Json(PrepareUploadResponse {
-                    session_id,
-                    files: file_tokens,
-                })).into_response();
+        return (
+            StatusCode::OK,
+            Json(PrepareUploadResponse {
+                session_id,
+                files: file_tokens,
+            }),
+        )
+            .into_response();
     } else {
         return StatusCode::FORBIDDEN.into_response();
     }
@@ -211,8 +245,13 @@ pub async fn register_upload(
     let session_id = &params.session_id;
     let file_id = &params.file_id;
     let token = &params.token;
-    
-    println!("📥 [register_upload] Received body: {} bytes, fileId: {}, sessionId: {}", body.len(), file_id, session_id);
+
+    println!(
+        "📥 [register_upload] Received body: {} bytes, fileId: {}, sessionId: {}",
+        body.len(),
+        file_id,
+        session_id
+    );
 
     // Get session and validate
     let mut sessions_lock = sessions.lock().await;
@@ -221,9 +260,8 @@ pub async fn register_upload(
         None => return StatusCode::BAD_REQUEST.into_response(),
     };
 
-
     if session.status != SessionStatus::Active {
-        return StatusCode::BAD_REQUEST.into_response()
+        return StatusCode::BAD_REQUEST.into_response();
     }
 
     // Validate token
@@ -234,11 +272,13 @@ pub async fn register_upload(
     // Get file metadata
     let file_metadata = match session.files.get(file_id) {
         Some(metadata) => metadata,
-        None => return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "File not found".to_string(),
-        )
-            .into_response(),
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "File not found".to_string(),
+            )
+                .into_response()
+        }
     };
 
     // ==========================================
@@ -247,18 +287,21 @@ pub async fn register_upload(
     if file_metadata.file_type == "text/plain" {
         let text_content = String::from_utf8_lossy(&body).to_string();
         println!("📥 拦截到纯文本/剪贴板数据，长度: {}", text_content.len());
-        
+
         // 异步推给 Android App 的 LocalServerSocket
         tokio::spawn(async move {
-            use tokio::net::UnixStream;
             use tokio::io::AsyncWriteExt;
+            use tokio::net::UnixStream;
             match UnixStream::connect("\0airsend_app_ipc").await {
                 Ok(mut stream) => {
                     let _ = stream.write_all(text_content.as_bytes()).await;
                     let _ = stream.shutdown().await;
                     println!("✅ 成功将文本推送到 Android App IPC 总线");
                 }
-                Err(e) => println!("❌ 无法连接到 App IPC (请确保App在前台运行且已启动 Reverse IPC): {}", e),
+                Err(e) => println!(
+                    "❌ 无法连接到 App IPC (请确保App在前台运行且已启动 Reverse IPC): {}",
+                    e
+                ),
             }
         });
 
@@ -270,7 +313,9 @@ pub async fn register_upload(
     // ==========================================
     // 🧠 智能分流落盘路径
     // ==========================================
-    let actual_dir = if file_metadata.file_type.starts_with("image/") || file_metadata.file_type.starts_with("video/") {
+    let actual_dir = if file_metadata.file_type.starts_with("image/")
+        || file_metadata.file_type.starts_with("video/")
+    {
         "/sdcard/Pictures/AirSend".to_string()
     } else {
         download_dir.clone()
@@ -297,7 +342,10 @@ pub async fn register_upload(
         let path = std::path::Path::new(&file_metadata.file_name);
 
         // 提取文件名本体和扩展名 (例如: "photo.png" -> stem: "photo", ext: "png")
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or(&file_metadata.file_name);
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&file_metadata.file_name);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         // 组装新的带序号的文件名
@@ -325,12 +373,16 @@ pub async fn register_upload(
     // ==========================================
     // 📷 触发 Android 媒体扫描器
     // ==========================================
-    if file_metadata.file_type.starts_with("image/") || file_metadata.file_type.starts_with("video/") {
+    if file_metadata.file_type.starts_with("image/")
+        || file_metadata.file_type.starts_with("video/")
+    {
         let _ = std::process::Command::new("am")
             .args(&[
                 "broadcast",
-                "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
-                "-d", &format!("file://{}", file_path)
+                "-a",
+                "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
+                "-d",
+                &format!("file://{}", file_path),
             ])
             .spawn();
         println!("📸 媒体已落盘至 {}，并触发系统相册刷新", file_path);

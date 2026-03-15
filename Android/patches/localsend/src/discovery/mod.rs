@@ -12,8 +12,8 @@ impl Client {
         Ok(())
     }
 
-    async fn process_device(&self, message: &str, src: SocketAddr ) {
-        if self.maybe_handle_campus_message(message).await {
+    async fn process_device(&self, message: &str, src: SocketAddr) {
+        if self.maybe_handle_campus_message(message, src).await {
             return;
         }
         if let Ok(device) = serde_json::from_str::<DeviceInfo>(message) {
@@ -24,7 +24,8 @@ impl Client {
             let mut src = src;
             src.set_port(device.port); // Update the port to the one the device sent
 
-            self.maybe_pin_peer_neighbor(src.ip(), device.mac_address.as_deref()).await;
+            self.maybe_pin_peer_neighbor(src.ip(), device.mac_address.as_deref())
+                .await;
 
             let mut peers = self.peers.lock().await;
             remember_peer_entry(&mut peers, src, device.clone());

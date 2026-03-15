@@ -243,6 +243,14 @@ actor ClipboardSender {
         } catch {
             guard let campusFallback else { throw error }
             logTransfer("⚠️ Direct image send failed for \(device.alias), switching to campus multicast fallback: \(error.localizedDescription)")
+            let fallbackLimit = CampusFallbackCoordinator.maximumPayloadBytes
+            guard imageData.count <= fallbackLimit else {
+                throw NSError(
+                    domain: "CampusFallback",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Direct image send failed and campus fallback only supports files up to \(fallbackLimit) bytes"]
+                )
+            }
             try await campusFallback.sendFile(
                 data: imageData,
                 fileName: screenshotName,

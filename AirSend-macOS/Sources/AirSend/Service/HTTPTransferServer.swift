@@ -666,7 +666,7 @@ actor HTTPTransferServer {
         do {
             let responseDto = RegisterDto(
                 alias: alias,
-                version: "3.0.0",
+                version: "3.0.1",
                 deviceModel: deviceModel,
                 deviceType: deviceType.rawValue,
                 fingerprint: fingerprint,
@@ -705,7 +705,7 @@ actor HTTPTransferServer {
             
             let responseDto = RegisterDto(
                 alias: alias,
-                version: "3.0.0",
+                version: "3.0.1",
                 deviceModel: deviceModel,
                 deviceType: deviceType.rawValue,
                 fingerprint: fingerprint,

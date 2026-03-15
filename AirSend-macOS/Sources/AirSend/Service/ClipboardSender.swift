@@ -131,7 +131,7 @@ actor ClipboardSender {
             url: url.absoluteString,
             method: "GET",
             headers: [
-                "User-Agent: LocalSend/3.0.0",
+                "User-Agent: LocalSend/3.0.1",
                 "Connection: close"
             ],
             timeout: 4.0
@@ -275,7 +275,7 @@ actor ClipboardSender {
             preview: nil
         )
         
-        let infoDto = RegisterDto(alias: alias, version: "3.0.0", deviceModel: deviceModel, deviceType: deviceType.rawValue, fingerprint: myFingerprint, macAddress: LocalNetworkIdentity.primaryHardwareAddress(), port: Int(NetworkPorts.transferPort), protocolType: localProtocol.rawValue, download: true)
+        let infoDto = RegisterDto(alias: alias, version: "3.0.1", deviceModel: deviceModel, deviceType: deviceType.rawValue, fingerprint: myFingerprint, macAddress: LocalNetworkIdentity.primaryHardwareAddress(), port: Int(NetworkPorts.transferPort), protocolType: localProtocol.rawValue, download: true)
         
         let requestDto = PrepareUploadRequestDto(info: infoDto, files: [fileId: fileDto])
         let bodyFile = try writeTemporaryData(try JSONEncoder().encode(requestDto), suffix: "json")
@@ -293,7 +293,7 @@ actor ClipboardSender {
                     method: "POST",
                     headers: [
                         "Content-Type: application/json",
-                        "User-Agent: LocalSend/3.0.0",
+                        "User-Agent: LocalSend/3.0.1",
                         "Connection: close"
                     ],
                     bodyFile: bodyFile,
@@ -337,7 +337,7 @@ actor ClipboardSender {
             method: "POST",
             headers: [
                 "Content-Type: application/octet-stream",
-                "User-Agent: LocalSend/3.0.0",
+                "User-Agent: LocalSend/3.0.1",
                 "Connection: close"
             ],
             bodyFile: bodyFile,
@@ -363,7 +363,7 @@ actor ClipboardSender {
         
         let infoDto = RegisterDto(
             alias: alias,
-            version: "3.0.0",
+            version: "3.0.1",
             deviceModel: deviceModel,
             deviceType: deviceType.rawValue,
             fingerprint: myFingerprint,
@@ -394,7 +394,7 @@ actor ClipboardSender {
                     method: "POST",
                     headers: [
                         "Content-Type: application/json",
-                        "User-Agent: LocalSend/3.0.0",
+                        "User-Agent: LocalSend/3.0.1",
                         "Connection: close"
                     ],
                     bodyFile: bodyFile,
@@ -459,7 +459,7 @@ actor ClipboardSender {
             method: "POST",
             headers: [
                 "Content-Type: application/octet-stream",
-                "User-Agent: LocalSend/3.0.0",
+                "User-Agent: LocalSend/3.0.1",
                 "Connection: close"
             ],
             bodyFile: bodyFile,

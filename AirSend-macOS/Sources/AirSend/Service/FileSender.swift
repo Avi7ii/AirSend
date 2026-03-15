@@ -53,7 +53,7 @@ actor FileSender {
     
     /// Cancel the current upload immediately
     /// Cancel the current upload immediately
-    func cancelCurrentTransfer() {
+    func cancelCurrentTransfer() async {
         logTransfer("🛑 [FileSender] cancelCurrentTransfer called. isCancelled: \(isCancelled), activeSessions count: \(activeSessions.count), activeProcesses count: \(activeProcesses.count)")
         isCancelled = true
         for session in activeSessions {
@@ -66,6 +66,9 @@ actor FileSender {
         }
         activeSessions.removeAll()
         activeProcesses.removeAll()
+        if let campusFallback {
+            await campusFallback.cancelAllOutgoingTransfers()
+        }
         logTransfer("🛑 [FileSender] All uploads cancelled by user/system")
         onCancelled?()
     }
@@ -254,8 +257,16 @@ actor FileSender {
                 throw error
             }
             logTransfer("⚠️ Direct file send failed for \(device.alias), switching to campus multicast fallback: \(error.localizedDescription)")
+            let fallbackLimit = CampusFallbackCoordinator.maximumPayloadBytes
             for (fileId, fileDto) in context.fileDtos {
                 guard let fileURL = context.fileMap[fileId] else { continue }
+                guard fileDto.size <= Int64(fallbackLimit) else {
+                    throw NSError(
+                        domain: "CampusFallback",
+                        code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "Direct file send failed and campus fallback only supports files up to \(fallbackLimit) bytes"]
+                    )
+                }
                 let data = try Data(contentsOf: fileURL)
                 try await campusFallback.sendFile(
                     data: data,

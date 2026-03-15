@@ -47,6 +47,7 @@ AirSend 是一套专为 **Mac + Android** 用户设计的跨平台互联工具�
 | Android 后台保活 | 依赖系统进程管理     | Rust 守护进程，脱离 App 生命周期 |
 | 系统级剪贴板访问 | ❌                    | ✅（需 Root + LSPosed）           |
 | 校园网兼容路径   | ❌ 无手动 HTTP 兼容链路 | ✅ 手动 HTTP 兼容模式（默认关闭） |
+| 大网段校园网发现 | ❌ 多播失效时容易直接失联 | ✅ `/24` 扩散探测 + 已知设备回找保活 |
 | 复杂拖拽体验     | 常规主窗口拖放       | ✅ DropZone 预热、防弹回、后台最小化 |
 | 协议兼容性       | ✅ LocalSend 标准协议 | ✅ 完全兼容 LocalSend 协议        |
 
@@ -75,8 +76,11 @@ AirSend 3.0.0 新增了一个**默认关闭、需手动开启**的 `HTTP 兼容�
 - 默认仍是 **HTTPS 安全模式**，不会影响正常家庭网络或与官方 LocalSend 的标准协议互通
 - 当校园网里 **能发现但发不出去** 时，可在 macOS 菜单栏 `Advanced -> Compatibility Mode (HTTP)` 手动打开兼容模式
 - 打开后，Mac 端会启用 plain HTTP 接收链路；发送端会在真正发文件/文字前做一次数据面预检，尽量选择当前校网里真正可通的传输路径
+- 如果校园网把 UDP multicast 压掉，AirSend 会在大网段里按 `/24` 切片扩散探测，并额外记住最近可达的设备 IP，后续通过轻量级回找探测让设备列表更快恢复、更不容易消失
+- 也就是说，AirSend 解决的不只是“能发现但传不动”，也包括“切到校园网后菜单里经常看不到手机”这一类设备列表稳定性问题
 - 这条兼容路径是 AirSend 针对复杂局域网额外做的能力，**官方 LocalSend 当前做不到**
 - 建议只在校园网/宿舍网这类异常环境下开启；家庭路由器和热点仍推荐保持默认 HTTPS
+- 兼容链路本身也做了边界收口：默认不静默降级、增加取消和超时回收、限制 fallback 仅处理小 payload，并通过来源绑定与 session nonce 降低串包风险
 
 ### 📋 剪贴板双向同步
 
@@ -149,13 +153,13 @@ flowchart TB
         end
 
         subgraph Mac_Network ["Network.framework - 双引擎"]
-            UDP_Disc["UDPDiscoveryService / 端口 53317 / 局域网广播 / 兼容探测"]:::mac_node
+            UDP_Disc["UDPDiscoveryService / 端口 53317 / 局域网广播 / `/24` 扩散探测 / 已知设备回找"]:::mac_node
             HTTP_Trans["HTTPTransferServer / HTTPS 默认 + HTTP 兼容 / 端口 53318 / 独立连接队列"]:::mac_node
             CertMgr -->|"注入 TLS 身份"| HTTP_Trans
         end
 
         subgraph Mac_Send ["发送引擎"]
-            FileSender["文件发送器 / HTTPS 默认 / HTTP 兼容预检 / 广播或单播"]:::mac_node
+            FileSender["文件发送器 / HTTPS 默认 / HTTP 兼容预检 / 小 payload fallback"]:::mac_node
             ClipSender["剪贴板发送器 / 文字为 clipboard.txt / 图片为 PNG / 兼容模式支持"]:::mac_node
         end
 
@@ -230,9 +234,11 @@ flowchart TB
 
 - **黄色链路**：默认是 LocalSend 协议的 HTTPS 传输通道；开启兼容模式后会切到 plain HTTP，专门应对复杂校园网
 - **蓝色区域（macOS 端）**：纯 Swift 实现，默认走 `Network.framework` HTTPS 接收，同时提供可手动启用的 plain HTTP 兼容接收器
+- **UDPDiscoveryService**：除常规发现外，还负责大网段 `/24` 扩散探测和已知设备回找，解决校园网里“设备列表经常空白”的问题
 - **绿色区域（Android App 层）**：Kotlin 前台服务，每 30 秒轮询守护进程获取在线设备，更新 Direct Share 快捷方式
 - **紫色区域（Xposed 层）**：运行在 `system_server` 进程中，以 UID 1000 权限绕过 Android 10+ 的后台剪贴板访问限制，同时作为双向 IPC 总线的 Mac→Android 方向终点
 - **橙色区域（Rust Daemon）**：独立于 App 生命周期的 `arm64-v8a` 原生进程，通过两条 Unix 域套接字（`@airsend_ipc` 和 `@airsend_app_ipc`）分别与 Kotlin App 层和 Xposed 层通信，并负责复杂网络下的重绑恢复
+- **Campus fallback 边界**：兼容链路只作为复杂网络下的小 payload 兜底，不是通用大文件穿透方案
 
 </details>
 
@@ -342,6 +348,8 @@ Android 端分两种模式：
 
 确认两台设备在同一 Wi-Fi 下，且路由器没有开启「AP 隔离」或「无线客户端隔离」功能（部分路由器默认开启此选项）。防火墙需放行 UDP 53317，以及 TCP 53317-53319。并尝试在 Mac 菜单中点击 `Rescan and Refresh`。
 
+如果是在校园网、宿舍网这种大网段里，AirSend 会优先尝试已知设备回找，再做 `/24` 扩散探测，所以第一次恢复出来可能仍需要几十秒；一旦重新找到，后续列表保活会明显更快。
+
 ---
 
 **Q：校园网里能发现设备，但一发就超时或几乎不可用怎么办？**
@@ -351,6 +359,17 @@ Android 端分两种模式：
 - 家庭网络 / 热点：保持默认 HTTPS 即可
 - 校园网 / 宿舍网：使用 AirSend 完整模式，并在 Mac 菜单栏 `Advanced -> Compatibility Mode (HTTP)` 手动开启兼容模式
 - 官方 LocalSend：目前**没有** AirSend 这条手动 HTTP 兼容路径
+
+---
+
+**Q：切到校园网后，设备列表里一开始看不到手机，或者出现后又消失怎么办？**
+
+AirSend 3.0.0 现在已经补上两层恢复逻辑：
+
+- 首次恢复：在多播失效的大网段里做 `/24` 扩散探测
+- 后续保活：记住上次可达的设备 IP，并做轻量级回找探测
+
+所以这种场景下先等第一次恢复完成，之后通常会稳定很多。如果学校网络明确启用了客户端隔离或彻底禁止终端互访，那就超出了 AirSend 本地兼容策略能解决的范围。
 
 ---
 

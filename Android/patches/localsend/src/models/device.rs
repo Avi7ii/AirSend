@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use std::process::Command;
 use crate::ports::TRANSFER_PORT;
+use serde::{Deserialize, Serialize};
+use std::process::Command;
+use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
@@ -52,7 +52,7 @@ impl DeviceInfo {
         fn collapse_spaces(value: &str) -> String {
             value.split_whitespace().collect::<Vec<_>>().join(" ")
         }
-        
+
         fn normalize_model_display(raw: &str) -> String {
             let mut value = collapse_spaces(raw.trim());
             if value.contains("一加") {
@@ -68,7 +68,7 @@ impl DeviceInfo {
             }
             value
         }
-        
+
         fn read_prop(key: &str) -> Option<String> {
             Command::new("getprop")
                 .arg(key)
@@ -82,7 +82,7 @@ impl DeviceInfo {
                         && !s.eq_ignore_ascii_case("null")
                 })
         }
-        
+
         fn codename_to_marketing_name(value: &str) -> Option<&'static str> {
             match value.trim().to_ascii_lowercase().as_str() {
                 // OnePlus 13T codename
@@ -90,7 +90,7 @@ impl DeviceInfo {
                 _ => None,
             }
         }
-        
+
         fn is_likely_codename(value: &str) -> bool {
             let candidate = value.trim();
             if candidate.is_empty() || candidate.contains(' ') {
@@ -98,9 +98,11 @@ impl DeviceInfo {
             }
             candidate.len() >= 3
                 && candidate.len() <= 12
-                && candidate.chars().all(|c| c.is_ascii_lowercase() || c == '_' || c == '-')
+                && candidate
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c == '_' || c == '-')
         }
-        
+
         fn detect_model_name() -> Option<String> {
             let preferred_keys = [
                 "ro.vendor.oplus.market.name",
@@ -126,28 +128,29 @@ impl DeviceInfo {
                 "ro.product.device",
                 "ro.product.system.device",
             ];
-            
+
             let mut codename_fallback: Option<String> = None;
             for key in preferred_keys.into_iter().chain(fallback_keys) {
                 let Some(raw_value) = read_prop(key) else {
                     continue;
                 };
-                
+
                 if let Some(mapped) = codename_to_marketing_name(&raw_value) {
                     return Some(mapped.to_string());
                 }
-                
+
                 if is_likely_codename(&raw_value) {
                     codename_fallback.get_or_insert(raw_value);
                     continue;
                 }
-                
+
                 return Some(raw_value);
             }
-            
-            codename_fallback.and_then(|value| codename_to_marketing_name(&value).map(str::to_string))
+
+            codename_fallback
+                .and_then(|value| codename_to_marketing_name(&value).map(str::to_string))
         }
-        
+
         let model = detect_model_name();
 
         Self {

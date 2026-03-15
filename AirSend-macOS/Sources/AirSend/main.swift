@@ -29,6 +29,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private var currentTransferTarget: String = ""
     private var transferProgressMenuItem: NSMenuItem?
     private var menuScanTimer: Timer?
+    private var isStatusMenuOpen = false
+    private var pendingDiscoveryMenuReopen = false
     
     // 🔋 功耗优化：广播与清理定时器（连接设备后停止）
     private var broadcastTimer: Timer?
@@ -89,6 +91,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private let historyGroupKeysStorage = "history_device_group_keys_v2"
     private let preferredGroupCandidateStorage = "preferred_device_ids_by_group_v2"
     private let localProtocolPreferenceStorage = "local_protocol_preference_v2"
+    private let knownDiscoveryHostsStorage = "known_discovery_hosts_v1"
     private let deviceConflictOnlineWindow: TimeInterval = 90.0
     private let androidAirSendRepository = "https://github.com/Avi7ii/AirSend"
     
@@ -132,6 +135,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }() {
         didSet {
             UserDefaults.standard.set(preferredDeviceIdsByGroup, forKey: preferredGroupCandidateStorage)
+        }
+    }
+
+    private var knownDiscoveryHosts: [String] {
+        get {
+            UserDefaults.standard.stringArray(forKey: knownDiscoveryHostsStorage) ?? []
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: knownDiscoveryHostsStorage)
         }
     }
     
@@ -180,6 +192,50 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     
     private func shortFingerprint(_ id: String) -> String {
         String(id.suffix(6))
+    }
+
+    private func mergeKnownDiscoveryHosts(_ hosts: [String]) {
+        var merged: [String] = []
+        var seen = Set<String>()
+
+        for host in hosts.map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }) where !host.isEmpty {
+            if seen.insert(host).inserted {
+                merged.append(host)
+            }
+        }
+
+        for host in knownDiscoveryHosts where seen.insert(host).inserted {
+            merged.append(host)
+        }
+
+        if merged.count > 32 {
+            merged = Array(merged.prefix(32))
+        }
+
+        knownDiscoveryHosts = merged
+    }
+
+    private func recordKnownDiscoveryHost(_ host: String) {
+        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        mergeKnownDiscoveryHosts([normalized])
+    }
+
+    private func prioritizedDiscoveryHosts() -> [String] {
+        var ordered: [String] = []
+        var seen = Set<String>()
+
+        let liveHosts = devices.values
+            .sorted { $0.lastSeen > $1.lastSeen }
+            .map(\.ip)
+
+        for host in liveHosts + knownDiscoveryHosts {
+            let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalized.isEmpty, seen.insert(normalized).inserted else { continue }
+            ordered.append(normalized)
+        }
+
+        return ordered
     }
     
     private func isAndroidModuleDevice(_ device: Device) -> Bool {
@@ -470,6 +526,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 cleanedDevices[id] = cleanedDevice
             }
             self.devices = cleanedDevices
+            mergeKnownDiscoveryHosts(cleanedDevices.values.map(\.ip))
         }
     }
 
@@ -487,6 +544,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         UserDefaults.standard.removeObject(forKey: historyGroupKeysStorage)
         UserDefaults.standard.set(broadcastSelectionKey, forKey: selectedGroupKeyStorage)
         UserDefaults.standard.removeObject(forKey: preferredGroupCandidateStorage)
+        UserDefaults.standard.removeObject(forKey: knownDiscoveryHostsStorage)
         
         updateMenu()
         updateWindowStatus()
@@ -1376,6 +1434,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             }
         }
 
+        discoveryService.prioritizedProbeHostsProvider = { [weak self] in
+            guard let self = self else { return [] }
+            return self.prioritizedDiscoveryHosts()
+        }
+
         discoveryService.onCampusFallbackPacket = { [weak self] data, sourceIP in
             guard let self = self else { return }
             Task {
@@ -1407,19 +1470,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 
                 // Update device state (important for heartbeat/lastSeen)
                 self.devices[device.id] = device
+                self.recordKnownDiscoveryHost(device.ip)
                 
                 // Only rebuild UI when the device is new or its reachable endpoint changed.
                 if isNewDevice {
                     logTransfer("✅ Discovery: Found device [\(device.alias)] at \(device.ip):\(device.port)")
                     self.updateMenu()
+                    self.refreshOpenMenuAfterDiscoveryIfNeeded(reason: "new-device")
                 } else if endpointChanged || metadataChanged {
                     logTransfer("🔁 Discovery: Updated device [\(device.alias)] -> \(device.ip):\(device.port)")
                     self.updateMenu()
+                    self.refreshOpenMenuAfterDiscoveryIfNeeded(reason: "endpoint-update")
                 }
             }
         }
         
         discoveryService.start()
+        discoveryService.probePreferredHosts(reason: "startup-preferred")
         
         // 🔋 发送一次初始广播，然后交由 updateDiscoveryTimers() 管理后续定时
         discoveryService.sendAnnouncement()
@@ -1468,6 +1535,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             broadcastTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     self?.discoveryService.sendAnnouncement()
+                    self?.discoveryService.probePreferredHosts(reason: "broadcast-keepalive")
                 }
             }
             broadcastTimer?.tolerance = 15.0 // 🔋
@@ -1719,6 +1787,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         setupMenu()
         updateWindowStatus()
     }
+
+    private func refreshOpenMenuAfterDiscoveryIfNeeded(reason: String) {
+        guard isStatusMenuOpen, !pendingDiscoveryMenuReopen else { return }
+        guard let menu = statusItem.menu else { return }
+
+        pendingDiscoveryMenuReopen = true
+        logTransfer("🧭 Discovery UI refresh requested while menu is open (\(reason))")
+        menu.cancelTracking()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            guard let self = self else { return }
+            self.pendingDiscoveryMenuReopen = false
+            self.statusItem.button?.performClick(nil)
+        }
+    }
     
     @objc func sendClipboard() {
         print("Send Clipboard clicked")
@@ -1874,7 +1957,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     // MARK: - NSMenuDelegate
     
     func menuWillOpen(_ menu: NSMenu) {
+        isStatusMenuOpen = true
         print("📡 Menu: Opening... starting high-frequency scan.")
+        discoveryService.probePreferredHosts(reason: "menu-open-preferred")
         // Perform an initial scan immediately
         discoveryService.triggerScan()
         
@@ -1896,12 +1981,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 }
                 
                 print("📡 Menu: Periodic scan while open...")
+                self?.discoveryService.probePreferredHosts(reason: "menu-periodic-preferred")
                 self?.discoveryService.triggerScan()
             }
         }
     }
     
     func menuDidClose(_ menu: NSMenu) {
+        isStatusMenuOpen = false
         print("📡 Menu: Closed. Stopping high-frequency scan.")
         menuScanTimer?.invalidate()
         menuScanTimer = nil

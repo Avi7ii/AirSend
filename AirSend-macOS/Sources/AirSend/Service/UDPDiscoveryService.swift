@@ -9,6 +9,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
     var onDeviceFound: ((Device) -> Void)?
     var onTransportFailure: ((String) -> Void)?
     var onCampusFallbackPacket: ((Data, String) -> Void)?
+    var prioritizedProbeHostsProvider: (() -> [String])?
     
     private let fingerprint: String
     private let alias = Host.current().localizedName ?? "AirSend"
@@ -29,6 +30,13 @@ final class UDPDiscoveryService: @unchecked Sendable {
     private let subnetProbeQueue = DispatchQueue(label: "com.airsend.discovery.subnet-probe", qos: .utility)
     private let subnetProbeStateQueue = DispatchQueue(label: "com.airsend.discovery.subnet-probe-state")
     private var isSubnetProbeRunning = false
+    private let preferredProbeQueue = DispatchQueue(label: "com.airsend.discovery.preferred-probe", qos: .utility)
+    private let preferredProbeStateQueue = DispatchQueue(label: "com.airsend.discovery.preferred-probe-state")
+    private var isPreferredProbeRunning = false
+    private let subnetProbeConcurrency = 192
+    private let preferredProbeConcurrency = 16
+    private let largeSubnetProbeTimeout: TimeInterval = 0.35
+    private let preferredProbeTimeout: TimeInterval = 0.45
     private lazy var discoverySession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 1.2
@@ -36,6 +44,14 @@ final class UDPDiscoveryService: @unchecked Sendable {
         config.waitsForConnectivity = false
         return URLSession(configuration: config, delegate: SessionDelegate(), delegateQueue: nil)
     }()
+
+    private func makeDiscoverySession(timeout: TimeInterval) -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = timeout
+        config.timeoutIntervalForResource = timeout
+        config.waitsForConnectivity = false
+        return URLSession(configuration: config, delegate: SessionDelegate(), delegateQueue: nil)
+    }
     
     private func reportTransportFailure(_ reason: String) {
         let now = Date()
@@ -161,7 +177,10 @@ final class UDPDiscoveryService: @unchecked Sendable {
     }
 
     func sendCampusPacket(_ data: Data) {
-        group?.send(content: data) { _ in }
+        if let group {
+            group.send(content: data) { _ in }
+            return
+        }
         broadcastConnection?.send(content: data, completion: .contentProcessed({ _ in }))
     }
     
@@ -175,7 +194,38 @@ final class UDPDiscoveryService: @unchecked Sendable {
                 self.sendAnnouncement()
             }
         }
+        probePreferredHosts(reason: "manual-scan-preferred")
         startSubnetProbe(reason: "manual-scan")
+    }
+
+    func probePreferredHosts(reason: String) {
+        let hosts = preferredProbeHosts()
+        guard !hosts.isEmpty else { return }
+
+        let shouldStart = preferredProbeStateQueue.sync { () -> Bool in
+            guard !isPreferredProbeRunning else { return false }
+            isPreferredProbeRunning = true
+            return true
+        }
+        guard shouldStart else { return }
+
+        preferredProbeQueue.async { [weak self] in
+            guard let self = self else { return }
+            Task {
+                defer {
+                    self.preferredProbeStateQueue.sync {
+                        self.isPreferredProbeRunning = false
+                    }
+                }
+                await self.probeHosts(
+                    hosts,
+                    reason: reason,
+                    timeout: self.preferredProbeTimeout,
+                    concurrency: min(self.preferredProbeConcurrency, hosts.count),
+                    logPrefix: "🎯 Discovery: Preferred host probe"
+                )
+            }
+        }
     }
     
     private func handleMessage(content: Data, source: NWEndpoint) {
@@ -274,20 +324,68 @@ final class UDPDiscoveryService: @unchecked Sendable {
     private func probeCurrentSubnet(reason: String) async {
         let candidates = subnetProbeCandidates()
         guard !candidates.isEmpty else { return }
+        let requestTimeout = candidates.count > 1024 ? largeSubnetProbeTimeout : 1.2
+        let session = requestTimeout == 1.2 ? discoverySession : makeDiscoverySession(timeout: requestTimeout)
+        let concurrency = min(subnetProbeConcurrency, candidates.count)
+        defer {
+            if session !== discoverySession {
+                session.invalidateAndCancel()
+            }
+        }
 
-        FileLogger.log("🔎 Discovery: Subnet probe [\(reason)] scanning \(candidates.count) host(s)")
+        await probeHosts(
+            candidates,
+            reason: reason,
+            timeout: requestTimeout,
+            concurrency: concurrency,
+            logPrefix: "🔎 Discovery: Subnet probe",
+            session: session
+        )
+    }
+
+    private func probeHosts(
+        _ hosts: [String],
+        reason: String,
+        timeout: TimeInterval,
+        concurrency: Int,
+        logPrefix: String,
+        session: URLSession? = nil
+    ) async {
+        guard !hosts.isEmpty else { return }
+
+        let activeSession = session ?? makeDiscoverySession(timeout: timeout)
+        let shouldInvalidateSession = (session == nil)
+        defer {
+            if shouldInvalidateSession {
+                activeSession.invalidateAndCancel()
+            }
+        }
+
+        FileLogger.log("\(logPrefix) [\(reason)] scanning \(hosts.count) host(s) (timeout \(String(format: "%.2f", timeout))s)")
 
         await withTaskGroup(of: Void.self) { group in
-            for host in candidates {
+            var iterator = hosts.makeIterator()
+            let initialTasks = min(max(1, concurrency), hosts.count)
+
+            for _ in 0..<initialTasks {
+                guard let host = iterator.next() else { break }
                 group.addTask { [weak self] in
                     guard let self = self else { return }
-                    await self.probeHost(host)
+                    await self.probeHost(host, timeout: timeout, session: activeSession)
+                }
+            }
+
+            while await group.next() != nil {
+                guard let host = iterator.next() else { continue }
+                group.addTask { [weak self] in
+                    guard let self = self else { return }
+                    await self.probeHost(host, timeout: timeout, session: activeSession)
                 }
             }
         }
     }
 
-    private func probeHost(_ host: String) async {
+    private func probeHost(_ host: String, timeout: TimeInterval, session: URLSession) async {
         let registerDto = RegisterDto(
             alias: alias,
             version: "3.0.0",
@@ -306,12 +404,12 @@ final class UDPDiscoveryService: @unchecked Sendable {
             }
 
             do {
-                var request = URLRequest(url: url, timeoutInterval: 1.2)
+                var request = URLRequest(url: url, timeoutInterval: timeout)
                 request.httpMethod = "POST"
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                 request.httpBody = try JSONEncoder().encode(registerDto)
 
-                let (data, response) = try await discoverySession.data(for: request)
+                let (data, response) = try await session.data(for: request)
                 guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
                     continue
                 }
@@ -350,15 +448,43 @@ final class UDPDiscoveryService: @unchecked Sendable {
         let subnets = currentPrivateIPv4Subnets()
         guard !subnets.isEmpty else { return [] }
 
-        var candidates = Set<String>()
+        var seen = Set<String>()
+        var candidates: [String] = []
+
+        for host in preferredProbeHosts() {
+            if seen.insert(host).inserted {
+                candidates.append(host)
+            }
+        }
+
         for subnet in subnets {
             for host in subnet.hosts {
-                if host != subnet.address {
-                    candidates.insert(host)
+                if host != subnet.address, seen.insert(host).inserted {
+                    candidates.append(host)
                 }
             }
         }
-        return candidates.sorted()
+        return candidates
+    }
+
+    private func preferredProbeHosts() -> [String] {
+        guard let provider = prioritizedProbeHostsProvider else { return [] }
+
+        var orderedHosts: [String] = []
+        var seen = Set<String>()
+
+        for rawHost in provider() {
+            let host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !host.isEmpty,
+                  host != "unknown",
+                  IPv4Subnet.parse(host) != nil,
+                  seen.insert(host).inserted else {
+                continue
+            }
+            orderedHosts.append(host)
+        }
+
+        return orderedHosts
     }
 
     private func currentPrivateIPv4Subnets() -> [IPv4Subnet] {
@@ -449,6 +575,8 @@ extension MulticastDto {
 }
 
 private struct IPv4Subnet {
+    private static let largeSubnetHostLimit = 9_216
+
     let address: String
     let hosts: [String]
     let isPrivate: Bool
@@ -465,6 +593,7 @@ private struct IPv4Subnet {
         let hostMask = ~netmaskValue
         let hostCount = Int(hostMask)
         let baseNetwork = addressValue & netmaskValue
+        let broadcast = baseNetwork | hostMask
 
         if hostCount <= 1 {
             self.hosts = []
@@ -472,8 +601,12 @@ private struct IPv4Subnet {
         }
 
         if hostCount > 254 {
-            let octets = Self.octets(addressValue)
-            self.hosts = (1...254).map { "\(octets.0).\(octets.1).\(octets.2).\($0)" }
+            self.hosts = Self.largeSubnetHosts(
+                addressValue: addressValue,
+                baseNetwork: baseNetwork,
+                broadcast: broadcast,
+                limit: Self.largeSubnetHostLimit
+            )
             return
         }
 
@@ -485,7 +618,7 @@ private struct IPv4Subnet {
         self.hosts = generated
     }
 
-    private static func parse(_ ip: String) -> UInt32? {
+    static func parse(_ ip: String) -> UInt32? {
         let parts = ip.split(separator: ".")
         guard parts.count == 4 else { return nil }
         var value: UInt32 = 0
@@ -508,6 +641,49 @@ private struct IPv4Subnet {
     private static func string(_ value: UInt32) -> String {
         let octets = octets(value)
         return "\(octets.0).\(octets.1).\(octets.2).\(octets.3)"
+    }
+
+    private static func largeSubnetHosts(addressValue: UInt32, baseNetwork: UInt32, broadcast: UInt32, limit: Int) -> [String] {
+        let currentSlice = addressValue & 0xffffff00
+        let firstSlice = baseNetwork & 0xffffff00
+        let lastSlice = broadcast & 0xffffff00
+
+        var slices: [UInt32] = []
+        var slice = firstSlice
+        while slice <= lastSlice {
+            slices.append(slice)
+            if slice > UInt32.max - 256 {
+                break
+            }
+            slice += 256
+        }
+
+        let orderedSlices = slices.sorted {
+            let lhsDistance = abs(Int64($0) - Int64(currentSlice))
+            let rhsDistance = abs(Int64($1) - Int64(currentSlice))
+            if lhsDistance == rhsDistance {
+                return $0 < $1
+            }
+            return lhsDistance < rhsDistance
+        }
+
+        var generated: [String] = []
+        generated.reserveCapacity(limit)
+
+        for sliceBase in orderedSlices {
+            for host in 1...254 {
+                let candidate = sliceBase + UInt32(host)
+                guard candidate > baseNetwork, candidate < broadcast, candidate != addressValue else {
+                    continue
+                }
+                generated.append(string(candidate))
+                if generated.count >= limit {
+                    return generated
+                }
+            }
+        }
+
+        return generated
     }
 
     private static func isPrivate(_ value: UInt32) -> Bool {

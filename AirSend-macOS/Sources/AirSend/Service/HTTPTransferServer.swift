@@ -15,9 +15,11 @@ actor HTTPTransferServer {
     private let alias = Host.current().localizedName ?? "Mac Headless"
     private let deviceModel = "macOS"
     private let deviceType = DeviceType.desktop
+    private var macAddress: String? { LocalNetworkIdentity.primaryHardwareAddress() }
     
     
     private var listener: NWListener?
+    private var plainCompatServer: PlainHTTPCompatServer?
     private var port: UInt16
     private var isHTTPS: Bool = false
     
@@ -29,6 +31,7 @@ actor HTTPTransferServer {
     private var fileTokens: [String: String] = [:] // fileId -> token
     private var filesToReceive: [String: FileDto] = [:] // fileId -> FileDto
     private var activeConnections: [ObjectIdentifier: NWConnection] = [:] // Connection pool for concurrent transfers
+    private var activeCompatConnections: [Int32: PlainHTTPCompatConnection] = [:]
 
     // Transfer State
     private var totalSessionSize: Int64 = 0
@@ -76,7 +79,7 @@ actor HTTPTransferServer {
         self.onCancelReceived = callback
     }
 
-    init(port: UInt16 = 53317, fingerprint: String) {
+    init(port: UInt16 = NetworkPorts.transferPort, fingerprint: String) {
         self.port = port
         self.fingerprint = fingerprint
     }
@@ -123,6 +126,14 @@ actor HTTPTransferServer {
     func removeUploadConnection(_ connection: NWConnection) {
         self.activeConnections.removeValue(forKey: ObjectIdentifier(connection))
     }
+
+    func addUploadConnection(_ connection: PlainHTTPCompatConnection) {
+        self.activeCompatConnections[connection.socket] = connection
+    }
+
+    func removeUploadConnection(_ connection: PlainHTTPCompatConnection) {
+        self.activeCompatConnections.removeValue(forKey: connection.socket)
+    }
     
     func getSessionSizeInfo() -> (received: Int64, total: Int64) {
         return (self.sessionBytesReceived, self.totalSessionSize)
@@ -136,16 +147,38 @@ actor HTTPTransferServer {
         self.filesToReceive.removeAll()
         
         let conns = self.activeConnections.values
+        let compatConns = self.activeCompatConnections.values
         self.activeConnections.removeAll()
+        self.activeCompatConnections.removeAll()
         conns.forEach { $0.cancel() }
+        compatConns.forEach { $0.close() }
         
         return wasActive
     }
     
     func start(p12Data: Data? = nil) async throws {
+        listener?.cancel()
+        listener = nil
+        plainCompatServer?.stop()
+        plainCompatServer = nil
+
+        guard let p12Data = p12Data else {
+            self.isHTTPS = false
+            let plainServer = PlainHTTPCompatServer(port: port)
+            plainServer.onNewConnection = { [weak self] connection in
+                logTransfer("🔌 [HTTPTransferServer] [Compat] New incoming connection from \(connection.remoteDescription)")
+                Task.detached(priority: .userInitiated) { [weak self] in
+                    await self?.processIncomingCompatRequest(connection)
+                }
+            }
+            try plainServer.start()
+            self.plainCompatServer = plainServer
+            return
+        }
+
         let parameters: NWParameters
         
-        if let p12Data = p12Data {
+        do {
             self.isHTTPS = true
             logTransfer("🌐 Starting HTTPS Server (NWListener) on port \(port)...")
             let options = NWProtocolTLS.Options()
@@ -190,95 +223,86 @@ actor HTTPTransferServer {
             parameters.includePeerToPeer = true
             
             // parameters.serviceClass = .background
+            let listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: port)!)
+            self.listener = listener
             
-        } else {
-            logTransfer("🌐 Starting HTTP Server (NWListener) on port \(port)...")
-            parameters = .tcp
-            parameters.allowLocalEndpointReuse = true
-            
-            if let tcpOptions = parameters.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
-                tcpOptions.noDelay = true // Disable Nagle's algorithm for instant handshake response
-                tcpOptions.enableKeepalive = true
-                tcpOptions.keepaliveIdle = 60    // 🔋 60s
-                tcpOptions.keepaliveInterval = 15 // 🔋 15s
-                tcpOptions.keepaliveCount = 3
-            }
-        }
-        
-        let listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: port)!)
-        self.listener = listener
-        
-        listener.newConnectionHandler = { [weak self] connection in
-            guard let self = self else { return }
-            
-            // QUEUE-PER-CONNECTION: Assign a unique, independent queue for each connection.
-            // This ensures control channel (Cancel) handshakes are NOT blocked by data channel activity.
-            let connectionQueue = DispatchQueue(label: "com.localsend.conn.\(UUID().uuidString.prefix(8))", qos: .userInteractive)
-            
-            // Start the connection on its dedicated queue
-            connection.start(queue: connectionQueue)
-            
-            let startTime = DispatchTime.now()
-            logTransfer("🔌 [HTTPTransferServer] [T+0ms] New incoming connection from \(connection.endpoint)")
-            
-            connection.stateUpdateHandler = { state in
-                let now = DispatchTime.now()
-                let elapsedMs = Double(now.uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000.0
+            listener.newConnectionHandler = { [weak self] connection in
+                guard let self = self else { return }
                 
-                switch state {
-                case .waiting(let error):
-                    logTransfer("⏳ [HTTPTransferServer] [T+\(Int(elapsedMs))ms] Connection waiting (\(connection.endpoint)): \(error)")
-                case .ready:
-                    let nowReady = DispatchTime.now()
-                    let readyElapsed = Double(nowReady.uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000.0
+                // QUEUE-PER-CONNECTION: Assign a unique, independent queue for each connection.
+                // This ensures control channel (Cancel) handshakes are NOT blocked by data channel activity.
+                let connectionQueue = DispatchQueue(label: "com.localsend.conn.\(UUID().uuidString.prefix(8))", qos: .userInteractive)
+                let startTime = DispatchTime.now()
+                logTransfer("🔌 [HTTPTransferServer] [T+0ms] New incoming connection from \(connection.endpoint)")
+                
+                connection.stateUpdateHandler = { state in
+                    let now = DispatchTime.now()
+                    let elapsedMs = Double(now.uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000.0
                     
-                    if let metadata = connection.metadata(definition: NWProtocolTLS.definition) as? NWProtocolTLS.Metadata {
-                        let secMetadata = metadata.securityProtocolMetadata
-                        let protocolName = sec_protocol_metadata_get_negotiated_protocol(secMetadata).map { String(cString: $0) } ?? "none"
-                        let tlsVersion = sec_protocol_metadata_get_negotiated_tls_protocol_version(secMetadata)
+                    switch state {
+                    case .waiting(let error):
+                        logTransfer("⏳ [HTTPTransferServer] [T+\(Int(elapsedMs))ms] Connection waiting (\(connection.endpoint)): \(error)")
+                    case .ready:
+                        let nowReady = DispatchTime.now()
+                        let readyElapsed = Double(nowReady.uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000.0
                         
-                        logTransfer("🔐 [HTTPTransferServer] [T+\(Int(readyElapsed))ms] READY (TLS): \(protocolName) | Version: \(tlsVersion) | Remote: \(connection.endpoint)")
-                    } else {
-                        logTransfer("🔌 [HTTPTransferServer] [T+\(Int(readyElapsed))ms] READY (Plain): Remote: \(connection.endpoint)")
+                        if let metadata = connection.metadata(definition: NWProtocolTLS.definition) as? NWProtocolTLS.Metadata {
+                            let secMetadata = metadata.securityProtocolMetadata
+                            let protocolName = sec_protocol_metadata_get_negotiated_protocol(secMetadata).map { String(cString: $0) } ?? "none"
+                            let tlsVersion = sec_protocol_metadata_get_negotiated_tls_protocol_version(secMetadata)
+                            
+                            logTransfer("🔐 [HTTPTransferServer] [T+\(Int(readyElapsed))ms] READY (TLS): \(protocolName) | Version: \(tlsVersion) | Remote: \(connection.endpoint)")
+                        } else {
+                            logTransfer("🔌 [HTTPTransferServer] [T+\(Int(readyElapsed))ms] READY (Plain): Remote: \(connection.endpoint)")
+                        }
+                    case .failed(let error):
+                        let nsError = error as NSError
+                        logTransfer("❌ [HTTPTransferServer] [T+\(Int(elapsedMs))ms] Connection Failed (\(connection.endpoint)): \(error.localizedDescription) (Code: \(nsError.code))")
+                        if nsError.code == -9816 {
+                            logTransfer("🚨 [HTTPTransferServer] Diagnostic: -9816 Peer Closed. Latency from Start: \(Int(elapsedMs))ms. If this is < 50ms, it's likely a certificate mismatch. If > 1000ms, it's a timeout/starvation.")
+                        }
+                        
+                        connection.cancel()
+                    case .cancelled:
+                        break
+                    default:
+                        break
                     }
-                    
-                    Task { [weak self] in
-                        await self?.processIncomingRequest(connection)
-                    }
-                case .failed(let error):
-                    let nsError = error as NSError
-                    logTransfer("❌ [HTTPTransferServer] [T+\(Int(elapsedMs))ms] Connection Failed (\(connection.endpoint)): \(error.localizedDescription) (Code: \(nsError.code))")
-                    if nsError.code == -9816 {
-                        logTransfer("🚨 [HTTPTransferServer] Diagnostic: -9816 Peer Closed. Latency from Start: \(Int(elapsedMs))ms. If this is < 50ms, it's likely a certificate mismatch. If > 1000ms, it's a timeout/starvation.")
-                    }
-                    
-                    // Handshake done (Failed)
-                    
-                    connection.cancel()
-                case .cancelled:
-                    // Handshake done (Cancelled)
-                    break
-                default:
-                    break
+                }
+
+                // Install the state handler before starting the connection so we never miss a fast `.ready`.
+                connection.start(queue: connectionQueue)
+
+                // Start reading immediately after `start()`. Network.framework will continue the receive
+                // once the connection really becomes usable, so we don't need to depend on a `.ready`
+                // callback arriving before application data is read.
+                Task { [weak self] in
+                    await self?.processIncomingRequest(connection)
                 }
             }
-        }
-        
-        listener.stateUpdateHandler = { state in
-            logTransfer("🌐 Server (NWListener) state: \(state)")
-            if case .failed(let error) = state {
-                logTransfer("❌ Server CRASHED: \(error)")
+            
+            listener.stateUpdateHandler = { state in
+                logTransfer("🌐 Server (NWListener) state: \(state)")
+                if case .failed(let error) = state {
+                    logTransfer("❌ Server CRASHED: \(error)")
+                }
             }
+            
+            listener.start(queue: self.listenerQueue)
+            self.listener = listener
+        } catch {
+            listener?.cancel()
+            listener = nil
+            throw error
         }
-        
-        listener.start(queue: self.listenerQueue)
-        self.listener = listener
     }
     
     func stop() {
         logTransfer("🌐 Stopping server...")
         listener?.cancel()
         listener = nil
+        plainCompatServer?.stop()
+        plainCompatServer = nil
     }
     
     /// Processes the request in a NONISOLATED context to prevent blocking the actor.
@@ -373,9 +397,12 @@ actor HTTPTransferServer {
             )
             
             // 4. Routing (non-upload paths only)
-            var response = await self.route(request: request, connection: connection)
+            var response = await self.route(
+                request: request,
+                remoteIP: self.normalizedRemoteIP(from: connection.endpoint)
+            )
             response.shouldKeepAlive = shouldKeepAlive
-            
+
             // 5. Send Response
             connection.send(content: response.serialize(), completion: .contentProcessed({ error in
                 if let error = error {
@@ -406,6 +433,91 @@ actor HTTPTransferServer {
             connection.cancel()
         }
     }
+
+    nonisolated private func processIncomingCompatRequest(_ connection: PlainHTTPCompatConnection) async {
+        defer { connection.close() }
+
+        do {
+            var accumulatedData = Data()
+            var headerData: Data?
+            var bodyOffset = 0
+
+            while true {
+                let chunk = try receiveSocketChunk(from: connection)
+                if chunk.isEmpty { break }
+                accumulatedData.append(chunk)
+
+                if let range = accumulatedData.range(of: "\r\n\r\n".data(using: .utf8)!) {
+                    headerData = accumulatedData.subdata(in: 0..<range.upperBound)
+                    bodyOffset = range.upperBound
+                    break
+                }
+
+                if accumulatedData.count > 16384 {
+                    break
+                }
+            }
+
+            guard let header = headerData, let requestInfo = HTTPRequestParser.parseHeader(header) else {
+                let bytesStr = accumulatedData.prefix(16).map { String(format: "%02hhx", $0) }.joined(separator: " ")
+                logTransfer("⚠️ [Compat] Malformed HTTP header from \(connection.remoteDescription). First bytes: [\(bytesStr)]")
+                return
+            }
+
+            let bodyPrefix = accumulatedData.subdata(in: bodyOffset..<accumulatedData.count)
+            let contentLength = Int(requestInfo.headers["content-length"] ?? "0") ?? 0
+            let isChunked = requestInfo.headers["transfer-encoding"]?.lowercased() == "chunked"
+            let requestedKeepAlive = requestInfo.headers["connection"]?.lowercased() == "keep-alive"
+
+            if requestInfo.path == "/api/localsend/v2/upload" {
+                logTransfer("📥 [Compat] \(requestInfo.method) \(requestInfo.path) [streaming \(isChunked ? "chunked" : "\(contentLength) bytes")]")
+                var response = await handleCompatUploadStreaming(
+                    requestInfo: requestInfo,
+                    connection: connection,
+                    bodyPrefix: bodyPrefix,
+                    contentLength: contentLength,
+                    isChunked: isChunked
+                )
+                response.shouldKeepAlive = false
+                try connection.sendAll(response.serialize())
+                return
+            }
+
+            var body: Data
+            var mutablePrefix = bodyPrefix
+            if isChunked {
+                body = try receiveSocketChunkedBody(from: connection, buffer: &mutablePrefix)
+            } else {
+                body = bodyPrefix
+                if contentLength > 0 {
+                    while body.count < contentLength {
+                        let remaining = contentLength - body.count
+                        let chunk = try receiveSocketChunk(from: connection, maxLength: min(remaining, 65536))
+                        if chunk.isEmpty { break }
+                        body.append(chunk)
+                    }
+                }
+            }
+
+            let request = HTTPRawRequest(
+                method: requestInfo.method,
+                path: requestInfo.path,
+                headers: requestInfo.headers,
+                body: body,
+                queryParams: requestInfo.queryParams
+            )
+
+            var response = await self.route(request: request, remoteIP: connection.remoteIP)
+            response.shouldKeepAlive = false
+            try connection.sendAll(response.serialize())
+
+            if requestedKeepAlive {
+                logTransfer("ℹ️ [Compat] Closing \(connection.remoteDescription) after one request. Keep-alive is intentionally disabled in compatibility mode.")
+            }
+        } catch {
+            logTransfer("❌ [Compat] Connection error for \(connection.remoteDescription): \(error.localizedDescription)")
+        }
+    }
     
     nonisolated private func receiveChunk(from connection: NWConnection, maxLength: Int = 65536) async throws -> Data {
         return try await withCheckedThrowingContinuation { continuation in
@@ -434,6 +546,15 @@ actor HTTPTransferServer {
             }
         }
     }
+
+    nonisolated private func receiveSocketChunk(from connection: PlainHTTPCompatConnection, maxLength: Int = 65536) throws -> Data {
+        let content = try connection.receive(maxLength: maxLength)
+        if !content.isEmpty {
+            let preview = content.prefix(16).map { String(format: "%02x", $0) }.joined(separator: " ")
+            logTransfer("📥 [Compat] Received chunk from \(connection.remoteDescription): \(content.count) bytes. Preview: [\(preview)]")
+        }
+        return content
+    }
     
     nonisolated private func readLine(from connection: NWConnection, buffer: inout Data) async throws -> String {
         while true {
@@ -443,6 +564,20 @@ actor HTTPTransferServer {
                 return String(data: lineData, encoding: .utf8) ?? ""
             }
             let chunk = try await receiveChunk(from: connection)
+            if chunk.isEmpty { break }
+            buffer.append(chunk)
+        }
+        return ""
+    }
+
+    nonisolated private func readSocketLine(from connection: PlainHTTPCompatConnection, buffer: inout Data) throws -> String {
+        while true {
+            if let range = buffer.range(of: "\r\n".data(using: .utf8)!) {
+                let lineData = buffer.subdata(in: 0..<range.lowerBound)
+                buffer.removeSubrange(0..<range.upperBound)
+                return String(data: lineData, encoding: .utf8) ?? ""
+            }
+            let chunk = try receiveSocketChunk(from: connection)
             if chunk.isEmpty { break }
             buffer.append(chunk)
         }
@@ -477,15 +612,44 @@ actor HTTPTransferServer {
         }
         return body
     }
-    
-    private func route(request: HTTPRawRequest, connection: NWConnection) async -> HTTPRawResponse {
+
+    nonisolated private func receiveSocketChunkedBody(from connection: PlainHTTPCompatConnection, buffer: inout Data) throws -> Data {
+        var body = Data()
+        while true {
+            let sizeLine = try readSocketLine(from: connection, buffer: &buffer)
+            let trimmedSize = sizeLine.trimmingCharacters(in: .whitespaces)
+            guard !trimmedSize.isEmpty, let size = Int(trimmedSize, radix: 16) else { break }
+            if size == 0 {
+                _ = try readSocketLine(from: connection, buffer: &buffer)
+                break
+            }
+
+            var chunkData = Data()
+            while chunkData.count < size {
+                if !buffer.isEmpty {
+                    let toTake = min(buffer.count, size - chunkData.count)
+                    chunkData.append(buffer.subdata(in: 0..<toTake))
+                    buffer.removeSubrange(0..<toTake)
+                } else {
+                    let next = try receiveSocketChunk(from: connection, maxLength: size - chunkData.count)
+                    if next.isEmpty { break }
+                    buffer.append(next)
+                }
+            }
+            body.append(chunkData)
+            _ = try readSocketLine(from: connection, buffer: &buffer)
+        }
+        return body
+    }
+
+    private func route(request: HTTPRawRequest, remoteIP: String) async -> HTTPRawResponse {
         logTransfer("📥 \(request.method) \(request.path)")
         
         switch request.path {
         case "/api/localsend/v2/info":
             return await handleInfo(request: request)
         case "/api/localsend/v2/register":
-            return await handleRegister(request: request, connection: connection)
+            return await handleRegister(request: request, remoteIP: remoteIP)
         case "/api/localsend/v2/prepare-upload":
             return await handlePrepareUpload(request: request)
         case "/api/localsend/v2/cancel":
@@ -502,11 +666,12 @@ actor HTTPTransferServer {
         do {
             let responseDto = RegisterDto(
                 alias: alias,
-                version: "2.4.2",
+                version: "3.0.0",
                 deviceModel: deviceModel,
                 deviceType: deviceType.rawValue,
                 fingerprint: fingerprint,
-                port: 53317,
+                macAddress: macAddress,
+                port: Int(NetworkPorts.transferPort),
                 protocolType: isHTTPS ? ProtocolType.https.rawValue : ProtocolType.http.rawValue,
                 download: true
             )
@@ -518,30 +683,16 @@ actor HTTPTransferServer {
         }
     }
     
-    private func handleRegister(request: HTTPRawRequest, connection: NWConnection) async -> HTTPRawResponse {
+    private func handleRegister(request: HTTPRawRequest, remoteIP: String) async -> HTTPRawResponse {
         do {
             let dto = try JSONDecoder().decode(RegisterDto.self, from: request.body)
-            
-            // Extract IP from connection
-            var ip = "unknown"
-            if case let .hostPort(host, _) = connection.endpoint {
-                ip = host.debugDescription
-            }
-            
-            // Clean IP
-            if let activeRange = ip.range(of: "%") {
-                ip = String(ip[..<activeRange.lowerBound])
-            }
-            if ip.hasPrefix("::ffff:") {
-                ip = String(ip.dropFirst(7))
-            }
-            
-            if ip != "unknown" {
+
+            if remoteIP != "unknown" {
                 let device = Device(
                     id: dto.fingerprint,
                     alias: dto.alias,
-                    ip: ip,
-                    port: dto.port ?? 53317,
+                    ip: remoteIP,
+                    port: dto.port ?? Int(NetworkPorts.transferPort),
                     deviceModel: dto.deviceModel,
                     deviceType: dto.deviceType,
                     version: dto.version ?? "2.0",
@@ -554,11 +705,12 @@ actor HTTPTransferServer {
             
             let responseDto = RegisterDto(
                 alias: alias,
-                version: "2.4.2",
+                version: "3.0.0",
                 deviceModel: deviceModel,
                 deviceType: deviceType.rawValue,
                 fingerprint: fingerprint,
-                port: 53317,
+                macAddress: macAddress,
+                port: Int(NetworkPorts.transferPort),
                 protocolType: isHTTPS ? ProtocolType.https.rawValue : ProtocolType.http.rawValue,
                 download: true
             )
@@ -568,6 +720,19 @@ actor HTTPTransferServer {
         } catch {
             return HTTPRawResponse(statusCode: 400, body: "Bad Request".data(using: .utf8)!)
         }
+    }
+
+    private func normalizedRemoteIP(from endpoint: NWEndpoint) -> String {
+        guard case let .hostPort(host, _) = endpoint else { return "unknown" }
+
+        var ip = host.debugDescription
+        if let activeRange = ip.range(of: "%") {
+            ip = String(ip[..<activeRange.lowerBound])
+        }
+        if ip.hasPrefix("::ffff:") {
+            ip = String(ip.dropFirst(7))
+        }
+        return ip
     }
     
     private func handlePrepareUpload(request: HTTPRawRequest) async -> HTTPRawResponse {
@@ -825,6 +990,179 @@ actor HTTPTransferServer {
                 await triggerTransferComplete(success: false, message: error.localizedDescription)
             }
             
+            return HTTPRawResponse(statusCode: 500, body: "Internal Server Error".data(using: .utf8)!)
+        }
+    }
+
+    nonisolated private func handleCompatUploadStreaming(
+        requestInfo: HTTPRequestParser.HeaderInfo,
+        connection: PlainHTTPCompatConnection,
+        bodyPrefix: Data,
+        contentLength: Int,
+        isChunked: Bool
+    ) async -> HTTPRawResponse {
+        let query = requestInfo.queryParams
+        guard let sessionId = query["sessionId"],
+              let fileId = query["fileId"],
+              let token = query["token"] else {
+            return HTTPRawResponse(statusCode: 400, body: "Bad Request".data(using: .utf8)!)
+        }
+
+        let sessionState = await self.getSessionState()
+        if sessionId != sessionState.id || sessionState.tokens[fileId] != token {
+            return HTTPRawResponse(statusCode: 403, body: "Forbidden".data(using: .utf8)!)
+        }
+
+        guard let fileDto = sessionState.files[fileId] else {
+            return HTTPRawResponse(statusCode: 404, body: "Not Found".data(using: .utf8)!)
+        }
+
+        await self.addUploadConnection(connection)
+        defer {
+            Task { await self.removeUploadConnection(connection) }
+        }
+
+        let baseDir = await self.getBaseDirectory()
+        let safeFileName = (fileDto.fileName as NSString).lastPathComponent
+        var destinationUrl = baseDir.appendingPathComponent(safeFileName)
+
+        var counter = 1
+        let ext = destinationUrl.pathExtension
+        let nameWithoutExt = destinationUrl.deletingPathExtension().lastPathComponent
+
+        while FileManager.default.fileExists(atPath: destinationUrl.path) {
+            let newName = "\(nameWithoutExt) (\(counter))"
+            destinationUrl = baseDir.appendingPathComponent(newName).appendingPathExtension(ext)
+            counter += 1
+        }
+
+        do {
+            let fileManager = FileManager.default
+            fileManager.createFile(atPath: destinationUrl.path, contents: nil)
+            let fileHandle = try FileHandle(forWritingTo: destinationUrl)
+            defer { try? fileHandle.close() }
+
+            var receivedBytes = 0
+            var mutableBuffer = bodyPrefix
+            let bufferSize = 65536
+            var lastProgressUpdate = Date()
+            var lastReportedProgress: Double = 0
+            var chunkStreamEndedNormally = false
+
+            if isChunked {
+                while true {
+                    let sizeLine = try readSocketLine(from: connection, buffer: &mutableBuffer)
+                    let hexStr = sizeLine.components(separatedBy: ";")[0].trimmingCharacters(in: .whitespaces)
+                    guard !hexStr.isEmpty, let size = Int(hexStr, radix: 16) else { break }
+
+                    if size == 0 {
+                        _ = try readSocketLine(from: connection, buffer: &mutableBuffer)
+                        chunkStreamEndedNormally = true
+                        break
+                    }
+
+                    var totalReadThisChunk = 0
+                    while totalReadThisChunk < size {
+                        let toTake = min(mutableBuffer.count, size - totalReadThisChunk)
+                        if toTake > 0 {
+                            let chunk = mutableBuffer.subdata(in: 0..<toTake)
+                            try fileHandle.write(contentsOf: chunk)
+                            mutableBuffer.removeSubrange(0..<toTake)
+                            totalReadThisChunk += toTake
+                            receivedBytes += toTake
+                            let progressInfo = await self.updateIncrementProgress(bytes: Int64(toTake))
+                            if progressInfo.total > 0 {
+                                let progress = Double(progressInfo.received) / Double(progressInfo.total)
+                                let timeSinceLast = Date().timeIntervalSince(lastProgressUpdate)
+                                if timeSinceLast > 0.1 || (progress - lastReportedProgress) > 0.01 || progress >= 1.0 {
+                                    await self.triggerProgress(progress)
+                                    lastProgressUpdate = Date()
+                                    lastReportedProgress = progress
+                                }
+                            }
+                        } else {
+                            let next = try receiveSocketChunk(from: connection, maxLength: min(size - totalReadThisChunk, bufferSize))
+                            if next.isEmpty {
+                                throw NSError(domain: "HTTPTransferServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Stream ended in chunk"])
+                            }
+                            mutableBuffer.append(next)
+                        }
+                    }
+                    _ = try readSocketLine(from: connection, buffer: &mutableBuffer)
+                }
+            } else {
+                if !mutableBuffer.isEmpty {
+                    let prefixCount = mutableBuffer.count
+                    try fileHandle.write(contentsOf: mutableBuffer)
+                    receivedBytes += prefixCount
+                    _ = await self.updateIncrementProgress(bytes: Int64(prefixCount))
+                    mutableBuffer.removeAll()
+                }
+
+                while receivedBytes < contentLength {
+                    let remaining = contentLength - receivedBytes
+                    let chunk = try receiveSocketChunk(from: connection, maxLength: min(remaining, bufferSize))
+                    if chunk.isEmpty { break }
+
+                    try fileHandle.write(contentsOf: chunk)
+                    receivedBytes += chunk.count
+                    let progressInfo = await self.updateIncrementProgress(bytes: Int64(chunk.count))
+                    if progressInfo.total > 0 {
+                        let progress = Double(progressInfo.received) / Double(progressInfo.total)
+                        let timeSinceLast = Date().timeIntervalSince(lastProgressUpdate)
+                        if timeSinceLast > 0.1 || (progress - lastReportedProgress) > 0.01 || progress >= 1.0 {
+                            await self.triggerProgress(progress)
+                            lastProgressUpdate = Date()
+                            lastReportedProgress = progress
+                        }
+                    }
+                }
+            }
+
+            logTransfer("✅ [Compat] File saved to \(destinationUrl.path) (\(receivedBytes) bytes, streamed)")
+
+            let isText = fileDto.fileName.hasSuffix(".txt") || fileDto.fileType == "text/plain"
+            if isText, receivedBytes < 1_000_000, let textContent = try? String(contentsOf: destinationUrl, encoding: .utf8) {
+                await self.triggerTextReceived(textContent)
+                if fileDto.fileName == "clipboard.txt" {
+                    do {
+                        try FileManager.default.removeItem(at: destinationUrl)
+                        logTransfer("🧹 [AirSend 中枢] 剪贴板临时文件 \(fileDto.fileName) 已被抹除，无痕同步完成")
+                    } catch {
+                        logTransfer("⚠️ 抹除临时文件失败: \(error)")
+                    }
+                }
+            }
+
+            let finalProgress = await self.getSessionSizeInfo()
+            if finalProgress.total > 0 {
+                await self.triggerProgress(1.0)
+            }
+
+            let counts = await self.incrementFileCount()
+            if (!isChunked && receivedBytes < contentLength) || (isChunked && !chunkStreamEndedNormally) {
+                logTransfer("❌ [Compat] File incomplete or chunk stream aborted! Expected \(contentLength), got \(receivedBytes). Transfer truncated.")
+                await self.triggerTransferComplete(success: false, message: "Transfer truncated")
+                return HTTPRawResponse(statusCode: 400, body: Data())
+            }
+
+            if counts.current >= counts.expected {
+                await self.triggerTransferComplete(success: true, message: nil as String?)
+            }
+
+            return HTTPRawResponse(statusCode: 200, body: Data())
+        } catch {
+            logTransfer("❌ [Compat] Upload Failed: \(error.localizedDescription)")
+            try? FileManager.default.removeItem(at: destinationUrl)
+
+            let nsError = error as NSError
+            if nsError.domain == NSPOSIXErrorDomain && (nsError.code == Int(ETIMEDOUT) || nsError.code == Int(ECONNRESET)) {
+                logTransfer("🚨 [Compat] Socket timeout/reset detected. Assuming peer cancelled silently.")
+                await triggerCancelReceived()
+            } else {
+                await triggerTransferComplete(success: false, message: error.localizedDescription)
+            }
+
             return HTTPRawResponse(statusCode: 500, body: "Internal Server Error".data(using: .utf8)!)
         }
     }

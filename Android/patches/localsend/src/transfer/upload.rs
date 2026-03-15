@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::Bytes;
-use axum::extract::{ConnectInfo, Query};
+use axum::extract::{ConnectInfo, Query, State};
 use axum::Extension;
 use axum::{response::IntoResponse, Json};
 use axum::http::StatusCode;
@@ -15,7 +16,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 use crate::error::{LocalSendError, Result};
 use crate::transfer::session::{Session, SessionStatus};
-use crate::{models::{device::DeviceInfo, file::FileMetadata}, Client};
+use crate::{models::{device::DeviceInfo, file::FileMetadata}, remember_peer_entry, Client};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,6 +44,8 @@ impl Client {
         let response = self
             .http_client
             .post(&format!("{}://{}/api/localsend/v2/prepare-upload", peer.1.protocol, peer.0.clone()))
+            .header("Connection", "close")
+            .timeout(Duration::from_secs(12))
             .json(&PrepareUploadRequest {
                 info: self.device.clone(),
                 files: files.clone(),
@@ -84,6 +87,8 @@ impl Client {
         let request = self
             .http_client
             .post(&format!("{}://{}/api/localsend/v2/upload?sessionId={}&fileId={}&token={}", session.receiver.protocol, session.addr, session_id, file_id, token))
+            .header("Connection", "close")
+            .timeout(Duration::from_secs(180))
             //.post(&format!("https://webhook.site/2f23a529-b687-4375-ad5f-54906ab26ac7?session_id={}&file_id={}&token={}", session_id, file_id, token))
             .body(body);
 
@@ -135,6 +140,8 @@ impl Client {
         let request = self
             .http_client
             .post(&format!("{}://{}/api/localsend/v2/cancel?sessionId={}", session.receiver.protocol, session.addr, session_id))
+            .header("Connection", "close")
+            .timeout(Duration::from_secs(10))
             .send()
             .await?;
 
@@ -147,12 +154,20 @@ impl Client {
 }
 
 pub async fn register_prepare_upload(
+    State(peers): State<Arc<Mutex<HashMap<String, (SocketAddr, DeviceInfo)>>>>,
     Extension(client): Extension<DeviceInfo>,
     Extension(sessions): Extension<Arc<Mutex<HashMap<String, Session>>>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(req): Json<PrepareUploadRequest>,
 ) -> impl IntoResponse {
     println!("Received upload request from alias: {}", req.info.alias);
+
+    let mut sender_addr = addr;
+    sender_addr.set_port(req.info.port);
+    {
+        let mut peers = peers.lock().await;
+        remember_peer_entry(&mut peers, sender_addr, req.info.clone());
+    }
 
     // 🚀 修复点：对于守护进程模式，直接自动同意接收，无需弹窗
     let result = true;

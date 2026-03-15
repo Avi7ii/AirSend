@@ -29,7 +29,7 @@ It consists of two parts:
 - **macOS side**: A natively-built Swift menu bar app, ~20MB RAM, no main window, drag-and-drop to send
 - **Android side**: Choose as needed — use the official LocalSend directly, or install the AirSend custom app for system-level deep integration
 
-> **Network requirement**: Both devices must be on the same Wi-Fi LAN, with AP isolation disabled on the router.
+> **Network requirement**: Both devices must be on the same Wi-Fi LAN, with AP isolation disabled on the router. HTTPS remains the default path; if you are on a campus or dorm network where discovery works but transfers stall, see the `HTTP Compatibility Mode` section below.
 
 ---
 
@@ -46,6 +46,8 @@ It consists of two parts:
 | Image Clipboard Sync   | ❌                                    | ✅ Copied images on Mac auto-send to Android     |
 | Android Background     | Depends on system process management | Rust daemon, independent of App lifecycle       |
 | System-Level Clipboard | ❌                                    | ✅ (Requires Root + LSPosed)                     |
+| Campus LAN path        | ❌ No manual HTTP compatibility path  | ✅ Manual HTTP compatibility mode (default off) |
+| Drag-and-drop UX       | Standard window drag target          | ✅ Prewarmed DropZone, anti-bounce, background minimize |
 | Protocol Compatibility | ✅ LocalSend standard                 | ✅ Fully compatible with LocalSend               |
 
 </div>
@@ -62,7 +64,19 @@ Drag files onto the macOS menu bar icon to send. Two modes supported:
 
 Received files are saved to the Downloads folder via streaming I/O, auto-renamed on conflict (e.g. `photo (1).jpg`), with no extra memory buffer.
 
-Since AirSend is fully compatible with the LocalSend protocol, Android users can use the official LocalSend app to transfer files with Mac — no extra configuration needed.
+On home routers, mobile hotspots, and other normal LANs, AirSend still defaults to the standard LocalSend-style HTTPS path, so Android users can use the official LocalSend app to transfer files with Mac with no extra configuration.
+
+On campus Wi-Fi, dorm networks, or other policy-heavy LANs, however, official LocalSend often stops at "the device is visible, but the actual transfer never really starts". That is where AirSend's full mode and the `HTTP Compatibility Mode` below come in.
+
+### 🌐 Campus / Complex LAN Compatibility
+
+AirSend 3.0.0 adds a **manual, default-off** `HTTP Compatibility Mode` specifically for networks where discovery works but the HTTPS data plane repeatedly times out or hangs.
+
+- The default remains **secure HTTPS mode**, so normal home-network usage and standard compatibility with official LocalSend stay intact
+- If devices can discover each other on a campus network but transfers keep stalling, turn on `Advanced -> Compatibility Mode (HTTP)` in the macOS menu bar
+- Once enabled, macOS exposes a plain-HTTP receive path, and the sender performs a real data-plane preflight before sending so it can choose the path that actually works on that LAN
+- This compatibility path is an extra AirSend capability built for difficult LANs; **official LocalSend does not currently provide it**
+- For home routers and mobile hotspots, leaving the default HTTPS mode on is still recommended
 
 ### 📋 Two-Way Clipboard Sync
 
@@ -76,11 +90,11 @@ Since AirSend is fully compatible with the LocalSend protocol, Android users can
 
 Take a screenshot on Android and it appears directly in your Mac's Downloads folder — without opening any app or manually sharing.
 
-How it works: The Rust daemon uses Linux `inotify` to continuously monitor screenshot directories. On detecting a new file write, it waits 1 second (for EXT4 page cache flush), then pushes it to Mac via HTTPS. Compatible with AOSP native paths and custom ROM paths (MIUI, HyperOS, ColorOS, etc.).
+How it works: The Rust daemon uses Linux `inotify` to continuously monitor screenshot directories. On detecting a new file write, it waits 1 second (for EXT4 page cache flush), then pushes it to Mac via the default HTTPS path or the compatibility HTTP path when needed. Compatible with AOSP native paths and custom ROM paths (MIUI, HyperOS, ColorOS, etc.).
 
 ### 🖼️ Image Clipboard Sync (Mac → Android)
 
-When you copy a screenshot or image on Mac, `ClipboardService` checks first for TIFF image data in the clipboard, converts it to PNG, and sends it to Android via HTTPS.
+When you copy a screenshot or image on Mac, `ClipboardService` checks first for TIFF image data in the clipboard, converts it to PNG, and sends it to Android via the default HTTPS path or the compatibility HTTP path when needed.
 
 ### 📱 Direct Share Integration
 
@@ -99,7 +113,7 @@ When sharing files on Android, your Mac appears directly in the system's Direct 
 | Android (basic file transfer) | Android 8.0+, install official LocalSend                  |
 | Android (full features)       | Root + Magisk or KernelSU + LSPosed                       |
 | Network                       | Both devices on the same Wi-Fi LAN, AP isolation disabled |
-| Firewall                      | Allow UDP 53317 and TCP 53317                             |
+| Firewall                      | Allow UDP 53317 and TCP 53317-53319                       |
 
 </div>
 
@@ -136,14 +150,14 @@ flowchart TB
         end
 
         subgraph Mac_Network ["Network.framework - Dual Engine"]
-            UDP_Disc["UDPDiscoveryService / Port 53317 / LAN Broadcast / Stop-on-Connect"]:::mac_node
-            HTTP_Trans["HTTPTransferServer NWListener Actor / TLS 1.2-1.3 / ALPN http1.1 / Per-Conn Queue"]:::mac_node
+            UDP_Disc["UDPDiscoveryService / Port 53317 / LAN Broadcast / Compatibility Discovery"]:::mac_node
+            HTTP_Trans["HTTPTransferServer / HTTPS Default + HTTP Compatibility / Port 53318 / Per-Conn Queue"]:::mac_node
             CertMgr -->|"Inject TLS Identity"| HTTP_Trans
         end
 
         subgraph Mac_Send ["Send Engines"]
-            FileSender["FileSender / HTTPS Chunked / Broadcast or Unicast"]:::mac_node
-            ClipSender["ClipboardSender / Text as clipboard.txt / Image as PNG"]:::mac_node
+            FileSender["FileSender / HTTPS Default / HTTP Preflight / Broadcast or Unicast"]:::mac_node
+            ClipSender["ClipboardSender / Text as clipboard.txt / Image as PNG / Compatibility Aware"]:::mac_node
         end
 
         subgraph Mac_Clipboard ["Clipboard Engine"]
@@ -188,7 +202,7 @@ flowchart TB
 
         subgraph Rust_Daemon ["Rust Daemon - arm64-v8a - Magisk Module"]
             inotify["inotify / notify crate / EXT4 Close-Write and Rename / 1s cache delay"]:::daemon_node
-            TokioCore["Tokio Async Runtime / Reqwest Client / NO-PROXY enforcement"]:::daemon_node
+            TokioCore["Tokio Async Runtime / Reqwest Client / Port 53319 / Complex-LAN Rebind"]:::daemon_node
             UDSServer["Unix Domain Sockets / @airsend-ipc and @airsend-app-ipc"]:::daemon_node
             inotify -->|"Screenshot Detected"| TokioCore
             UDSServer <-->|"IPC Command Bus"| TokioCore
@@ -203,11 +217,11 @@ flowchart TB
     %% ==========================================
     %% Part 3: LAN Cross-Border Flows
     %% ==========================================
-    UDP_Disc <===>|"UDP Broadcast - LocalSend Compatible Peer Discovery"| TokioCore:::protocol_line
-    TokioCore ==>|"HTTPS - Screenshot Auto-Send - inotify triggered"| HTTP_Trans:::protocol_line
-    ClipSender ==>|"HTTPS - clipboard.txt - Read and Burn on arrival"| TokioCore:::protocol_line
-    TokioCore ==>|"HTTPS - Android Clipboard to Mac NSPasteboard"| HTTP_Trans:::protocol_line
-    FileSender <==>|"HTTPS Chunked - Drag-and-Drop File Transfer"| TokioCore:::protocol_line
+    UDP_Disc <===>|"UDP Discovery - LocalSend Compatible"| TokioCore:::protocol_line
+    TokioCore ==>|"HTTPS/HTTP - Screenshot Auto-Send - inotify triggered"| HTTP_Trans:::protocol_line
+    ClipSender ==>|"HTTPS/HTTP - clipboard.txt / PNG / campus compatibility"| TokioCore:::protocol_line
+    TokioCore ==>|"HTTPS/HTTP - Android Clipboard to Mac NSPasteboard"| HTTP_Trans:::protocol_line
+    FileSender <==>|"HTTPS Default / HTTP Compatibility / Chunked File Transfer"| TokioCore:::protocol_line
 
 ```
 
@@ -215,11 +229,11 @@ flowchart TB
 <summary>📖 How to read this diagram (click to expand)</summary>
 <br>
 
-- **Yellow links**: LocalSend HTTPS transport channel — all data between Mac and Android crosses the router here
-- **Blue area (macOS)**: Pure Swift, `Network.framework` NWListener, TLS 1.2-1.3 encryption, dedicated dispatch queue per connection
+- **Yellow links**: LocalSend HTTPS is the default transport path; in compatibility mode AirSend can switch the LAN data path to plain HTTP for difficult campus-style networks
+- **Blue area (macOS)**: Pure Swift, default `Network.framework` HTTPS receiver, plus a manually enabled plain-HTTP compatibility receiver for difficult LANs
 - **Green area (Android App)**: Kotlin foreground service, polls daemon every 30s for online devices, updates Direct Share shortcuts
 - **Purple area (Xposed)**: Runs in `system_server` process, bypasses Android 10+ background clipboard restrictions via UID 1000, also serves as the Mac→Android direction endpoint of the IPC bus
-- **Orange area (Rust Daemon)**: `arm64-v8a` native process, independent of App lifecycle, communicates via two Unix domain sockets (`@airsend_ipc` and `@airsend_app_ipc`)
+- **Orange area (Rust Daemon)**: `arm64-v8a` native process, independent of App lifecycle, communicates via two Unix domain sockets (`@airsend_ipc` and `@airsend_app_ipc`), and handles rebinding on unstable LAN changes
 
 </details>
 
@@ -259,6 +273,9 @@ Android supports two modes:
 
 Install the official [LocalSend](https://github.com/localsend/localsend/releases) to transfer files with Mac — best compatibility.
 
+For normal home Wi-Fi and hotspots, this is also the recommended starting point.  
+For campus or dorm networks where devices can be discovered but transfers are still unusable, official LocalSend alone is often not enough; that is where AirSend full mode and HTTP compatibility become relevant.
+
 **Not included**: clipboard auto-sync, screenshot auto-push, Direct Share shortcuts.
 
 ### 🔴 Full Mode (Root + Magisk/KernelSU + LSPosed)
@@ -282,6 +299,7 @@ Starts with the system as a Magisk module, fully independent of the App lifecycl
 | Screenshot monitoring | `inotify` on two screenshot dirs, 1s Page Cache delay before push |
 | Device discovery      | LocalSend UDP broadcast, maintains online device table            |
 | IPC bus               | Two Unix domain sockets: `@airsend_ipc` / `@airsend_app_ipc`      |
+| Transport resilience  | HTTPS by default, HTTP compatibility on difficult LANs, rebinding on interface change |
 | Proxy bypass          | Forces `NO_PROXY=*` at startup                                    |
 
 Monitored screenshot paths:
@@ -316,6 +334,8 @@ Runs in `system_server`, hooks `ClipboardService$ClipboardImpl.setPrimaryClip`:
 
 Install the official [LocalSend](https://github.com/localsend/localsend/releases). Both devices on the same Wi-Fi and you're ready to transfer files.
 
+If you are testing on a campus or dorm LAN and the devices can see each other but transfers freeze, do not stop at basic mode. Use the full AirSend mode below and manually enable `Advanced -> Compatibility Mode (HTTP)` on Mac.
+
 **Full Mode (root users)**
 
 1. Download the latest Magisk module from [Releases](https://github.com/Avi7ii/AirSend/releases/latest)
@@ -330,7 +350,17 @@ After setup, clipboard sync, screenshot auto-send, and Direct Share shortcuts al
 
 **Q: Devices can't find each other?**
 
-Confirm both devices are on the same Wi-Fi and that the router doesn't have "AP Isolation" or "Client Isolation" enabled (some routers enable this by default). Firewall must allow UDP 53317 and TCP 53317. Also try clicking **Refresh and Rescan** in the Mac menu.
+Confirm both devices are on the same Wi-Fi and that the router doesn't have "AP Isolation" or "Client Isolation" enabled (some routers enable this by default). Firewall must allow UDP 53317 and TCP 53317-53319. Also try clicking **Rescan and Refresh** in the Mac menu.
+
+---
+
+**Q: On campus Wi-Fi the devices can discover each other, but every transfer times out or feels unusable. What should I do?**
+
+If mobile hotspot or home Wi-Fi works but the campus LAN does not, the problem is usually the campus data plane rather than the devices themselves.
+
+- Home network / hotspot: keep the default HTTPS mode
+- Campus / dorm LAN: use AirSend full mode and manually enable `Advanced -> Compatibility Mode (HTTP)` on macOS
+- Official LocalSend: it currently **does not** provide this manual HTTP compatibility path
 
 ---
 

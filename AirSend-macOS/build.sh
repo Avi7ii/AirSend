@@ -5,6 +5,16 @@ APP_NAME="AirSend"
 BUILD_DIR=".build/arm64-apple-macosx/debug"
 EXECUTABLE_NAME="AirSend"
 
+clean_bundle_xattrs() {
+    local bundle_path="$1"
+    xattr -cr "$bundle_path" 2>/dev/null || true
+    xattr -d -r com.apple.FinderInfo "$bundle_path" 2>/dev/null || true
+    xattr -d -r com.apple.fileprovider.fpfs#P "$bundle_path" 2>/dev/null || true
+    xattr -d -r com.apple.macl "$bundle_path" 2>/dev/null || true
+    xattr -d -r com.apple.provenance "$bundle_path" 2>/dev/null || true
+    xattr -d -r com.apple.ResourceFork "$bundle_path" 2>/dev/null || true
+}
+
 echo "🚀 Building $APP_NAME (Debug Mode)..."
 swift build -c debug
 
@@ -25,27 +35,16 @@ if [ -f "AppIcon.icns" ]; then
 fi
 
 # Remove quarantine attribute (fix "App is damaged" error)
-xattr -cr "$APP_NAME.app"
-xattr -d -r com.apple.FinderInfo "$APP_NAME.app" 2>/dev/null || true
-xattr -d -r com.apple.fileprovider.fpfs#P "$APP_NAME.app" 2>/dev/null || true
-xattr -d -r com.apple.macl "$APP_NAME.app" 2>/dev/null || true
+clean_bundle_xattrs "$APP_NAME.app"
 
 # Sign with persistent local certificate (avoids re-granting permissions on each build)
 SIGNING_IDENTITY="GetBackMyWindowsCert"
 if security find-identity -v -p codesigning | grep -q "$SIGNING_IDENTITY"; then
-    # Clean extended attributes (Finder info, resource forks) which cause signing errors
-    xattr -cr "$APP_NAME.app"
-    xattr -d -r com.apple.FinderInfo "$APP_NAME.app" 2>/dev/null || true
-    xattr -d -r com.apple.fileprovider.fpfs#P "$APP_NAME.app" 2>/dev/null || true
-    xattr -d -r com.apple.macl "$APP_NAME.app" 2>/dev/null || true
+    clean_bundle_xattrs "$APP_NAME.app"
     codesign --force --deep --sign "$SIGNING_IDENTITY" "$APP_NAME.app"
 else
     echo "⚠️  Certificate '$SIGNING_IDENTITY' not found, using ad-hoc signing"
-    # Clean extended attributes (Finder info, resource forks) which cause signing errors
-    xattr -cr "$APP_NAME.app"
-    xattr -d -r com.apple.FinderInfo "$APP_NAME.app" 2>/dev/null || true
-    xattr -d -r com.apple.fileprovider.fpfs#P "$APP_NAME.app" 2>/dev/null || true
-    xattr -d -r com.apple.macl "$APP_NAME.app" 2>/dev/null || true
+    clean_bundle_xattrs "$APP_NAME.app"
     # Sign the App (Ad-hoc signature for local running)
     codesign --force --deep --sign - "$APP_NAME.app"
 fi

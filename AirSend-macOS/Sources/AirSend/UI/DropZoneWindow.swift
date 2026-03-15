@@ -121,10 +121,7 @@ class DropZoneContentView: NSView {
     private func setup() {
         // 外层：全透明，接受 drag
         self.wantsLayer = true
-        self.registerForDraggedTypes([
-            .fileURL,
-            NSPasteboard.PasteboardType("NSFilenamesPboardType")
-        ])
+        self.registerForDraggedTypes(LocalFileDrag.acceptedTypes)
         
         // 内层视觅盒子：240x180 frosted glass
         contentBox.material = .hudWindow
@@ -466,6 +463,11 @@ class DropZoneContentView: NSView {
     }
     
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let urls = LocalFileDrag.stageValidLocalFileURLs(from: sender.draggingPasteboard)
+        guard !urls.isEmpty else {
+            FileLogger.log("⛔️ [Drag] DropZoneContentView ignored non-local-file drag.")
+            return []
+        }
         // 取消任何待执行的「退出清除」任务
         dragExitWorkItem?.cancel()
         dragExitWorkItem = nil
@@ -481,7 +483,7 @@ class DropZoneContentView: NSView {
     }
     
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        return .copy
+        LocalFileDrag.stageValidLocalFileURLs(from: sender.draggingPasteboard).isEmpty ? [] : .copy
     }
     
     // 关闭系统级周期性 poll，减少 drag session 被系统提前中止的概率
@@ -514,6 +516,13 @@ class DropZoneContentView: NSView {
     }
     
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let finalURLs = LocalFileDrag.stagedOrCurrentLocalFileURLs(from: sender.draggingPasteboard)
+        guard !finalURLs.isEmpty else {
+            self.isPerformingDrop = false
+            self.isAcceptingDragSession = false
+            return false
+        }
+
         // 取消退出计时，确保 drag session 期间 isAcceptingDragSession 保持 true
         dragExitWorkItem?.cancel()
         dragExitWorkItem = nil
@@ -523,27 +532,7 @@ class DropZoneContentView: NSView {
         // isAcceptingDragSession 保持 true，直到 drop 流程完成后由 resetFromSuccess 清除
         
         FileLogger.log("⬇️ [Drag] performDragOperation called. isPerformingDrop=true, isAcceptingDragSession=\(isAcceptingDragSession)")
-        
-        // 读取文件 URL（优先新 API，兜底旧 API）
-        var urls: [URL]? = sender.draggingPasteboard.readObjects(
-            forClasses: [NSURL.self],
-            options: [.urlReadingFileURLsOnly: true]
-        ) as? [URL]
-        
-        if urls == nil || urls!.isEmpty {
-            FileLogger.log("⚠️ [Drag] New API returned no URLs, trying NSFilenamesPboardType fallback...")
-            urls = (sender.draggingPasteboard.propertyList(
-                forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")
-            ) as? [String])?.map { URL(fileURLWithPath: $0) }
-        }
-        
-        guard let finalURLs = urls, !finalURLs.isEmpty else {
-            FileLogger.log("⚠️ [Drag] performDragOperation: No URLs found, but returning true to prevent bounce-back animation.")
-            self.isPerformingDrop = false
-            self.isAcceptingDragSession = false
-            return true  // 始终返回 true 以阻止弹回动画
-        }
-        
+
         FileLogger.log("✅ [Drag] performDragOperation: \(finalURLs.count) file(s) accepted. Calling onDrop.")
         onDrop?(finalURLs)
         return true

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use std::process::Command;
+use crate::ports::TRANSFER_PORT;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
@@ -23,6 +24,8 @@ pub struct DeviceInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device_type: Option<DeviceType>,
     pub fingerprint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mac_address: Option<String>,
     pub port: u16,
     pub protocol: String,
     #[serde(default)]
@@ -149,11 +152,12 @@ impl DeviceInfo {
 
         Self {
             alias: "AirSend Android Module".to_string(),
-            version: "2.4.2".to_string(),
+            version: "3.0.0".to_string(),
             device_model: model,
             device_type: Some(DeviceType::Headless),
             fingerprint,
-            port: 53317,
+            mac_address: None,
+            port: TRANSFER_PORT,
             protocol: protocol.into(),
             download: true,
             announce: Some(true),

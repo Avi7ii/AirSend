@@ -37,6 +37,9 @@ features = [
     "tokio",
 ]
 
+[dependencies.base64]
+version = "0.22.1"
+
 [dependencies.axum-macros]
 version = "0.4.2"
 

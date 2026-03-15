@@ -15,12 +15,13 @@ struct RegisterDto: Codable {
     let deviceModel: String?
     let deviceType: String?
     let fingerprint: String
+    let macAddress: String?
     let port: Int?
     let protocolType: String?
     let download: Bool?
     
     enum CodingKeys: String, CodingKey {
-        case alias, version, deviceModel, deviceType, fingerprint, port, download
+        case alias, version, deviceModel, deviceType, fingerprint, macAddress, port, download
         case protocolType = "protocol"
     }
 }

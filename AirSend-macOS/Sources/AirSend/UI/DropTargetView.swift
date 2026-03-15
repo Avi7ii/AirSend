@@ -10,26 +10,29 @@ protocol DropTargetViewDelegate: AnyObject {
 class DropTargetView: NSView {
     weak var delegate: DropTargetViewDelegate?
 
-    // 注册所有可能的文件类型：现代 fileURL、旧版 NSFilenamesPboardType、通用 URL
-    private static let acceptedTypes: [NSPasteboard.PasteboardType] = [
-        .fileURL,
-        NSPasteboard.PasteboardType("NSFilenamesPboardType")
-    ]
-
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        registerForDraggedTypes(Self.acceptedTypes)
+        registerForDraggedTypes(LocalFileDrag.acceptedTypes)
     }
     
     required init?(coder: NSCoder) {
         super.init(coder: coder)
-        registerForDraggedTypes(Self.acceptedTypes)
+        registerForDraggedTypes(LocalFileDrag.acceptedTypes)
     }
     
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let urls = LocalFileDrag.stageValidLocalFileURLs(from: sender.draggingPasteboard)
+        guard !urls.isEmpty else {
+            FileLogger.log("⛔️ [Drag] DropTargetView ignored non-local-file drag.")
+            return []
+        }
         FileLogger.log("🔘 [Drag] draggingEntered DropTargetView (MenuBar button)")
         delegate?.didEnterDrag()
         return .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        LocalFileDrag.stageValidLocalFileURLs(from: sender.draggingPasteboard).isEmpty ? [] : .copy
     }
     
     override func draggingExited(_ sender: NSDraggingInfo?) {
@@ -39,28 +42,15 @@ class DropTargetView: NSView {
     
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         FileLogger.log("🔘 [Drag] performDragOperation DropTargetView (MenuBar button) called")
-        
-        // 优先使用现代 API 读取文件 URL
-        if let urls = sender.draggingPasteboard.readObjects(
-            forClasses: [NSURL.self],
-            options: [.urlReadingFileURLsOnly: true]
-        ) as? [URL], !urls.isEmpty {
-            FileLogger.log("✅ [Drag] DropTargetView: \\(urls.count) file(s) via new API")
-            delegate?.didPerformDrop(urls: urls)
-            return true
+
+        let urls = LocalFileDrag.stagedOrCurrentLocalFileURLs(from: sender.draggingPasteboard)
+        guard !urls.isEmpty else {
+            FileLogger.log("❌ [Drag] DropTargetView: performDragOperation failed - no local files found")
+            return false
         }
-        
-        // 兜底：旧版 NSFilenamesPboardType
-        if let paths = sender.draggingPasteboard.propertyList(
-            forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")
-        ) as? [String], !paths.isEmpty {
-            FileLogger.log("✅ [Drag] DropTargetView: \\(paths.count) file(s) via NSFilenamesPboardType fallback")
-            let urls = paths.map { URL(fileURLWithPath: $0) }
-            delegate?.didPerformDrop(urls: urls)
-            return true
-        }
-        
-        FileLogger.log("❌ [Drag] DropTargetView: performDragOperation failed - no URLs found")
-        return false
+
+        FileLogger.log("✅ [Drag] DropTargetView: \\(urls.count) local file(s) accepted")
+        delegate?.didPerformDrop(urls: urls)
+        return true
     }
 }

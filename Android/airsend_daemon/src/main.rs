@@ -6,9 +6,9 @@ use notify::{Watcher, RecursiveMode, EventKind, event::ModifyKind, event::Rename
 
 use tracing_subscriber::fmt::format::FmtSpan;
 use anyhow::{Result, Context};
-use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
-use localsend::{Client, TlsIdentity};
+use localsend::{current_network_binding, ports::{DISCOVERY_PORT, TRANSFER_PORT}, Client, TlsIdentity};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -41,7 +41,6 @@ const LOG_FILE: &str = "airsend_daemon.log";
 const TLS_DIR: &str = "/data/adb/airsend";
 const TLS_CERT_PATH: &str = "/data/adb/airsend/server-cert.pem";
 const TLS_KEY_PATH: &str = "/data/adb/airsend/server-key.pem";
-
 #[derive(Clone)]
 struct PreparedTlsIdentity {
     cert_pem: Vec<u8>,
@@ -218,11 +217,18 @@ async fn main() -> Result<()> {
 
     let tls_identity = load_or_create_tls_identity().context("Failed to initialize TLS identity")?;
     info!("🔐 TLS 设备指纹: {}", tls_identity.fingerprint);
-    let device_info = DeviceInfo::headless_with_identity(tls_identity.fingerprint.clone(), "https");
+    let device_info = DeviceInfo::headless_with_identity(tls_identity.fingerprint.clone(), "http");
 
     // 2. 🛡️ 引入韧性轮询：等待系统网络底层设备 (wlan0/tun0) 挂载完成
     let mut client = loop {
-        match Client::with_config(device_info.clone(), 53317, "/sdcard/Download/AirSend".to_string()).await {
+        match Client::with_config(
+            device_info.clone(),
+            TRANSFER_PORT,
+            DISCOVERY_PORT,
+            "/sdcard/Download/AirSend".to_string(),
+        )
+        .await
+        {
             Ok(c) => {
                 tracing::info!("🌐 网络设备就绪，LocalSend 客户端初始化成功！");
                 break c;
@@ -239,25 +245,28 @@ async fn main() -> Result<()> {
         .danger_accept_invalid_certs(true)
         .no_proxy(); // 🔪 彻底物理切断所有内置代理探测逻辑
 
-    if !client.multicast_interface.is_unspecified() {
-        http_client_builder =
-            http_client_builder.local_address(IpAddr::V4(client.multicast_interface));
-    }
-
+    // Android 热点/网络切换后，固定绑定旧的源 IP 或网卡会让 reqwest 持续报
+    // "Cannot assign requested address"，导致 Android -> Mac 的主动发送失效。
+    // 这里让内核按当前路由自行选择出口；UDP 发现 socket 仍然保持独立的 LAN 绑定。
     if let Some(interface) = client.bind_interface.as_deref() {
-        http_client_builder = http_client_builder.interface(interface);
-        tracing::info!("🌐 出站网络绑定: {} ({})", interface, client.multicast_interface);
+        tracing::info!(
+            "🌐 出站 HTTP 走系统路由（当前检测到 {} / {}）",
+            interface,
+            client.multicast_interface
+        );
     } else if !client.multicast_interface.is_unspecified() {
-        tracing::info!("🌐 出站网络绑定: {}", client.multicast_interface);
+        tracing::info!(
+            "🌐 出站 HTTP 走系统路由（当前检测到 {}）",
+            client.multicast_interface
+        );
+    } else {
+        tracing::info!("🌐 出站 HTTP 走系统路由（未固定源地址）");
     }
 
     client.http_client = http_client_builder
         .build()
         .context("Failed to build insecure HTTP client")?;
-    client.tls_identity = Some(TlsIdentity {
-        cert_pem: tls_identity.cert_pem.clone(),
-        key_pem: tls_identity.key_pem.clone(),
-    });
+    client.tls_identity = None;
 
     let state = Arc::new(AppState {
         client,
@@ -277,6 +286,11 @@ async fn main() -> Result<()> {
     });
     info!("LocalSend 协议栈已在后台并发运行");
 
+    spawn_network_rebind_watcher((
+        state.client.bind_interface.clone(),
+        state.client.multicast_interface,
+    ));
+
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
@@ -295,6 +309,58 @@ async fn main() -> Result<()> {
 struct AppState {
     client: Client,
     preferred_target: Mutex<Option<String>>,
+}
+
+fn spawn_network_rebind_watcher(initial_binding: (Option<String>, Ipv4Addr)) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+
+            let Some((interface, ipv4)) = current_network_binding() else {
+                continue;
+            };
+
+            let binding_changed = initial_binding.0.as_deref() != Some(interface.as_str())
+                || initial_binding.1 != ipv4;
+            if !binding_changed {
+                continue;
+            }
+
+            warn!(
+                "🔄 检测到网络绑定变化: {:?}/{:?} -> {}/{}. 准备重启 daemon 以重绑局域网 socket",
+                initial_binding.0,
+                initial_binding.1,
+                interface,
+                ipv4
+            );
+
+            if let Err(err) = schedule_self_restart() {
+                error!("❌ 计划重启 daemon 失败: {err:#}");
+                continue;
+            }
+
+            warn!("♻️ 旧 daemon 退出，等待新进程接管");
+            std::process::exit(0);
+        }
+    });
+}
+
+fn schedule_self_restart() -> Result<()> {
+    let daemon_bin = std::env::current_exe()
+        .context("failed to resolve current daemon path")?;
+    let log_file = format!("{}/{}", LOG_PATH, LOG_FILE);
+    let script = format!(
+        "sleep 1; nohup '{}' >> '{}' 2>&1 &",
+        daemon_bin.display(),
+        log_file
+    );
+
+    Command::new("sh")
+        .args(["-c", &script])
+        .spawn()
+        .context("failed to spawn daemon restart helper")?;
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -610,18 +676,58 @@ async fn send_to_target(
     is_text: bool,
 ) -> Result<()> {
     if is_text {
-        tracing::info!("🚀 正在向 [{}] {} 发起 HTTPS 握手...", target_id, target_addr);
-        // 🚨 关键修复 1：传入 target_id 而不是 target_addr
+        tracing::info!("🚀 正在向 [{}] {} 发起直连握手...", target_id, target_addr);
         if let Err(e) = send_text_protocol(&state.client, target_id, data).await {
-            tracing::error!("❌ HTTPS 发送彻底失败，底层错误链:\n{:#?}", e);
-            return Err(e);
+            tracing::warn!("⚠️ 直连文本发送失败，切换 Campus 组播 fallback: {:#?}", e);
+            if let Err(fallback_err) = state.client.send_campus_text(target_id, data).await {
+                tracing::error!("❌ Campus 组播文本 fallback 也失败了:\n{:#?}", fallback_err);
+                return Err(fallback_err.into());
+            }
         }
     } else {
-        // 🚨 关键修复 2：send_file 同样需要 target_id 作为参数
-        state.client.send_file(target_id.to_string(), PathBuf::from(data)).await?;
+        let path = PathBuf::from(data);
+        if let Err(e) = state.client.send_file(target_id.to_string(), path.clone()).await {
+            tracing::warn!("⚠️ 直连文件发送失败，切换 Campus 组播 fallback: {:#?}", e);
+            let bytes = tokio::fs::read(&path).await?;
+            let file_name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("CampusTransfer.bin");
+            let file_type = infer_campus_mime_type(&path);
+            if let Err(fallback_err) = state
+                .client
+                .send_campus_file(target_id, file_name, &file_type, &bytes)
+                .await
+            {
+                tracing::error!("❌ Campus 组播文件 fallback 也失败了:\n{:#?}", fallback_err);
+                return Err(fallback_err.into());
+            }
+        }
     }
     tracing::info!("✅ 发送成功！");
     Ok(())
+}
+
+fn infer_campus_mime_type(path: &Path) -> String {
+    let ext = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase());
+
+    match ext.as_deref() {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("heic") => "image/heic",
+        Some("mp4") => "video/mp4",
+        Some("mov") => "video/quicktime",
+        Some("txt") => "text/plain",
+        Some("json") => "application/json",
+        Some("pdf") => "application/pdf",
+        _ => "application/octet-stream",
+    }
+    .to_string()
 }
 
 // 🚨 关键修复 3：参数名改为 peer_id，并在方法内准确传递给 prepare_upload

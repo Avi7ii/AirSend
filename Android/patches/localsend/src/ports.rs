@@ -1,0 +1,2 @@
+pub const DISCOVERY_PORT: u16 = 53317;
+pub const TRANSFER_PORT: u16 = 53319;

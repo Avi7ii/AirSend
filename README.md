@@ -29,7 +29,7 @@ AirSend 是一套专为 **Mac + Android** 用户设计的跨平台互联工具�
 - **macOS 端**：一个用 Swift 原生开发的菜单栏应用，内存占用约 20MB，没有主窗口，拖拽即发
 - **Android 端**：按需选择——可以直接用官方 LocalSend，也可以安装 AirSend 定制 App 获得系统级深度集成
 
-> **网络要求**：两台设备需在同一 Wi-Fi 局域网下，路由器未开启 AP 隔离。
+> **网络要求**：两台设备需在同一 Wi-Fi 局域网下，路由器未开启 AP 隔离。默认仍优先使用 HTTPS；如果你所在的是“能发现但几乎传不动”的校园网/宿舍网，请看下文的 `HTTP 兼容模式`。
 
 ---
 
@@ -46,6 +46,8 @@ AirSend 是一套专为 **Mac + Android** 用户设计的跨平台互联工具�
 | 图片剪贴板同步   | ❌                    | ✅ Mac 复制图片自动发到 Android   |
 | Android 后台保活 | 依赖系统进程管理     | Rust 守护进程，脱离 App 生命周期 |
 | 系统级剪贴板访问 | ❌                    | ✅（需 Root + LSPosed）           |
+| 校园网兼容路径   | ❌ 无手动 HTTP 兼容链路 | ✅ 手动 HTTP 兼容模式（默认关闭） |
+| 复杂拖拽体验     | 常规主窗口拖放       | ✅ DropZone 预热、防弹回、后台最小化 |
 | 协议兼容性       | ✅ LocalSend 标准协议 | ✅ 完全兼容 LocalSend 协议        |
 
 </div>
@@ -62,7 +64,19 @@ AirSend 是一套专为 **Mac + Android** 用户设计的跨平台互联工具�
 
 接收到的文件直接以流式写入保存到下载目录，文件名冲突时自动重命名（如 `photo (1).jpg`），不占用额外内存缓存。
 
-由于完全兼容 LocalSend 协议，Android 端用官方 LocalSend App 即可与 Mac 互传文件，无需额外配置。
+在家庭路由器、手机热点等正常局域网下，AirSend 默认继续使用 LocalSend 标准 HTTPS 协议，Android 端直接用官方 LocalSend App 即可与 Mac 互传文件，无需额外配置。
+
+但如果你所在的是校园网、宿舍网或其他策略复杂的企业/学校局域网，官方 LocalSend 往往只能停留在“发现得到设备，但实际数据传不动”。这时需要使用 AirSend 的完整模式和下方的 `HTTP 兼容模式`。
+
+### 🌐 校园网 / 复杂局域网兼容
+
+AirSend 3.0.0 新增了一个**默认关闭、需手动开启**的 `HTTP 兼容模式`，专门给“设备在线、发现正常、但 HTTPS 数据面反复超时”的校园网环境准备。
+
+- 默认仍是 **HTTPS 安全模式**，不会影响正常家庭网络或与官方 LocalSend 的标准协议互通
+- 当校园网里 **能发现但发不出去** 时，可在 macOS 菜单栏 `Advanced -> Compatibility Mode (HTTP)` 手动打开兼容模式
+- 打开后，Mac 端会启用 plain HTTP 接收链路；发送端会在真正发文件/文字前做一次数据面预检，尽量选择当前校网里真正可通的传输路径
+- 这条兼容路径是 AirSend 针对复杂局域网额外做的能力，**官方 LocalSend 当前做不到**
+- 建议只在校园网/宿舍网这类异常环境下开启；家庭路由器和热点仍推荐保持默认 HTTPS
 
 ### 📋 剪贴板双向同步
 
@@ -76,11 +90,11 @@ AirSend 是一套专为 **Mac + Android** 用户设计的跨平台互联工具�
 
 Android 截图后，不需要打开任何 App、不需要手动分享，截图文件会直接出现在 Mac 的下载目录里。
 
-实现方式：Rust 守护进程通过 Linux `inotify` 持续监听截图目录，检测到新文件写入完成后延迟 1 秒（等待 EXT4 完成写盘），然后直接通过 HTTPS 推送至 Mac。兼容 AOSP 原生截图路径及 MIUI、HyperOS、ColorOS 等常见定制 ROM 的路径。
+实现方式：Rust 守护进程通过 Linux `inotify` 持续监听截图目录，检测到新文件写入完成后延迟 1 秒（等待 EXT4 完成写盘），然后直接通过默认 HTTPS 或兼容模式下的 HTTP 链路推送至 Mac。兼容 AOSP 原生截图路径及 MIUI、HyperOS、ColorOS 等常见定制 ROM 的路径。
 
 ### 🖼️ 图片剪贴板同步（Mac → Android）
 
-Mac 端复制截图或图片时，会优先检测剪贴板中是否存在 TIFF 格式图片数据，转换为 PNG 后通过 HTTPS 发送到 Android。
+Mac 端复制截图或图片时，会优先检测剪贴板中是否存在 TIFF 格式图片数据，转换为 PNG 后通过默认 HTTPS 或兼容模式下的 HTTP 链路发送到 Android。
 
 ### 📱 系统分享菜单集成（Direct Share）
 
@@ -98,7 +112,7 @@ Mac 端复制截图或图片时，会优先检测剪贴板中是否存在 TIFF �
 | Android（基础文件传输） | Android 8.0+，安装官方 LocalSend 即可               |
 | Android（完整功能）     | Root 权限 + Magisk 或 KernelSU + LSPosed            |
 | 网络                    | 两端设备处于同一 Wi-Fi 局域网，路由器未开启 AP 隔离 |
-| 防火墙                  | 放行 UDP 53317 和 TCP 53317                         |
+| 防火墙                  | 放行 UDP 53317，以及 TCP 53317-53319               |
 
 </div>
 
@@ -135,14 +149,14 @@ flowchart TB
         end
 
         subgraph Mac_Network ["Network.framework - 双引擎"]
-            UDP_Disc["UDPDiscoveryService / 端口 53317 / 局域网广播 / 连接后停播"]:::mac_node
-            HTTP_Trans["HTTPTransferServer NWListener Actor / TLS 1.2-1.3 / ALPN http1.1 / 独立连接队列"]:::mac_node
+            UDP_Disc["UDPDiscoveryService / 端口 53317 / 局域网广播 / 兼容探测"]:::mac_node
+            HTTP_Trans["HTTPTransferServer / HTTPS 默认 + HTTP 兼容 / 端口 53318 / 独立连接队列"]:::mac_node
             CertMgr -->|"注入 TLS 身份"| HTTP_Trans
         end
 
         subgraph Mac_Send ["发送引擎"]
-            FileSender["文件发送器 / HTTPS 分块传输 / 广播或单播"]:::mac_node
-            ClipSender["剪贴板发送器 / 文字为 clipboard.txt / 图片为 PNG"]:::mac_node
+            FileSender["文件发送器 / HTTPS 默认 / HTTP 兼容预检 / 广播或单播"]:::mac_node
+            ClipSender["剪贴板发送器 / 文字为 clipboard.txt / 图片为 PNG / 兼容模式支持"]:::mac_node
         end
 
         subgraph Mac_Clipboard ["剪贴板引擎"]
@@ -187,7 +201,7 @@ flowchart TB
 
         subgraph Rust_Daemon ["Rust 守护进程 - arm64-v8a - Magisk 模块"]
             inotify["inotify / notify crate / EXT4 Close-Write 和 Rename 事件 / 1s 刚度延迟"]:::daemon_node
-            TokioCore["Tokio 异步运行时 / Reqwest Client / 强制斠此代理"]:::daemon_node
+            TokioCore["Tokio 异步运行时 / Reqwest Client / 端口 53319 / 复杂网络重绑"]:::daemon_node
             UDSServer["Unix 块套接字 / @airsend-ipc 和 @airsend-app-ipc"]:::daemon_node
             inotify -->|"捕获截图"| TokioCore
             UDSServer <-->|"IPC 指令总线"| TokioCore
@@ -202,11 +216,11 @@ flowchart TB
     %% ==========================================
     %% 第三部分：局域网双端跨越
     %% ==========================================
-    UDP_Disc <===>|"广播发现 - LocalSend 协议兼容"| TokioCore:::protocol_line
-    TokioCore ==>|"HTTPS - 截图自动发送 - inotify 触发"| HTTP_Trans:::protocol_line
-    ClipSender ==>|"HTTPS - clipboard.txt - 到达后阅后即焚"| TokioCore:::protocol_line
-    TokioCore ==>|"HTTPS - Android 剪贴板同步到 Mac NSPasteboard"| HTTP_Trans:::protocol_line
-    FileSender <==>|"HTTPS 分块 - 拖拽文件传输"| TokioCore:::protocol_line
+    UDP_Disc <===>|"UDP 发现 - LocalSend 协议兼容"| TokioCore:::protocol_line
+    TokioCore ==>|"HTTPS/HTTP - 截图自动发送 - inotify 触发"| HTTP_Trans:::protocol_line
+    ClipSender ==>|"HTTPS/HTTP - clipboard.txt / PNG / 校园网兼容"| TokioCore:::protocol_line
+    TokioCore ==>|"HTTPS/HTTP - Android 剪贴板同步到 Mac NSPasteboard"| HTTP_Trans:::protocol_line
+    FileSender <==>|"HTTPS 默认 / HTTP 兼容 / 分块文件传输"| TokioCore:::protocol_line
 
 ```
 
@@ -214,11 +228,11 @@ flowchart TB
 <summary>� 读图说明（点击展开）</summary>
 <br>
 
-- **黄色链路**：LocalSend 协议的 HTTPS 传输通道，Mac 和 Android 的数据都经此跨越路由器
-- **蓝色区域（macOS 端）**：纯 Swift 实现，基于 `Network.framework` 的 NWListener，TLS 1.2-1.3 加密，每个连接分配独立调度队列
+- **黄色链路**：默认是 LocalSend 协议的 HTTPS 传输通道；开启兼容模式后会切到 plain HTTP，专门应对复杂校园网
+- **蓝色区域（macOS 端）**：纯 Swift 实现，默认走 `Network.framework` HTTPS 接收，同时提供可手动启用的 plain HTTP 兼容接收器
 - **绿色区域（Android App 层）**：Kotlin 前台服务，每 30 秒轮询守护进程获取在线设备，更新 Direct Share 快捷方式
 - **紫色区域（Xposed 层）**：运行在 `system_server` 进程中，以 UID 1000 权限绕过 Android 10+ 的后台剪贴板访问限制，同时作为双向 IPC 总线的 Mac→Android 方向终点
-- **橙色区域（Rust Daemon）**：独立于 App 生命周期的 `arm64-v8a` 原生进程，通过两条 Unix 域套接字（`@airsend_ipc` 和 `@airsend_app_ipc`）分别与 Kotlin App 层和 Xposed 层通信
+- **橙色区域（Rust Daemon）**：独立于 App 生命周期的 `arm64-v8a` 原生进程，通过两条 Unix 域套接字（`@airsend_ipc` 和 `@airsend_app_ipc`）分别与 Kotlin App 层和 Xposed 层通信，并负责复杂网络下的重绑恢复
 
 </details>
 
@@ -257,6 +271,9 @@ Android 端分两种模式：
 
 安装官方 [LocalSend](https://github.com/localsend/localsend/releases) 即可与 Mac 互传文件，兼容性最好。
 
+如果你所在的是普通家庭 Wi-Fi 或热点，这也是最推荐的入门方式。  
+如果你所在的是**能发现设备、但文件几乎传不动**的校园网/宿舍网，仅靠官方 LocalSend 往往不够，这时需要使用 AirSend 完整模式和 HTTP 兼容能力。
+
 **不包含的功能**：剪贴板自动同步、截图自动推送、Direct Share 快捷方式。
 
 ### 🔴 完整模式（需要 Root + Magisk/KernelSU + LSPosed）
@@ -276,9 +293,10 @@ Android 端分两种模式：
 以 Magisk 模块形式随系统启动，完全独立于 App 生命周期。主要职责：
 
 - 绑定 `@airsend_ipc`（接收 Kotlin 和 Xposed 的命令）和 `@airsend_app_ipc`（向 Xposed 推送 Mac 下发的内容）两条 Unix 域套接字
-- 通过 `inotify`（`notify` crate）持续监听 `/data/media/0/Pictures/Screenshots` 和 `/data/media/0/DCIM/Screenshots`，检测到截图写入完成后延迟 1 秒（等待 EXT4 页缓存刷盘），再通过 LocalSend HTTPS 推送到 Mac
+- 通过 `inotify`（`notify` crate）持续监听 `/data/media/0/Pictures/Screenshots` 和 `/data/media/0/DCIM/Screenshots`，检测到截图写入完成后延迟 1 秒（等待 EXT4 页缓存刷盘），再通过 HTTPS / HTTP 兼容链路推送到 Mac
 - 通过 LocalSend 协议栈维护一份在线设备表，响应 Kotlin App 的 `GET_PEERS` 查询
-- 启动时强制清除所有代理环境变量（`NO_PROXY=*`），确保 HTTPS 请求直连 Mac，不经过 VPN 或代理工具
+- 启动时强制清除所有代理环境变量（`NO_PROXY=*`），确保局域网请求直连 Mac，不经过 VPN 或代理工具
+- 监听网络绑定变化，在热点/校园网切换后主动重绑，减少旧 socket 残留导致的假在线
 
 
 
@@ -306,6 +324,8 @@ Android 端分两种模式：
 
 直接安装官方 [LocalSend](https://github.com/localsend/localsend/releases)。Mac 和 Android 在同一 Wi-Fi 下即可互传文件，无需任何额外配置。
 
+如果是在校园网/宿舍网里测试，发现两端**能看到彼此、但一发就卡住**，请不要停留在基础模式，直接使用下方完整模式，并在 Mac 菜单栏里手动打开 `Advanced -> Compatibility Mode (HTTP)`。
+
 **完整模式（Root 用户）**
 
 1. 在 [Releases 页面](https://github.com/Avi7ii/AirSend/releases/latest) 下载最新版Magisk模块
@@ -320,7 +340,17 @@ Android 端分两种模式：
 
 **Q：两端互相发现不了？**
 
-确认两台设备在同一 Wi-Fi 下，且路由器没有开启「AP 隔离」或「无线客户端隔离」功能（部分路由器默认开启此选项）。防火墙需放行 UDP 53317 和 TCP 53317。并尝试在Mac菜单中点击Refresh and Rescan
+确认两台设备在同一 Wi-Fi 下，且路由器没有开启「AP 隔离」或「无线客户端隔离」功能（部分路由器默认开启此选项）。防火墙需放行 UDP 53317，以及 TCP 53317-53319。并尝试在 Mac 菜单中点击 `Rescan and Refresh`。
+
+---
+
+**Q：校园网里能发现设备，但一发就超时或几乎不可用怎么办？**
+
+先确认热点或家庭 Wi-Fi 下是否正常；如果正常，而校园网里只有发现正常、实际传输持续卡住，那通常不是设备本身坏了，而是校园网数据面策略太激进。
+
+- 家庭网络 / 热点：保持默认 HTTPS 即可
+- 校园网 / 宿舍网：使用 AirSend 完整模式，并在 Mac 菜单栏 `Advanced -> Compatibility Mode (HTTP)` 手动开启兼容模式
+- 官方 LocalSend：目前**没有** AirSend 这条手动 HTTP 兼容路径
 
 ---
 

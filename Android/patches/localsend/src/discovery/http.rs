@@ -1,16 +1,27 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::time::Duration;
 use tokio::sync::Mutex;
 
 use axum::{extract::{ConnectInfo, State}, Extension, Json};
 
-use crate::{models::device::DeviceInfo, Client};
+use crate::{models::device::DeviceInfo, ports::TRANSFER_PORT, remember_peer_entry, Client};
 
 impl Client {
     pub async fn announce_http(&self, ip: Option<SocketAddr>, protocol: &str) -> crate::error::Result<()> {
         if let Some(ip) = ip {
             let url = format!("{}://{}/api/localsend/v2/register", protocol, ip);
-            // 使用 Client 实例自己的 http_client (这已经被我们在 main.rs 里注入了不安全证书配置)
-            self.http_client.post(&url).json(&self.device).send().await?;
+            // Discovery 流量不应与真正的传输复用长连接，否则换网后会把
+            // /register、/prepare-upload、/upload 串在同一条 keep-alive 通道上，
+            // 导致 30s 级别的队头阻塞。
+            let response = self
+                .http_client
+                .post(&url)
+                .header("Connection", "close")
+                .timeout(Duration::from_secs(1))
+                .json(&self.device)
+                .send()
+                .await?;
+            let _ = response.bytes().await?;
         }
         Ok(())
     }
@@ -20,7 +31,7 @@ impl Client {
         let mut address_list = Vec::new();
         for j in 0..256 {
             for k in 0..256 {
-                address_list.push(format!("192.168.{:03}.{}:53317", j, k));
+                address_list.push(format!("192.168.{:03}.{}:{}", j, k, TRANSFER_PORT));
             }
         }
 
@@ -41,6 +52,7 @@ pub async fn register_device(
 ) -> Json<DeviceInfo> {
     let mut addr = addr;
     addr.set_port(device.port);
-    peers.lock().await.insert(device.fingerprint.clone(), (addr, device.clone()));
+    let mut peers = peers.lock().await;
+    remember_peer_entry(&mut peers, addr, device.clone());
     Json(client)
 }

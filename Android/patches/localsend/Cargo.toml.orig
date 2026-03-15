@@ -11,6 +11,7 @@ readme = "README.md"
 [dependencies]
 axum = { version = "0.7.9", features = ["json", "macros", "tokio"] }
 axum-macros = "0.4.2"
+base64 = "0.22.1"
 chrono = "0.4.39"
 hyper = { version = "1.8.1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1.20", features = ["server", "tokio", "http1", "http2", "service"] }

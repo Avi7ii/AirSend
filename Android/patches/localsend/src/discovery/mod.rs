@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use crate::{models::device::DeviceInfo, Client};
+use crate::{models::device::DeviceInfo, remember_peer_entry, Client};
 
 pub mod http;
 pub mod multicast;
@@ -13,6 +13,9 @@ impl Client {
     }
 
     async fn process_device(&self, message: &str, src: SocketAddr ) {
+        if self.maybe_handle_campus_message(message).await {
+            return;
+        }
         if let Ok(device) = serde_json::from_str::<DeviceInfo>(message) {
             if device.fingerprint == self.device.fingerprint {
                 return;
@@ -21,8 +24,10 @@ impl Client {
             let mut src = src;
             src.set_port(device.port); // Update the port to the one the device sent
 
+            self.maybe_pin_peer_neighbor(src.ip(), device.mac_address.as_deref()).await;
+
             let mut peers = self.peers.lock().await;
-            peers.insert(device.fingerprint.clone(), (src.clone(), device.clone()));
+            remember_peer_entry(&mut peers, src, device.clone());
 
             if device.announce != Some(true) {
                 return;

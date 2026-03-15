@@ -20,6 +20,7 @@ struct MulticastDto: Codable {
     let deviceModel: String?
     let deviceType: String? // nullable since v2
     let fingerprint: String
+    let macAddress: String?
     let port: Int? // v2
     let protocolType: ProtocolType? // v2, mapped from 'protocol'
     let download: Bool? // v2
@@ -32,6 +33,7 @@ struct MulticastDto: Codable {
         case deviceModel
         case deviceType
         case fingerprint
+        case macAddress
         case port
         case protocolType = "protocol"
         case download

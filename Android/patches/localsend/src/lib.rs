@@ -1,14 +1,18 @@
 pub mod discovery;
 pub mod error;
 pub mod models;
+pub mod ports;
 pub mod server;
 pub mod transfer;
+pub mod campus_fallback;
 
 use crate::models::device::DeviceInfo;
+use crate::ports::{DISCOVERY_PORT, TRANSFER_PORT};
 use socket2::SockRef;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket as StdUdpSocket};
 use std::process::Command;
+use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::task::JoinHandle;
 use std::sync::Arc;
@@ -27,6 +31,7 @@ pub struct Client {
     pub socket: Arc<UdpSocket>,
     pub multicast_addr: SocketAddrV4,
     pub port: u16,
+    pub discovery_port: u16,
     pub peers: Arc<Mutex<HashMap<String, (SocketAddr, DeviceInfo)>>>,
     pub sessions: Arc<Mutex<HashMap<String, Session>>>, // Session ID to Session
     pub http_client: reqwest::Client,
@@ -34,6 +39,8 @@ pub struct Client {
     pub bind_interface: Option<String>,
     pub multicast_interface: Ipv4Addr,
     pub tls_identity: Option<TlsIdentity>,
+    pub pinned_neighbors: Arc<Mutex<HashMap<String, String>>>,
+    pub campus_fallback: Arc<Mutex<campus_fallback::CampusFallbackState>>,
 }
 
 #[derive(Default)]
@@ -118,6 +125,55 @@ fn detect_network_binding_from_ip(ipv4: Ipv4Addr) -> Option<NetworkBinding> {
         }
     }
 
+    None
+}
+
+pub(crate) fn remember_peer_entry(
+    peers: &mut HashMap<String, (SocketAddr, DeviceInfo)>,
+    addr: SocketAddr,
+    device: DeviceInfo,
+) {
+    let fingerprint = device.fingerprint.clone();
+    peers.retain(|existing_fingerprint, (existing_addr, existing_info)| {
+        if existing_fingerprint == &fingerprint {
+            return true;
+        }
+
+        if existing_addr.ip() != addr.ip() || existing_addr.port() != addr.port() {
+            return true;
+        }
+
+        if existing_info.alias != device.alias {
+            return true;
+        }
+
+        match (&existing_info.mac_address, &device.mac_address) {
+            (Some(existing_mac), Some(new_mac)) if !existing_mac.eq_ignore_ascii_case(new_mac) => true,
+            _ => false,
+        }
+    });
+
+    peers.insert(fingerprint, (addr, device));
+}
+
+fn hardware_address_for_interface(interface: &str) -> Option<String> {
+    let output = Command::new("ip")
+        .args(["link", "show", "dev", interface])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    for line in stdout.lines() {
+        let mut parts = line.split_whitespace();
+        while let Some(part) = parts.next() {
+            if part == "link/ether" {
+                return parts.next().map(|value| value.to_ascii_lowercase());
+            }
+        }
+    }
     None
 }
 
@@ -217,13 +273,32 @@ fn detect_network_binding() -> NetworkBinding {
         .unwrap_or_default()
 }
 
+pub fn current_network_binding() -> Option<(String, Ipv4Addr)> {
+    let binding = detect_network_binding();
+    match (binding.interface, binding.ipv4) {
+        (Some(interface), Some(ipv4)) => Some((interface, ipv4)),
+        _ => None,
+    }
+}
+
 impl Client {
     pub async fn default() -> crate::error::Result<Self> {
         let device = DeviceInfo::default();
-        Self::with_config(device, 53317, "/sdcard/Download/AirSend".to_string()).await
+        Self::with_config(
+            device,
+            TRANSFER_PORT,
+            DISCOVERY_PORT,
+            "/sdcard/Download/AirSend".to_string(),
+        )
+        .await
     }
 
-    pub async fn with_config(info: DeviceInfo, port: u16, download_dir: String) -> crate::error::Result<Self>{
+    pub async fn with_config(
+        info: DeviceInfo,
+        transfer_port: u16,
+        discovery_port: u16,
+        download_dir: String,
+    ) -> crate::error::Result<Self> {
         let binding = detect_network_binding();
         if binding.interface.is_none() || binding.ipv4.is_none() {
             return Err(std::io::Error::new(
@@ -232,7 +307,8 @@ impl Client {
             )
             .into());
         }
-        let socket = UdpSocket::bind(format!("0.0.0.0:{}", port.clone())).await?;
+        let socket = UdpSocket::bind(format!("0.0.0.0:{}", discovery_port)).await?;
+        socket.set_broadcast(true)?;
         socket.set_multicast_loop_v4(true)?;
         socket.set_multicast_ttl_v4(255)?;
         let multicast_interface = binding.ipv4.unwrap_or(Ipv4Addr::new(0, 0, 0, 0));
@@ -240,16 +316,31 @@ impl Client {
             SockRef::from(&socket).set_multicast_if_v4(&multicast_interface)?;
         }
         socket.join_multicast_v4(Ipv4Addr::new(224, 0, 0, 167), multicast_interface)?;
-        let multicast_addr = SocketAddrV4::new(Ipv4Addr::new(224, 0, 0, 167), port.clone());
+        let multicast_addr = SocketAddrV4::new(Ipv4Addr::new(224, 0, 0, 167), discovery_port);
         let peers = Arc::new(Mutex::new(HashMap::new()));
-        let http_client = reqwest::Client::new();
+        let http_client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(3))
+            .timeout(Duration::from_secs(20))
+            .pool_max_idle_per_host(0)
+            .pool_idle_timeout(Duration::from_secs(1))
+            .build()?;
         let sessions = Arc::new(Mutex::new(HashMap::new()));
+        let pinned_neighbors = Arc::new(Mutex::new(HashMap::new()));
+        let campus_fallback = Arc::new(Mutex::new(campus_fallback::CampusFallbackState::default()));
+        let mut device = info;
+        device.port = transfer_port;
+        if device.mac_address.is_none() {
+            if let Some(interface) = binding.interface.as_deref() {
+                device.mac_address = hardware_address_for_interface(interface);
+            }
+        }
 
         Ok(Self {
-            device: info,
+            device,
             socket: socket.into(),
             multicast_addr,
-            port,
+            port: transfer_port,
+            discovery_port,
             peers,
             http_client,
             sessions,
@@ -257,6 +348,8 @@ impl Client {
             bind_interface: binding.interface,
             multicast_interface,
             tls_identity: None,
+            pinned_neighbors,
+            campus_fallback,
         })
 
     }
@@ -287,7 +380,9 @@ impl Client {
                     if let Err(e) = client.announce(None).await {
                         eprintln!("Announcement error: {}", e);
                     }
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    let has_peers = !client.peers.lock().await.is_empty();
+                    let next_interval_secs = if has_peers { 30 } else { 5 };
+                    tokio::time::sleep(std::time::Duration::from_secs(next_interval_secs)).await;
                 }
             })
         };
@@ -299,4 +394,58 @@ impl Client {
         let mut peers = self.peers.lock().await;
         peers.clear();
     }
+
+    pub async fn maybe_pin_peer_neighbor(&self, peer_ip: IpAddr, peer_mac: Option<&str>) {
+        let IpAddr::V4(peer_ipv4) = peer_ip else {
+            return;
+        };
+        let Some(interface) = self.bind_interface.clone() else {
+            return;
+        };
+        let Some(mac_address) = peer_mac.map(str::trim).filter(|value| is_valid_mac_address(value)) else {
+            return;
+        };
+
+        let peer_key = peer_ipv4.to_string();
+        let mut pinned = self.pinned_neighbors.lock().await;
+        if pinned.get(&peer_key).map(String::as_str) == Some(mac_address) {
+            return;
+        }
+        drop(pinned);
+
+        let interface_for_command = interface.clone();
+        let peer_for_command = peer_key.clone();
+        let mac_for_command = mac_address.to_string();
+        let result = tokio::task::spawn_blocking(move || {
+            Command::new("su")
+                .args([
+                    "-c",
+                    &format!(
+                        "ip neigh replace {} lladdr {} dev {} nud permanent",
+                        peer_for_command, mac_for_command, interface_for_command
+                    ),
+                ])
+                .output()
+        })
+        .await;
+
+        match result {
+            Ok(Ok(output)) if output.status.success() => {
+                let mut pinned = self.pinned_neighbors.lock().await;
+                pinned.insert(peer_key.clone(), mac_address.to_string());
+                eprintln!("Pinned peer neighbor {} -> {} on {}", peer_key, mac_address, interface);
+            }
+            Ok(Ok(output)) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                eprintln!("Failed to pin neighbor {} -> {}: {}", peer_key, mac_address, stderr.trim());
+            }
+            Ok(Err(err)) => eprintln!("Failed to spawn ip neigh command: {}", err),
+            Err(err) => eprintln!("Neighbor pin task failed: {}", err),
+        }
+    }
+}
+
+fn is_valid_mac_address(value: &str) -> bool {
+    let parts: Vec<_> = value.split(':').collect();
+    parts.len() == 6 && parts.iter().all(|part| part.len() == 2 && u8::from_str_radix(part, 16).is_ok())
 }

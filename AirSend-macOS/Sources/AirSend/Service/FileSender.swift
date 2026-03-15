@@ -7,9 +7,9 @@ actor FileSender {
     private let deviceType = DeviceType.desktop
     private let myFingerprint: String
     
-    private let session: URLSession
     private let sessionDelegate: SessionDelegate
     private let localProtocol: ProtocolType
+    private let campusFallback: CampusFallbackCoordinator?
     
     // Callback for progress: (overallProgress 0.0-1.0)
     var onProgress: (@Sendable (Double) -> Void)?
@@ -24,27 +24,19 @@ actor FileSender {
     
     // Active upload sessions (for cancellation)
     private var activeSessions: Set<URLSession> = []
+    private var activeProcesses: [Process] = []
     private var isCancelled = false
 
-    init(fingerprint: String, localProtocol: ProtocolType = .https) {
+    init(
+        fingerprint: String,
+        localProtocol: ProtocolType = .https,
+        campusFallback: CampusFallbackCoordinator? = nil
+    ) {
         self.myFingerprint = fingerprint
         self.localProtocol = localProtocol
+        self.campusFallback = campusFallback
         let delegate = SessionDelegate()
         self.sessionDelegate = delegate
-        
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 45 
-        config.timeoutIntervalForResource = 86400 
-        
-        // LIMIT to 1 connection per host to ensure maximum stability and avoid H2 multiplexing issues
-        config.httpMaximumConnectionsPerHost = 1
-        config.waitsForConnectivity = true
-        config.httpShouldUsePipelining = false
-        
-        // CRITICAL: Bypass system proxy (Clash etc.) for local network communication
-        config.connectionProxyDictionary = [:]
-        
-        self.session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
     }
     
     func setOnProgress(_ callback: @escaping @Sendable (Double) -> Void) {
@@ -62,13 +54,18 @@ actor FileSender {
     /// Cancel the current upload immediately
     /// Cancel the current upload immediately
     func cancelCurrentTransfer() {
-        logTransfer("🛑 [FileSender] cancelCurrentTransfer called. isCancelled: \(isCancelled), activeSessions count: \(activeSessions.count)")
+        logTransfer("🛑 [FileSender] cancelCurrentTransfer called. isCancelled: \(isCancelled), activeSessions count: \(activeSessions.count), activeProcesses count: \(activeProcesses.count)")
         isCancelled = true
         for session in activeSessions {
             logTransfer("🛑 [FileSender] Invalidating and cancelling an active URLSession...")
             session.invalidateAndCancel()
         }
+        for process in activeProcesses where process.isRunning {
+            logTransfer("🛑 [FileSender] Terminating active curl process...")
+            process.terminate()
+        }
         activeSessions.removeAll()
+        activeProcesses.removeAll()
         logTransfer("🛑 [FileSender] All uploads cancelled by user/system")
         onCancelled?()
     }
@@ -79,10 +76,159 @@ actor FileSender {
         let progress = min(Double(totalSent) / Double(totalBytes), 1.0)
         onProgress?(progress)
     }
+
+    private func updateFallbackProgress(fileId: String, sentBytes: Int64) {
+        sentBytesMap[fileId] = sentBytes
+        updateGlobalProgress()
+    }
+
+    private func makeSession(requestTimeout: TimeInterval,
+                             resourceTimeout: TimeInterval,
+                             delegate: SessionDelegate? = nil) -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = requestTimeout
+        config.timeoutIntervalForResource = resourceTimeout
+        config.httpMaximumConnectionsPerHost = 1
+        config.waitsForConnectivity = false
+        config.httpShouldUsePipelining = false
+        config.connectionProxyDictionary = [:]
+        return URLSession(configuration: config, delegate: delegate ?? sessionDelegate, delegateQueue: nil)
+    }
+
+    private func formattedHost(for device: Device) -> String {
+        if device.ip.contains(":") && !device.ip.hasPrefix("[") {
+            return "[\(device.ip)]"
+        }
+        return device.ip
+    }
+
+    private func buildURL(for device: Device, scheme: String, path: String) -> URL? {
+        URL(string: "\(scheme)://\(formattedHost(for: device)):\(device.port)\(path)")
+    }
+
+    private func probeReachability(to device: Device, scheme: String) async throws {
+        guard let url = buildURL(for: device, scheme: scheme, path: "/api/localsend/v2/info") else {
+            throw NSError(domain: "FileSender", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid probe URL"])
+        }
+
+        let response = try await performCurlRequest(
+            url: url.absoluteString,
+            method: "GET",
+            headers: [
+                "User-Agent: LocalSend/3.0.0",
+                "Connection: close"
+            ],
+            timeout: 4.0
+        )
+
+        guard 200..<300 ~= response.statusCode else {
+            throw NSError(domain: "FileSender", code: -1, userInfo: [NSLocalizedDescriptionKey: "Probe failed for \(scheme.uppercased())"])
+        }
+    }
+
+    private func isTransientTransportError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain {
+            return nsError.code == NSURLErrorTimedOut
+                || nsError.code == NSURLErrorNetworkConnectionLost
+                || nsError.code == NSURLErrorNotConnectedToInternet
+        }
+        if nsError.domain == "FileSenderCurl" {
+            return nsError.code == 28
+        }
+        return false
+    }
+
+    private func shouldFallbackScheme(for device: Device, preferredScheme: String, after error: Error) -> Bool {
+        if !device.https {
+            return true
+        }
+        guard preferredScheme == "https" else {
+            return true
+        }
+        return !isTransientTransportError(error)
+    }
+
+    private func resolveReachableScheme(for device: Device, preferredScheme: String) async throws -> String {
+        let fallbackScheme = preferredScheme == "https" ? "http" : "https"
+        var lastError: Error?
+
+        let preferredAttempts = (device.https && preferredScheme == "https") ? 3 : 2
+
+        for attempt in 1...preferredAttempts {
+            do {
+                try await probeReachability(to: device, scheme: preferredScheme)
+                if attempt == 1 {
+                    logTransfer("✅ Data-plane preflight passed via \(preferredScheme.uppercased()) for \(device.alias)")
+                } else {
+                    logTransfer("✅ Data-plane preflight recovered via \(preferredScheme.uppercased()) for \(device.alias) on retry \(attempt)/\(preferredAttempts)")
+                }
+                return preferredScheme
+            } catch {
+                lastError = error
+                logTransfer("⚠️ Preflight \(preferredScheme.uppercased()) failed for \(device.alias) [attempt \(attempt)/\(preferredAttempts)]: \(error.localizedDescription)")
+                if attempt < preferredAttempts && isTransientTransportError(error) {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    continue
+                }
+                break
+            }
+        }
+
+        if let fallbackTriggerError = lastError, shouldFallbackScheme(for: device, preferredScheme: preferredScheme, after: fallbackTriggerError) {
+            do {
+                try await probeReachability(to: device, scheme: fallbackScheme)
+                logTransfer("🔁 Data-plane preflight switched to \(fallbackScheme.uppercased()) for \(device.alias)")
+                return fallbackScheme
+            } catch {
+                lastError = error
+                logTransfer("⚠️ Preflight \(fallbackScheme.uppercased()) failed for \(device.alias): \(error.localizedDescription)")
+            }
+        }
+
+        throw lastError ?? NSError(domain: "FileSender", code: -1, userInfo: [NSLocalizedDescriptionKey: "Peer preflight failed"])
+    }
+
+    private func shouldRetryPrepare(after error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain {
+            return nsError.code == NSURLErrorCannotConnectToHost
+                || nsError.code == NSURLErrorNetworkConnectionLost
+                || nsError.code == NSURLErrorNotConnectedToInternet
+                || nsError.code == NSURLErrorTimedOut
+        }
+        if nsError.domain == "FileSenderCurl" {
+            return nsError.code == 28
+        }
+        return false
+    }
+
+    private func performPrepareRequest(_ request: URLRequest) async throws -> (Data, Int) {
+        guard let url = request.url else {
+            throw NSError(domain: "FileSender", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid prepare URL"])
+        }
+
+        let bodyFile = try writeTemporaryData(request.httpBody ?? Data(), suffix: "json")
+        defer { try? FileManager.default.removeItem(at: bodyFile) }
+
+        let response = try await performCurlRequest(
+            url: url.absoluteString,
+            method: "POST",
+            headers: [
+                "Content-Type: application/json",
+                "Accept: application/json",
+                "User-Agent: LocalSend/3.0.0",
+                "Connection: close"
+            ],
+            bodyFile: bodyFile,
+            timeout: 30.0
+        )
+        return (response.body, response.statusCode)
+    }
     
     func sendFiles(_ urls: [URL], to device: Device) async throws {
         let preferredScheme = device.https ? "https" : "http"
-        logTransfer("🚀 Starting sendFiles to \(device.alias) (\(device.ip)) using \(preferredScheme)")
+        logTransfer("🚀 Starting sendFiles to \(device.alias) (\(device.ip)) using preferred \(preferredScheme)")
         
         let context = try await prepareContext(urls: urls)
         
@@ -98,40 +244,36 @@ actor FileSender {
         self.totalBytes = context.fileDtos.values.reduce(0) { $0 + $1.size }
         self.sentBytesMap = [:]
         self.isCancelled = false
+        sessionDelegate.expectedFingerprints[device.ip] = device.id
         
         do {
-            try await internalSend(context: context, to: device, scheme: preferredScheme)
+            let resolvedScheme = try await resolveReachableScheme(for: device, preferredScheme: preferredScheme)
+            try await internalSend(context: context, to: device, scheme: resolvedScheme)
         } catch {
-            let nsErr = error as NSError
-            // CRITICAL: If we are cancelled, or connection is lost/refused mid-transfer, do NOT retry.
-            // -999: Cancelled
-            // -1005: Network connection lost (often on peer cancel)
-            // -1004: Connection refused (peer closed server)
-            // -9816: SSL Handshake closed (common with certificate/cancel issues)
-
-            // CRITICAL CHANGE: Treat Connection Lost (-1005) and Timeout (-1001) as explicit CANCEL by peer
-            // when we are already deep in the transfer.
-            if nsErr.code == NSURLErrorNetworkConnectionLost || nsErr.code == NSURLErrorTimedOut {
-                 logTransfer("🛑 [FileSender] Network lost/timeout detected (-1005/-1001). Assuming PEER CANCELLED.")
-                 isCancelled = true // Mark as cancelled internally so UI shows "Cancelled" instead of "Error"
-                 onCancelled?()     // Trigger cancellation callback immediately
-                 throw error        // Stop retry loop
-            }
-
-            let isFatalForRetry = isCancelled || 
-                                 nsErr.code == NSURLErrorCancelled || 
-                                 nsErr.code == NSURLErrorCannotConnectToHost ||
-                                 nsErr.code == -9816
-            
-            if isFatalForRetry {
-                logTransfer("🛑 [FileSender] Transfer stopped during \(preferredScheme) phase. Code: \(nsErr.code), isCancelled: \(isCancelled). Error: \(nsErr.localizedDescription)")
+            guard let campusFallback else {
                 throw error
             }
-            
-            logTransfer("⚠️ Failed with \(preferredScheme): \(error)")
-            let fallbackScheme = (preferredScheme == "http") ? "https" : "http"
-            logTransfer("🔄 Retrying with \(fallbackScheme)...")
-            try await internalSend(context: context, to: device, scheme: fallbackScheme)
+            logTransfer("⚠️ Direct file send failed for \(device.alias), switching to campus multicast fallback: \(error.localizedDescription)")
+            for (fileId, fileDto) in context.fileDtos {
+                guard let fileURL = context.fileMap[fileId] else { continue }
+                let data = try Data(contentsOf: fileURL)
+                try await campusFallback.sendFile(
+                    data: data,
+                    fileName: fileDto.fileName,
+                    fileType: fileDto.fileType,
+                    to: device,
+                    onAccepted: onAccepted,
+                    onProgress: { [weak self] progress in
+                        Task {
+                            await self?.updateFallbackProgress(
+                                fileId: fileId,
+                                sentBytes: Int64(Double(fileDto.size) * progress)
+                            )
+                        }
+                    }
+                )
+                updateFallbackProgress(fileId: fileId, sentBytes: fileDto.size)
+            }
         }
     }
     
@@ -148,6 +290,91 @@ actor FileSender {
     
     private func unregisterSession(_ session: URLSession) {
         activeSessions.remove(session)
+    }
+
+    private func registerProcess(_ process: Process) {
+        activeProcesses.append(process)
+    }
+
+    private func unregisterProcess(_ process: Process) {
+        activeProcesses.removeAll { $0 === process }
+    }
+
+    private struct CurlHTTPResult {
+        let statusCode: Int
+        let body: Data
+    }
+
+    private func writeTemporaryData(_ data: Data, suffix: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("airsend-\(UUID().uuidString).\(suffix)")
+        try data.write(to: url)
+        return url
+    }
+
+    private func performCurlRequest(url: String,
+                                    method: String,
+                                    headers: [String],
+                                    bodyFile: URL? = nil,
+                                    timeout: TimeInterval) async throws -> CurlHTTPResult {
+        let responseFile = FileManager.default.temporaryDirectory.appendingPathComponent("airsend-response-\(UUID().uuidString).tmp")
+        defer { try? FileManager.default.removeItem(at: responseFile) }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+
+        var arguments = [
+            "-sS",
+            "-k",
+            "--http1.1",
+            "--connect-timeout", String(max(1, Int(ceil(min(timeout, 4))))),
+            "--max-time", String(max(1, Int(ceil(timeout)))),
+            "--output", responseFile.path,
+            "--write-out", "%{http_code}",
+            "-X", method
+        ]
+
+        for header in headers {
+            arguments.append(contentsOf: ["-H", header])
+        }
+
+        if let bodyFile {
+            arguments.append(contentsOf: ["--data-binary", "@\(bodyFile.path)"])
+        }
+
+        arguments.append(url)
+        process.arguments = arguments
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        registerProcess(process)
+        defer { unregisterProcess(process) }
+
+        let terminationStatus: Int32 = try await withCheckedThrowingContinuation { continuation in
+            process.terminationHandler = { proc in
+                continuation.resume(returning: proc.terminationStatus)
+            }
+
+            do {
+                try process.run()
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
+
+        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        let body = (try? Data(contentsOf: responseFile)) ?? Data()
+
+        if terminationStatus != 0 {
+            let stderr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "curl failed"
+            throw NSError(domain: "FileSenderCurl", code: Int(terminationStatus), userInfo: [NSLocalizedDescriptionKey: stderr])
+        }
+
+        let statusCode = Int(String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? -1
+        return CurlHTTPResult(statusCode: statusCode, body: body)
     }
     
     private func prepareContext(urls: [URL]) async throws -> SendContext {
@@ -201,10 +428,7 @@ actor FileSender {
     }
     
     private func internalSend(context: SendContext, to device: Device, scheme: String) async throws {
-        var host = device.ip
-        if host.contains(":") && !host.hasPrefix("[") {
-            host = "[\(host)]"
-        }
+        let host = formattedHost(for: device)
         
         // 1. Prepare DTOs from context
         let fileDtos = context.fileDtos
@@ -226,11 +450,12 @@ actor FileSender {
         
         let infoDto = RegisterDto(
             alias: alias,
-            version: "2.4.2",
+            version: "3.0.0",
             deviceModel: deviceModel,
             deviceType: deviceType.rawValue,
             fingerprint: myFingerprint,
-            port: 53317,
+            macAddress: LocalNetworkIdentity.primaryHardwareAddress(),
+            port: Int(NetworkPorts.transferPort),
             protocolType: localProtocol.rawValue,
             download: true
         )
@@ -241,83 +466,71 @@ actor FileSender {
         )
         
         // 2. Send Prepare Request
-        let prepareUrlString = "\(scheme)://\(host):\(device.port)/api/localsend/v2/prepare-upload"
-        guard let prepareUrl = URL(string: prepareUrlString) else { return }
-        
-        var request = URLRequest(url: prepareUrl)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("LocalSend/2.4.2", forHTTPHeaderField: "User-Agent")
-        request.setValue("close", forHTTPHeaderField: "Connection")
-        request.timeoutInterval = 60.0 // Give user 60s to click "Accept"
-        
         let encoder = JSONEncoder()
         encoder.outputFormatting = .prettyPrinted
         let bodyData = try encoder.encode(requestDto)
-        request.httpBody = bodyData
         
         if let jsonString = String(data: bodyData, encoding: .utf8) {
             logTransfer("📝 Prepare Request Body:\n\(jsonString)")
         }
         
-        logTransfer("📡 Sending prepare to \(prepareUrlString)")
-        
-        let startTime = Date()
+        var activeScheme = scheme
         var lastError: Error?
-        var handshakeSuccessful = false
         var data: Data = Data()
-        var httpResponse: HTTPURLResponse?
+        var prepareStatusCode: Int?
 
-        // Retry Loop for Prepare Phase (Handshake)
-        // We ONLY retry if we fail to establish a connection (phone offline/locked).
-        // Once a request is successfully waiting for a response, we stop retrying and let it wait.
-        while Date().timeIntervalSince(startTime) < 120.0 && !handshakeSuccessful {
+        for attempt in 1...2 {
+            let prepareUrlString = "\(activeScheme)://\(host):\(device.port)/api/localsend/v2/prepare-upload"
+            guard let prepareUrl = URL(string: prepareUrlString) else {
+                throw NSError(domain: "FileSender", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid prepare URL"])
+            }
+
+            var request = URLRequest(url: prepareUrl)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("LocalSend/3.0.0", forHTTPHeaderField: "User-Agent")
+            request.setValue("close", forHTTPHeaderField: "Connection")
+            request.timeoutInterval = 30.0
+            request.httpBody = bodyData
+
             do {
-                logTransfer("📡 Attempting handshake...")
-                let (receivedData, response) = try await session.data(for: request, delegate: sessionDelegate)
-                if let res = response as? HTTPURLResponse {
-                    data = receivedData
-                    httpResponse = res
-                    handshakeSuccessful = true
-                    logTransfer("📥 Handshake received response: \(res.statusCode)")
-                }
+                logTransfer("📡 Sending prepare to \(prepareUrlString) [attempt \(attempt)/2]")
+                let result = try await performPrepareRequest(request)
+                data = result.0
+                prepareStatusCode = result.1
+                logTransfer("📥 Handshake received response: \(result.1)")
+                break
             } catch {
                 lastError = error
-                let nsError = error as NSError
-                
-                // Retry only on connection-level errors
-                if nsError.domain == NSURLErrorDomain && 
-                   (nsError.code == NSURLErrorCannotConnectToHost || 
-                    nsError.code == NSURLErrorTimedOut || 
-                    nsError.code == NSURLErrorNotConnectedToInternet) {
-                    
-                    logTransfer("📡 Connection failed (\(nsError.code)): \(error.localizedDescription). Retrying in 2s...")
-                    try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
-                } else {
-                    // If it's a cancelled error or other non-retryable error, fail immediately
-                    logTransfer("❌ Stop retrying due to fatal error: \(error.localizedDescription)")
-                    throw error
+                if attempt < 2 && shouldRetryPrepare(after: error) {
+                    logTransfer("♻️ Prepare transport failed: \(error.localizedDescription). Re-probing peer and retrying once...")
+                    activeScheme = try await resolveReachableScheme(for: device, preferredScheme: activeScheme)
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    continue
                 }
+                logTransfer("❌ Prepare request failed: \(error.localizedDescription)")
+                throw error
             }
         }
 
-        guard handshakeSuccessful, let httpResponse = httpResponse else {
+        guard let prepareStatusCode = prepareStatusCode else {
              logTransfer("❌ Prepare failed: Timeout or persistent error: \(lastError?.localizedDescription ?? "Unknown")")
              throw lastError ?? NSError(domain: "FileSender", code: -1, userInfo: [NSLocalizedDescriptionKey: "Handshake timeout"])
         }
         
-        logTransfer("📥 Prepare response status: \(httpResponse.statusCode)")
+        logTransfer("📥 Prepare response status: \(prepareStatusCode)")
         
-        if httpResponse.statusCode == 200 || httpResponse.statusCode == 204 {
+        if prepareStatusCode == 200 || prepareStatusCode == 204 {
              onAccepted?()
-             if httpResponse.statusCode == 204 {
+             if prepareStatusCode == 204 {
                  logTransfer("✅ Receiver finished without requesting files (204)")
                  return
              }
             
             let decoder = JSONDecoder()
             let responseDto = try decoder.decode(PrepareUploadResponseDto.self, from: data)
+            let uploadScheme = activeScheme
             
             // 3. Upload Files with Concurrency Control
             let maxConcurrency = 3
@@ -332,7 +545,7 @@ actor FileSender {
                     
                     group.addTask {
                         logTransfer("📤 Starting concurrent upload for \(fileUrl.lastPathComponent) (ID: \(fileId))...")
-                        try await self.uploadFile(url: fileUrl, to: device, fileId: fileId, token: token, sessionId: responseDto.sessionId, scheme: scheme)
+                        try await self.uploadFile(url: fileUrl, to: device, fileId: fileId, token: token, sessionId: responseDto.sessionId, scheme: uploadScheme)
                     }
                     
                     uploadedCount += 1
@@ -350,21 +563,14 @@ actor FileSender {
             logTransfer("🎉 All files sent successfully to \(device.alias)")
             
         } else {
-             logTransfer("❌ Prepare declined: \(httpResponse.statusCode)")
-             throw NSError(domain: "FileSender", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Request declined: \(httpResponse.statusCode)"])
+             logTransfer("❌ Prepare declined: \(prepareStatusCode)")
+             throw NSError(domain: "FileSender", code: prepareStatusCode, userInfo: [NSLocalizedDescriptionKey: "Request declined: \(prepareStatusCode)"])
         }
     }
     
     private func uploadFile(url: URL, to device: Device, fileId: String, token: String, sessionId: String, scheme: String) async throws {
-        var host = device.ip
-        if host.contains(":") && !host.hasPrefix("[") {
-            host = "[\(host)]"
-        }
+        let host = formattedHost(for: device)
         let urlString = "\(scheme)://\(host):\(device.port)/api/localsend/v2/upload?sessionId=\(sessionId)&fileId=\(fileId)&token=\(token)"
-        
-        guard let uploadUrl = URL(string: urlString) else {
-            throw NSError(domain: "FileSender", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid upload URL"])
-        }
         
         // Get file size without loading into memory
         let resourceValues = try url.resourceValues(forKeys: [.fileSizeKey])
@@ -373,64 +579,32 @@ actor FileSender {
         logTransfer("📦 File to upload: \(url.path), size: \(fileSize) bytes")
         logTransfer("⬆️ Uploading \(fileId) (\(fileSize) bytes) to \(urlString)")
         
-        var request = URLRequest(url: uploadUrl)
-        request.httpMethod = "POST"
-        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-        request.setValue("\(fileSize)", forHTTPHeaderField: "Content-Length")
-        request.setValue("LocalSend/2.4.2", forHTTPHeaderField: "User-Agent")
-        request.timeoutInterval = 300
-        
-        // Create a dedicated upload session with performance tuning
-        let uploadConfig = URLSessionConfiguration.default
-        uploadConfig.timeoutIntervalForRequest = 60
-        uploadConfig.timeoutIntervalForResource = 86400
-        uploadConfig.waitsForConnectivity = true
-        // CRITICAL: Bypass system proxy for local network
-        uploadConfig.connectionProxyDictionary = [:]
-        
         // Check if cancelled before starting
         guard !isCancelled else {
             throw NSError(domain: "FileSender", code: -999, userInfo: [NSLocalizedDescriptionKey: "Transfer cancelled"])
         }
+
+        let response = try await performCurlRequest(
+            url: urlString,
+            method: "POST",
+            headers: [
+                "Content-Type: application/octet-stream",
+                "User-Agent: LocalSend/3.0.0",
+                "Connection: close"
+            ],
+            bodyFile: url,
+            timeout: 180.0
+        )
+
+        logTransfer("📥 Upload response for \(fileId): HTTP \(response.statusCode)")
         
-        // 读取文件数据到内存
-        // URLSession.upload(for:fromFile:) 在某些配置下会发送 Content-Length: 0
-        let fileData = try Data(contentsOf: url)
-        logTransfer("📦 Loaded file data into memory: \(fileData.count) bytes")
-        request.httpBody = fileData
-        
-        let uploadDelegate = SessionDelegate()
-        uploadDelegate.expectedFingerprints = sessionDelegate.expectedFingerprints
-        uploadDelegate.onProgress = { [weak self] task, totalBytesSent, totalBytesExpectedToSend in
-            Task { [weak self] in
-                await self?.updateSentBytes(fileId: fileId, sent: totalBytesSent)
-            }
-        }
-        
-        let uploadSession = URLSession(configuration: uploadConfig, delegate: uploadDelegate, delegateQueue: nil)
-        registerSession(uploadSession)
-        
-        defer {
-            uploadSession.finishTasksAndInvalidate()
-            unregisterSession(uploadSession)
-        }
-        
-                // 使用 data(for:) + httpBody 发送，确保 Content-Length 正确
-                let (data, response) = try await uploadSession.data(for: request)
-        
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw NSError(domain: "FileSender", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])
-        }
-        
-        logTransfer("📥 Upload response for \(fileId): HTTP \(httpResponse.statusCode)")
-        
-        if httpResponse.statusCode >= 200 && httpResponse.statusCode < 300 {
+        if response.statusCode >= 200 && response.statusCode < 300 {
             logTransfer("✅ Upload complete for \(fileId)")
             updateSentBytes(fileId: fileId, sent: fileSize)
         } else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            logTransfer("❌ Upload failed for \(fileId): HTTP \(httpResponse.statusCode) - \(body)")
-            throw NSError(domain: "FileSender", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Upload failed: HTTP \(httpResponse.statusCode)"])
+            let body = String(data: response.body, encoding: .utf8) ?? ""
+            logTransfer("❌ Upload failed for \(fileId): HTTP \(response.statusCode) - \(body)")
+            throw NSError(domain: "FileSender", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: "Upload failed: HTTP \(response.statusCode)"])
         }
     }
 

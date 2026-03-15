@@ -13,10 +13,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     // Persistent Fingerprint (Will be overwritten by real cert fingerprint)
     var fingerprint: String = UUID().uuidString
     
-    lazy var discoveryService = UDPDiscoveryService(fingerprint: fingerprint, protocolType: .https)
+    lazy var discoveryService = UDPDiscoveryService(fingerprint: fingerprint, protocolType: preferredLocalProtocol)
+    lazy var campusFallback = CampusFallbackCoordinator(fingerprint: fingerprint)
     lazy var transferServer = HTTPTransferServer(fingerprint: fingerprint)
-    lazy var clipboardSender = ClipboardSender(fingerprint: fingerprint)
-    lazy var fileSender = FileSender(fingerprint: fingerprint)
+    lazy var clipboardSender = ClipboardSender(fingerprint: fingerprint, localProtocol: preferredLocalProtocol, campusFallback: campusFallback)
+    lazy var fileSender = FileSender(fingerprint: fingerprint, localProtocol: preferredLocalProtocol, campusFallback: campusFallback)
     let clipboardService = ClipboardService()
     
     // UI Components
@@ -64,11 +65,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             updateMenu()
         }
     }
+
+    private var preferredLocalProtocol: ProtocolType {
+        get {
+            if let override = ProcessInfo.processInfo.environment["AIRSEND_LOCAL_PROTOCOL"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+               let protocolType = ProtocolType(rawValue: override) {
+                return protocolType
+            }
+            guard let rawValue = UserDefaults.standard.string(forKey: localProtocolPreferenceStorage),
+                  let protocolType = ProtocolType(rawValue: rawValue) else {
+                return .https
+            }
+            return protocolType
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: localProtocolPreferenceStorage)
+            updateMenu()
+        }
+    }
     
     private let broadcastSelectionKey = "broadcast"
     private let selectedGroupKeyStorage = "selected_device_group_key_v2"
     private let historyGroupKeysStorage = "history_device_group_keys_v2"
     private let preferredGroupCandidateStorage = "preferred_device_ids_by_group_v2"
+    private let localProtocolPreferenceStorage = "local_protocol_preference_v2"
     private let deviceConflictOnlineWindow: TimeInterval = 90.0
     private let androidAirSendRepository = "https://github.com/Avi7ii/AirSend"
     
@@ -490,22 +510,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
     private func hasFilePayloadInDragPasteboard() -> Bool {
         guard NSEvent.pressedMouseButtons != 0 else { return false }
-        let pboard = NSPasteboard(name: .drag)
-        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
-        if let urls = pboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL], !urls.isEmpty {
-            return true
-        }
-        if let paths = pboard.propertyList(forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")) as? [String], !paths.isEmpty {
-            return true
-        }
-        return false
+        return !LocalFileDrag.stageValidLocalFileURLs(from: NSPasteboard(name: .drag)).isEmpty
     }
 
     private func filterValidLocalDropURLs(_ urls: [URL]) -> [URL] {
-        urls.filter { url in
-            guard url.isFileURL else { return false }
-            return FileManager.default.fileExists(atPath: url.path)
-        }
+        LocalFileDrag.filterExistingLocalFileURLs(urls)
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -570,34 +579,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
                 
                 self.fingerprint = realFingerprint
-                
-                // 3. Setup Services
-                // Preference: HTTPS for official compatibility
-                let targetProtocol = ProtocolType.https 
-                logTransfer("🌐 Restoring HTTPS Mode for full protocol compatibility.")
-                
-                self.transferServer = HTTPTransferServer(fingerprint: realFingerprint)
-                self.discoveryService = UDPDiscoveryService(fingerprint: realFingerprint, protocolType: targetProtocol)
-                self.fileSender = FileSender(fingerprint: realFingerprint, localProtocol: targetProtocol)
-                self.clipboardSender = ClipboardSender(fingerprint: realFingerprint, localProtocol: targetProtocol)
-                
-                // 4. Start Discovery FIRST
-                startDiscovery()
-                
-                // Give UDP a moment to bind before TCP kicks in
-                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
-                
-                // 5. Start Transfer Server
-                await startTransferServer()
-                
-                startClipboardService()
-                startDragMonitoring()
+                await self.restartNetworkingStack()
             } catch {
                 logTransfer("❌ Initialization Failed: \(error)")
-                startDiscovery() 
-                await startTransferServer()
-                startClipboardService()
-                startDragMonitoring()
+                await self.restartNetworkingStack()
             }
         }
     }
@@ -624,22 +609,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         let currentCount = NSPasteboard(name: .drag).changeCount
         let hasPayload = hasFilePayloadInDragPasteboard()
         let detectedByChangeCount = (currentCount != lastDragCount)
-        // Some drag sources don't reliably bump changeCount at drag start.
-        // Probe payload directly as a fallback so first-approach detection still works.
-        let detectedByPayloadProbe = !isDragging && !detectedByChangeCount && hasPayload
 
-        // Activate when:
-        // 1) a fresh changeCount edge with file payload is observed, OR
-        // 2) payload probe confirms a file drag even before changeCount updates.
-        if (detectedByChangeCount && hasPayload) || detectedByPayloadProbe {
+        // Only activate on a fresh drag pasteboard change that contains real local files.
+        // This avoids reusing stale drag pasteboard contents during text selection or window moves.
+        if detectedByChangeCount && hasPayload {
             // 检测到新的 drag，更新计数并标记状态
             lastDragCount = currentCount
             hasFreshDragPayloadChange = true
             isDragging = true
             dropZoneWindow.isDuringDrag = true  // 同步到 DropZoneWindow，让 show() 使用 orderFront
-            if detectedByPayloadProbe {
-                FileLogger.log("🧲 [DragDetect] Activated by payload probe (no changeCount edge yet).")
-            }
             // 🔋 升速到 0.1s（仅在空闲态时切换，避免重复 invalidate）
             if dragMonitorTimer?.timeInterval != 0.1 {
                 setDragTimerInterval(0.1)
@@ -699,17 +677,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     if !hasFreshDragPayloadChange {
                         FileLogger.log("⚠️ [DragFallback] No fresh changeCount edge. Probing pasteboard directly.")
                     }
-                    let pboard = NSPasteboard(name: .drag)
-                    let opts: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
-                    if let urls = pboard.readObjects(forClasses: [NSURL.self], options: opts) as? [URL],
-                       !urls.isEmpty {
-                        let validURLs = filterValidLocalDropURLs(urls)
-                        if validURLs.isEmpty {
-                            FileLogger.log("⚠️ [DragFallback] Ignored non-local/non-existent payload.")
-                            hasFreshDragPayloadChange = false
-                            dropZoneWindow.hide()
-                            return
-                        }
+                    let validURLs = LocalFileDrag.stagedOrCurrentLocalFileURLs(from: NSPasteboard(name: .drag))
+                    if !validURLs.isEmpty {
                         FileLogger.log("🎣 [DragFallback] Pasteboard 兜底捕获：\(validURLs.count) 个文件。mouseLoc=\(mouseLoc), inWindow=\(isMouseInWindow)")
                         dropZoneWindow.isPerformingDrop = true
                         isDragInsideWindow = false
@@ -735,6 +704,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                                 && !self.dropZoneWindow.isAcceptingDragSession {
                                 FileLogger.log("🚨 App: Drop timeout (1.5s)，force hiding.")
                                 self.hasFreshDragPayloadChange = false
+                                LocalFileDrag.clearCachedDragPayload()
                                 self.dropZoneWindow.hide()
                             }
                         }
@@ -746,6 +716,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 
                 // 窗口外松手，正常隐藏
                 hasFreshDragPayloadChange = false
+                LocalFileDrag.clearCachedDragPayload()
                 dropZoneWindow.hide()
                 return
             }
@@ -817,6 +788,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         hasFreshDragPayloadChange = true
         dropZoneWindow.isDuringDrag = true
         lastDragCount = NSPasteboard(name: .drag).changeCount
+        _ = LocalFileDrag.stageValidLocalFileURLs(from: NSPasteboard(name: .drag))
         if dragMonitorTimer?.timeInterval != 0.1 {
             setDragTimerInterval(0.1)
         }
@@ -837,6 +809,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             isDragging = false
             hasFreshDragPayloadChange = false
             dropZoneWindow.isDuringDrag = false
+            LocalFileDrag.clearCachedDragPayload()
             if dragMonitorTimer?.timeInterval != idleDragTimerInterval {
                 setDragTimerInterval(idleDragTimerInterval)
             }
@@ -919,6 +892,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         isDragging = false
         hasFreshDragPayloadChange = false
         dropZoneWindow.isDuringDrag = false
+        LocalFileDrag.clearCachedDragPayload()
         if dragMonitorTimer?.timeInterval != idleDragTimerInterval {
             setDragTimerInterval(idleDragTimerInterval)
         }
@@ -1145,6 +1119,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
     
     func startClipboardService() {
+        clipboardService.stop()
         // 重新接上剪贴板变化的回调
         clipboardService.onNewContent = { [weak self] newText in
             guard let self = self else { return }
@@ -1212,6 +1187,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 self?.clipboardService.setContent(text)
             }
         }
+
+        await campusFallback.setOnTextReceived { [weak self] text in
+            DispatchQueue.main.async {
+                print("Received campus fallback text from remote, updating clipboard...")
+                self?.clipboardService.setContent(text)
+            }
+        }
         
         await transferServer.setOnCancelReceived { [weak self] in
             guard let self = self else { return }
@@ -1235,8 +1217,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             }
             return true // Auto-accept
         }
+
+        await campusFallback.setOnTransferRequest { [weak self] request in
+            logTransfer("📥 [App] Incoming campus transfer request from \(request.senderAlias) (\(request.fileCount) files, \(request.totalSize) bytes)")
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.enableWakelock()
+                self.hasStartedTransfer = true
+                self.dropZoneWindow.resetFromSuccess()
+                self.dropZoneWindow.setStatusText("Receiving from \(request.senderAlias)...")
+                self.dropZoneWindow.isPerformingDrop = true
+                self.dropZoneWindow.setProgress(0)
+                self.dropZoneWindow.show(under: self.statusItem)
+            }
+            return true
+        }
         
         await transferServer.setOnProgress { [weak self] progress in
+            DispatchQueue.main.async {
+                self?.dropZoneWindow.setProgress(progress)
+            }
+        }
+
+        await campusFallback.setOnProgress { [weak self] progress in
             DispatchQueue.main.async {
                 self?.dropZoneWindow.setProgress(progress)
             }
@@ -1274,6 +1277,43 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 self.hasStartedTransfer = false
             }
         }
+
+        await campusFallback.setGetSaveDirectory {
+            FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+        }
+
+        await campusFallback.setOnTransferComplete { [weak self] (success, errorMsg) in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                self.disableWakelock()
+                logTransfer("🏁 [App] Campus fallback transfer complete. Success: \(success), Error: \(errorMsg ?? "nil")")
+
+                if success {
+                    self.dropZoneWindow.setStatusText("Saved!")
+                    self.dropZoneWindow.showSuccess()
+                    self.dropZoneWindow.show(under: self.statusItem)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        self.dropZoneWindow.hide()
+                    }
+                } else {
+                    let msg: String
+                    let errLower = (errorMsg ?? "").lowercased()
+                    if errLower.contains("cancel") || errLower.contains("truncated") {
+                        msg = "Cancelled"
+                    } else {
+                        msg = "Failed"
+                    }
+                    self.dropZoneWindow.showError(message: msg)
+                    self.dropZoneWindow.show(under: self.statusItem)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                        if self.dropZoneWindow.isShowingError {
+                            self.dropZoneWindow.hide()
+                        }
+                    }
+                }
+                self.hasStartedTransfer = false
+            }
+        }
         
         do {
             if discoveryService.protocolType == .https {
@@ -1290,12 +1330,63 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             // Do NOT try to start in plain mode here. If it fails, we want it to fail loudly.
         }
     }
+
+    private func restartNetworkingStack(clearTransientDevices: Bool = false) async {
+        await transferServer.stop()
+        discoveryService.stop()
+        clipboardService.stop()
+
+        if clearTransientDevices {
+            let keptDevices = devices.filter {
+                let groupKey = self.deviceGroupKey(for: $0.value)
+                return self.historyDeviceGroupKeys.contains(groupKey) || self.selectedDeviceGroupKey == groupKey
+            }
+            self.devices = keptDevices
+        }
+
+        let targetProtocol = preferredLocalProtocol
+        if targetProtocol == .http {
+            logTransfer("🌐 LAN compatibility mode enabled. Using plain HTTP for local receiver/discovery.")
+        } else {
+            logTransfer("🔐 Secure LAN mode enabled. Using HTTPS for local receiver/discovery.")
+        }
+
+        self.transferServer = HTTPTransferServer(fingerprint: fingerprint)
+        self.discoveryService = UDPDiscoveryService(fingerprint: fingerprint, protocolType: targetProtocol)
+        self.campusFallback = CampusFallbackCoordinator(fingerprint: fingerprint)
+        self.fileSender = FileSender(fingerprint: fingerprint, localProtocol: targetProtocol, campusFallback: campusFallback)
+        self.clipboardSender = ClipboardSender(fingerprint: fingerprint, localProtocol: targetProtocol, campusFallback: campusFallback)
+
+        startDiscovery()
+
+        // Give UDP discovery a moment to bind before TCP starts on the same service port.
+        try? await Task.sleep(nanoseconds: 500_000_000)
+
+        await startTransferServer()
+        startClipboardService()
+        startDragMonitoring()
+        updateMenu()
+    }
     
     func startDiscovery() {
         discoveryService.onTransportFailure = { [weak self] reason in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.restartDiscoveryService(reason: reason, triggerScan: true)
+            }
+        }
+
+        discoveryService.onCampusFallbackPacket = { [weak self] data, sourceIP in
+            guard let self = self else { return }
+            Task {
+                await self.campusFallback.handlePacket(data, sourceIP: sourceIP)
+            }
+        }
+
+        let discoveryService = self.discoveryService
+        Task {
+            await campusFallback.setPacketSender { data in
+                discoveryService.sendCampusPacket(data)
             }
         }
         
@@ -1552,6 +1643,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         advancedMenu.addItem(NSMenuItem(title: "Add Device by IP...", action: #selector(addDeviceByIP), keyEquivalent: "a"))
         advancedMenu.addItem(NSMenuItem(title: "Clear Discovered Devices", action: #selector(clearDeviceHistory), keyEquivalent: ""))
         advancedMenu.addItem(NSMenuItem(title: "Reset Identity", action: #selector(resetIdentity(_:)), keyEquivalent: ""))
+        let compatibilityItem = NSMenuItem(title: "Compatibility Mode (HTTP)", action: #selector(toggleLanCompatibilityMode(_:)), keyEquivalent: "")
+        compatibilityItem.state = preferredLocalProtocol == .http ? .on : .off
+        advancedMenu.addItem(compatibilityItem)
         
         advancedMenu.addItem(NSMenuItem.separator())
         let autoUpdateItem = NSMenuItem(title: "Auto-check for Updates", action: #selector(toggleAutoUpdate(_:)), keyEquivalent: "")
@@ -1698,27 +1792,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 let newFingerprint = try await CertificateManager.shared.getFingerprint()
                 self.fingerprint = newFingerprint
                 logTransfer("✅ New Identity Fingerprint: \(newFingerprint)")
-                
-                // 3. Restart Services
-                // Preference: HTTPS
-                let targetProtocol = ProtocolType.https
-                
-                self.transferServer = HTTPTransferServer(fingerprint: newFingerprint)
-                self.discoveryService = UDPDiscoveryService(fingerprint: newFingerprint, protocolType: targetProtocol)
-                self.fileSender = FileSender(fingerprint: newFingerprint, localProtocol: targetProtocol)
-                self.clipboardSender = ClipboardSender(fingerprint: newFingerprint, localProtocol: targetProtocol)
-                
-                // Clear discovered devices to force fresh discovery
-                let keptDevices = devices.filter {
-                    let groupKey = self.deviceGroupKey(for: $0.value)
-                    return self.historyDeviceGroupKeys.contains(groupKey) || self.selectedDeviceGroupKey == groupKey
-                }
-                self.devices = keptDevices
-                
-                startDiscovery()
-                await startTransferServer()
-                startClipboardService()
-                startDragMonitoring()
+                await self.restartNetworkingStack(clearTransientDevices: true)
                 
                 logTransfer("✨ Identity Reset Complete. Services restarted.")
                 
@@ -1754,10 +1828,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     id: "manual-\(ip)",
                     alias: "Manual IP (\(ip))",
                     ip: ip,
-                    port: 53317,
+                    port: Int(NetworkPorts.transferPort),
                     deviceModel: "Remote Device",
                     deviceType: "desktop",
-                    version: "2.4.2",
+                    version: "3.0.0",
                     https: false,
                     download: true,
                     lastSeen: Date()
@@ -1987,6 +2061,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         isAutoUpdateEnabled.toggle()
         print("🚨 App: Auto-update toggled to [\(isAutoUpdateEnabled)]")
     }
+
+    @objc private func toggleLanCompatibilityMode(_ sender: NSMenuItem) {
+        let enablingCompatibility = preferredLocalProtocol != .http
+        preferredLocalProtocol = enablingCompatibility ? .http : .https
+        logTransfer(
+            enablingCompatibility
+                ? "🌐 Compatibility mode toggled on. Future inbound LAN transfers will prefer plain HTTP."
+                : "🔐 Compatibility mode toggled off. Future inbound LAN transfers will prefer HTTPS."
+        )
+
+        Task { @MainActor in
+            await restartNetworkingStack()
+        }
+    }
 }
 
 // MARK: - UI Helpers
@@ -2013,7 +2101,176 @@ class RequestIndicatorView: NSView {
     }
 }
 
+private struct SelfTestCaseResult {
+    let label: String
+    let success: Bool
+    let elapsed: TimeInterval
+    let errorDescription: String?
+}
+
+private final class SelfTestExitState: @unchecked Sendable {
+    var code: Int32 = 0
+}
+
+private enum SelfTestRunner {
+    static func runIfRequested() {
+        let env = ProcessInfo.processInfo.environment
+        guard env["AIRSEND_SELFTEST"] == "1" else { return }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        let exitState = SelfTestExitState()
+
+        Task.detached {
+            defer { semaphore.signal() }
+            do {
+                try await run()
+            } catch {
+                print("SELFTEST_FATAL \(error.localizedDescription)")
+                exitState.code = 1
+            }
+        }
+
+        semaphore.wait()
+        fflush(stdout)
+        exit(exitState.code)
+    }
+
+    static func run() async throws {
+        let env = ProcessInfo.processInfo.environment
+        let ip = try requiredEnv("AIRSEND_SELFTEST_DEVICE_IP", env: env)
+        let fingerprint = try requiredEnv("AIRSEND_SELFTEST_DEVICE_FINGERPRINT", env: env)
+        let alias = env["AIRSEND_SELFTEST_DEVICE_ALIAS"] ?? "AirSend Android Module"
+        let model = env["AIRSEND_SELFTEST_DEVICE_MODEL"] ?? "Android Device"
+        let deviceType = env["AIRSEND_SELFTEST_DEVICE_TYPE"] ?? "headless"
+        let goodPort = Int(env["AIRSEND_SELFTEST_DEVICE_PORT"] ?? "\(NetworkPorts.transferPort)") ?? Int(NetworkPorts.transferPort)
+        let badPort = Int(env["AIRSEND_SELFTEST_BAD_PORT"] ?? "\(goodPort + 1)") ?? (goodPort + 1)
+        let deviceUsesHTTPS = (env["AIRSEND_SELFTEST_DEVICE_HTTPS"] ?? "false").lowercased() == "true"
+        let localProtocol = ProtocolType(rawValue: env["AIRSEND_SELFTEST_LOCAL_PROTOCOL"] ?? "http") ?? .http
+        let localFingerprint = env["AIRSEND_SELFTEST_LOCAL_FINGERPRINT"] ?? "probe-mac-fingerprint"
+        let maxFastFailure = Double(env["AIRSEND_SELFTEST_MAX_BAD_ELAPSED"] ?? "16") ?? 16
+        let campusMode = (env["AIRSEND_SELFTEST_CAMPUS"] ?? "0") == "1"
+
+        let goodDevice = Device(
+            id: fingerprint,
+            alias: alias,
+            ip: ip,
+            port: goodPort,
+            deviceModel: model,
+            deviceType: deviceType,
+            version: "3.0.0",
+            https: deviceUsesHTTPS,
+            download: true,
+            lastSeen: Date()
+        )
+        let badDevice = Device(
+            id: fingerprint,
+            alias: alias,
+            ip: ip,
+            port: badPort,
+            deviceModel: model,
+            deviceType: deviceType,
+            version: "3.0.0",
+            https: deviceUsesHTTPS,
+            download: true,
+            lastSeen: Date()
+        )
+
+        let tempFile = FileManager.default.temporaryDirectory.appendingPathComponent("airsend-selftest-\(UUID().uuidString).txt")
+        try "airsend-selftest-\(Int(Date().timeIntervalSince1970))".write(to: tempFile, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: tempFile) }
+
+        let campusFallback = campusMode ? CampusFallbackCoordinator(fingerprint: localFingerprint) : nil
+        let discoveryService = campusMode ? UDPDiscoveryService(fingerprint: localFingerprint, protocolType: localProtocol) : nil
+
+        if let campusFallback, let discoveryService {
+            discoveryService.onCampusFallbackPacket = { data, sourceIP in
+                Task {
+                    await campusFallback.handlePacket(data, sourceIP: sourceIP)
+                }
+            }
+            await campusFallback.setPacketSender { data in
+                discoveryService.sendCampusPacket(data)
+            }
+            discoveryService.start()
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+
+        defer {
+            discoveryService?.stop()
+        }
+
+        let fileSender = FileSender(fingerprint: localFingerprint, localProtocol: localProtocol, campusFallback: campusFallback)
+        let clipboardSender = ClipboardSender(fingerprint: localFingerprint, localProtocol: localProtocol, campusFallback: campusFallback)
+
+        if campusMode {
+            let fileGood = await runCase("FILE_GOOD_PORT") {
+                try await fileSender.sendFiles([tempFile], to: goodDevice)
+            }
+            let textGood = await runCase("TEXT_GOOD_PORT") {
+                try await clipboardSender.sendText("selftest-text-good-port", to: goodDevice)
+            }
+
+            let failures = [fileGood, textGood].filter { !$0.success }
+            if !failures.isEmpty {
+                let details = failures
+                    .map { "\($0.label)=success:\($0.success),elapsed:\(String(format: "%.2f", $0.elapsed)),error:\($0.errorDescription ?? "nil")" }
+                    .joined(separator: " | ")
+                throw NSError(domain: "SelfTestRunner", code: 2, userInfo: [NSLocalizedDescriptionKey: details])
+            }
+            print("SELFTEST_OK")
+            return
+        }
+
+        let fileBad = await runCase("FILE_BAD_PORT") {
+            try await fileSender.sendFiles([tempFile], to: badDevice)
+        }
+        let fileGood = await runCase("FILE_GOOD_PORT") {
+            try await fileSender.sendFiles([tempFile], to: goodDevice)
+        }
+        let textBad = await runCase("TEXT_BAD_PORT") {
+            try await clipboardSender.sendText("selftest-text-bad-port", to: badDevice)
+        }
+        let textGood = await runCase("TEXT_GOOD_PORT") {
+            try await clipboardSender.sendText("selftest-text-good-port", to: goodDevice)
+        }
+
+        let mustSucceed = [fileGood, textGood].filter { !$0.success }
+        let mustFailFast = [fileBad, textBad].filter { $0.success || $0.elapsed > maxFastFailure }
+
+        if !mustSucceed.isEmpty || !mustFailFast.isEmpty {
+            let details = (mustSucceed + mustFailFast)
+                .map { "\($0.label)=success:\($0.success),elapsed:\(String(format: "%.2f", $0.elapsed)),error:\($0.errorDescription ?? "nil")" }
+                .joined(separator: " | ")
+            throw NSError(domain: "SelfTestRunner", code: 1, userInfo: [NSLocalizedDescriptionKey: details])
+        }
+
+        print("SELFTEST_OK")
+    }
+
+    static func runCase(_ label: String, operation: @escaping () async throws -> Void) async -> SelfTestCaseResult {
+        let start = Date()
+        do {
+            try await operation()
+            let elapsed = Date().timeIntervalSince(start)
+            print("\(label)_SUCCESS elapsed=\(String(format: "%.2f", elapsed))s")
+            return SelfTestCaseResult(label: label, success: true, elapsed: elapsed, errorDescription: nil)
+        } catch {
+            let elapsed = Date().timeIntervalSince(start)
+            print("\(label)_FAIL elapsed=\(String(format: "%.2f", elapsed))s error=\(error.localizedDescription)")
+            return SelfTestCaseResult(label: label, success: false, elapsed: elapsed, errorDescription: error.localizedDescription)
+        }
+    }
+
+    static func requiredEnv(_ key: String, env: [String: String]) throws -> String {
+        if let value = env[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
+            return value
+        }
+        throw NSError(domain: "SelfTestRunner", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing env \(key)"])
+    }
+}
+
 // Execution Entry Point
+SelfTestRunner.runIfRequested()
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

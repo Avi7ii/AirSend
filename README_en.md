@@ -69,19 +69,6 @@ On home routers, mobile hotspots, and other normal LANs, AirSend still defaults 
 
 On campus Wi-Fi, dorm networks, or other policy-heavy LANs, however, official LocalSend often stops at "the device is visible, but the actual transfer never really starts". That is where AirSend's full mode and the `HTTP Compatibility Mode` below come in.
 
-### 🌐 Campus / Complex LAN Compatibility
-
-AirSend 3.0.0 adds a **manual, default-off** `HTTP Compatibility Mode` specifically for networks where discovery works but the HTTPS data plane repeatedly times out or hangs.
-
-- The default remains **secure HTTPS mode**, so normal home-network usage and standard compatibility with official LocalSend stay intact
-- If devices can discover each other on a campus network but transfers keep stalling, turn on `Advanced -> Compatibility Mode (HTTP)` in the macOS menu bar
-- Once enabled, macOS exposes a plain-HTTP receive path, and the sender performs a real data-plane preflight before sending so it can choose the path that actually works on that LAN
-- If campus policy suppresses UDP multicast, AirSend can expand discovery by `/24` slices across a large subnet and also remember the last reachable device IP for lightweight re-probing and list keepalive
-- In practice, AirSend now addresses not only “device discovered but transfer unusable”, but also “after switching to campus Wi-Fi the phone is missing from the menu again”
-- This compatibility path is an extra AirSend capability built for difficult LANs; **official LocalSend does not currently provide it**
-- For home routers and mobile hotspots, leaving the default HTTPS mode on is still recommended
-- The compatibility path itself is also tighter now: no silent downgrade by default, better cancellation and timeout cleanup, small-payload fallback boundaries, and session/source binding to reduce packet mixups
-
 ### 📋 Two-Way Clipboard Sync
 
 **Android → Mac**: Copy text on your phone, and the Mac clipboard updates automatically within seconds — no app needed, no popups. Requires full mode (Root + LSPosed).
@@ -103,6 +90,19 @@ When you copy a screenshot or image on Mac, `ClipboardService` checks first for 
 ### 📱 Direct Share Integration
 
 When sharing files on Android, your Mac appears directly in the system's Direct Share target list — like sending to a contact. No need to open AirSend, just tap and send.
+
+### 🌐 Campus / Complex LAN Compatibility
+
+AirSend 3.0.0 adds a **manual, default-off** `HTTP Compatibility Mode` specifically for networks where discovery works but the HTTPS data plane repeatedly times out or hangs.
+
+- The default remains **secure HTTPS mode**, so normal home-network usage and standard compatibility with official LocalSend stay intact
+- If devices can discover each other on a campus network but transfers keep stalling, turn on `Advanced -> Compatibility Mode (HTTP)` in the macOS menu bar
+- Once enabled, macOS exposes a plain-HTTP receive path, and the sender performs a real data-plane preflight before sending so it can choose the path that actually works on that LAN
+- If campus policy suppresses UDP multicast, AirSend can expand discovery by `/24` slices across a large subnet and also remember the last reachable device IP for lightweight re-probing and list keepalive
+- In practice, AirSend now addresses not only “device discovered but transfer unusable”, but also “after switching to campus Wi-Fi the phone is missing from the menu again”
+- This compatibility path is an extra AirSend capability built for difficult LANs; **official LocalSend does not currently provide it**
+- For home routers and mobile hotspots, leaving the default HTTPS mode on is still recommended
+- The compatibility path itself is also tighter now: no silent downgrade by default, better cancellation and timeout cleanup, small-payload fallback boundaries, and session/source binding to reduce packet mixups
 
 ---
 

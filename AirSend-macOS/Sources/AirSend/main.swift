@@ -93,6 +93,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private let localProtocolPreferenceStorage = "local_protocol_preference_v2"
     private let knownDiscoveryHostsStorage = "known_discovery_hosts_v1"
     private let deviceConflictOnlineWindow: TimeInterval = 90.0
+    private let offlineDeviceTimeout: TimeInterval = 120.0
+    private let knownHostRetentionInterval: TimeInterval = 900.0
+    private let freshKnownHostWindow: TimeInterval = 75.0
     private let androidAirSendRepository = "https://github.com/Avi7ii/AirSend"
     
     private struct DeviceGroupViewModel {
@@ -236,6 +239,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
 
         return ordered
+    }
+
+    private func hasFreshKnownDiscoveryDevice(now: Date = Date()) -> Bool {
+        let knownHosts = Set(knownDiscoveryHosts)
+        guard !knownHosts.isEmpty else { return false }
+
+        return devices.values.contains { device in
+            knownHosts.contains(device.ip) && now.timeIntervalSince(device.lastSeen) <= freshKnownHostWindow
+        }
+    }
+
+    private func shouldProbeKnownHosts(now: Date = Date()) -> Bool {
+        guard !knownDiscoveryHosts.isEmpty else { return false }
+        return !hasFreshKnownDiscoveryDevice(now: now)
+    }
+
+    private func retentionInterval(for device: Device) -> TimeInterval {
+        if preferredLocalProtocol == .http && knownDiscoveryHosts.contains(device.ip) {
+            return knownHostRetentionInterval
+        }
+        return offlineDeviceTimeout
     }
     
     private func isAndroidModuleDevice(_ device: Device) -> Bool {
@@ -1535,7 +1559,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             broadcastTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     self?.discoveryService.sendAnnouncement()
-                    self?.discoveryService.probePreferredHosts(reason: "broadcast-keepalive")
+                    if self?.shouldProbeKnownHosts() == true {
+                        self?.discoveryService.probePreferredHosts(reason: "broadcast-keepalive")
+                    }
                 }
             }
             broadcastTimer?.tolerance = 15.0 // 🔋
@@ -1556,14 +1582,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private func cleanupOfflineDevices() {
         let now = Date()
         var hasChanges = false
-        let timeout: TimeInterval = 120.0 // Keep selected targets from flapping offline too aggressively.
         for (id, device) in self.devices {
             let groupKey = deviceGroupKey(for: device)
             if selectedDeviceGroupKey != broadcastSelectionKey && groupKey == selectedDeviceGroupKey {
                 // Keep current selection candidates to avoid immediate "Target Offline" flapping.
                 continue
             }
-            if now.timeIntervalSince(device.lastSeen) > timeout {
+            if now.timeIntervalSince(device.lastSeen) > retentionInterval(for: device) {
                 logTransfer("🧹 Cleanup: Device [\(device.alias)] timed out and removed.")
                 self.devices.removeValue(forKey: id)
                 hasChanges = true
@@ -1827,23 +1852,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
     
     @objc func scanForDevices(_ sender: NSMenuItem) {
-        print("Manual scan triggered - cleaning up offline other devices")
-        
-        // Cleanup logic: Keep only history groups or the currently selected group
-        let historyGroups = self.historyDeviceGroupKeys
-        let selectedGroup = self.selectedDeviceGroupKey
-        
-        var nextDevices: [String: Device] = [:]
-        for (id, device) in devices {
-            let groupKey = deviceGroupKey(for: device)
-            if historyGroups.contains(groupKey) || selectedGroup == groupKey {
-                nextDevices[id] = device
-            }
-        }
-        
-        self.devices = nextDevices
-        
-        restartDiscoveryService(reason: "manual refresh", triggerScan: true)
+        print("Manual scan triggered - preserving current discovery state")
+
+        discoveryService.probePreferredHosts(reason: "manual-refresh-preferred")
+        discoveryService.triggerScan()
         
         // Prevent menu from closing and show immediate feedback
         // The menu normally closes on action. We can pop it back up immediately
@@ -1914,7 +1926,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     port: Int(NetworkPorts.transferPort),
                     deviceModel: "Remote Device",
                     deviceType: "desktop",
-                    version: "3.0.0",
+                    version: "3.0.1",
                     https: false,
                     download: true,
                     lastSeen: Date()
@@ -1981,8 +1993,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 }
                 
                 print("📡 Menu: Periodic scan while open...")
-                self?.discoveryService.probePreferredHosts(reason: "menu-periodic-preferred")
-                self?.discoveryService.triggerScan()
+                if self?.shouldProbeKnownHosts() == true {
+                    self?.discoveryService.probePreferredHosts(reason: "menu-periodic-preferred")
+                }
+                if self?.buildDeviceGroups().isEmpty == true {
+                    self?.discoveryService.triggerScan()
+                }
             }
         }
     }
@@ -2244,7 +2260,7 @@ private enum SelfTestRunner {
             port: goodPort,
             deviceModel: model,
             deviceType: deviceType,
-            version: "3.0.0",
+            version: "3.0.1",
             https: deviceUsesHTTPS,
             download: true,
             lastSeen: Date()
@@ -2256,7 +2272,7 @@ private enum SelfTestRunner {
             port: badPort,
             deviceModel: model,
             deviceType: deviceType,
-            version: "3.0.0",
+            version: "3.0.1",
             https: deviceUsesHTTPS,
             download: true,
             lastSeen: Date()

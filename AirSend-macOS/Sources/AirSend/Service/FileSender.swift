@@ -118,7 +118,7 @@ actor FileSender {
             url: url.absoluteString,
             method: "GET",
             headers: [
-                "User-Agent: LocalSend/3.0.0",
+                "User-Agent: LocalSend/3.0.1",
                 "Connection: close"
             ],
             timeout: 4.0
@@ -220,7 +220,7 @@ actor FileSender {
             headers: [
                 "Content-Type: application/json",
                 "Accept: application/json",
-                "User-Agent: LocalSend/3.0.0",
+                "User-Agent: LocalSend/3.0.1",
                 "Connection: close"
             ],
             bodyFile: bodyFile,
@@ -461,7 +461,7 @@ actor FileSender {
         
         let infoDto = RegisterDto(
             alias: alias,
-            version: "3.0.0",
+            version: "3.0.1",
             deviceModel: deviceModel,
             deviceType: deviceType.rawValue,
             fingerprint: myFingerprint,
@@ -500,7 +500,7 @@ actor FileSender {
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("application/json", forHTTPHeaderField: "Accept")
-            request.setValue("LocalSend/3.0.0", forHTTPHeaderField: "User-Agent")
+            request.setValue("LocalSend/3.0.1", forHTTPHeaderField: "User-Agent")
             request.setValue("close", forHTTPHeaderField: "Connection")
             request.timeoutInterval = 30.0
             request.httpBody = bodyData
@@ -600,7 +600,7 @@ actor FileSender {
             method: "POST",
             headers: [
                 "Content-Type: application/octet-stream",
-                "User-Agent: LocalSend/3.0.0",
+                "User-Agent: LocalSend/3.0.1",
                 "Connection: close"
             ],
             bodyFile: url,

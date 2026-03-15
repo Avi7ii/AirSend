@@ -33,10 +33,11 @@ final class UDPDiscoveryService: @unchecked Sendable {
     private let preferredProbeQueue = DispatchQueue(label: "com.airsend.discovery.preferred-probe", qos: .utility)
     private let preferredProbeStateQueue = DispatchQueue(label: "com.airsend.discovery.preferred-probe-state")
     private var isPreferredProbeRunning = false
-    private let subnetProbeConcurrency = 192
+    private let subnetProbeConcurrency = 320
     private let preferredProbeConcurrency = 16
     private let largeSubnetProbeTimeout: TimeInterval = 0.35
     private let preferredProbeTimeout: TimeInterval = 0.45
+    private let curlPath = "/usr/bin/curl"
     private lazy var discoverySession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 1.2
@@ -150,7 +151,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
     func sendAnnouncement(isAnnouncement: Bool = true) {
         let dto = MulticastDto(
             alias: alias,
-            version: "3.0.0",
+            version: "3.0.1",
             deviceModel: deviceModel,
             deviceType: deviceType.rawValue,
             fingerprint: fingerprint,
@@ -217,13 +218,23 @@ final class UDPDiscoveryService: @unchecked Sendable {
                         self.isPreferredProbeRunning = false
                     }
                 }
-                await self.probeHosts(
-                    hosts,
-                    reason: reason,
-                    timeout: self.preferredProbeTimeout,
-                    concurrency: min(self.preferredProbeConcurrency, hosts.count),
-                    logPrefix: "🎯 Discovery: Preferred host probe"
-                )
+                if self.protocolType == .http {
+                    await self.probeHostsWithCurl(
+                        hosts,
+                        reason: reason,
+                        timeout: self.preferredProbeTimeout,
+                        concurrency: min(self.preferredProbeConcurrency, hosts.count),
+                        logPrefix: "🎯 Discovery: Preferred host probe"
+                    )
+                } else {
+                    await self.probeHosts(
+                        hosts,
+                        reason: reason,
+                        timeout: self.preferredProbeTimeout,
+                        concurrency: min(self.preferredProbeConcurrency, hosts.count),
+                        logPrefix: "🎯 Discovery: Preferred host probe"
+                    )
+                }
             }
         }
     }
@@ -385,10 +396,66 @@ final class UDPDiscoveryService: @unchecked Sendable {
         }
     }
 
+    private func probeHostsWithCurl(
+        _ hosts: [String],
+        reason: String,
+        timeout: TimeInterval,
+        concurrency: Int,
+        logPrefix: String
+    ) async {
+        guard !hosts.isEmpty else { return }
+
+        let registerDto = RegisterDto(
+            alias: alias,
+            version: "3.0.1",
+            deviceModel: deviceModel,
+            deviceType: deviceType.rawValue,
+            fingerprint: fingerprint,
+            macAddress: macAddress,
+            port: Int(NetworkPorts.transferPort),
+            protocolType: protocolType.rawValue,
+            download: true
+        )
+
+        let requestBodyFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("airsend-discovery-\(UUID().uuidString).json")
+
+        do {
+            try JSONEncoder().encode(registerDto).write(to: requestBodyFile)
+        } catch {
+            FileLogger.log("❌ Discovery: Failed to prepare preferred probe payload: \(error)")
+            return
+        }
+        defer { try? FileManager.default.removeItem(at: requestBodyFile) }
+
+        FileLogger.log("\(logPrefix) [\(reason)] scanning \(hosts.count) host(s) (timeout \(String(format: "%.2f", timeout))s)")
+
+        await withTaskGroup(of: Void.self) { group in
+            var iterator = hosts.makeIterator()
+            let initialTasks = min(max(1, concurrency), hosts.count)
+
+            for _ in 0..<initialTasks {
+                guard let host = iterator.next() else { break }
+                group.addTask { [weak self] in
+                    guard let self = self else { return }
+                    await self.probeHostWithCurl(host, timeout: timeout, requestBodyFile: requestBodyFile)
+                }
+            }
+
+            while await group.next() != nil {
+                guard let host = iterator.next() else { continue }
+                group.addTask { [weak self] in
+                    guard let self = self else { return }
+                    await self.probeHostWithCurl(host, timeout: timeout, requestBodyFile: requestBodyFile)
+                }
+            }
+        }
+    }
+
     private func probeHost(_ host: String, timeout: TimeInterval, session: URLSession) async {
         let registerDto = RegisterDto(
             alias: alias,
-            version: "3.0.0",
+            version: "3.0.1",
             deviceModel: deviceModel,
             deviceType: deviceType.rawValue,
             fingerprint: fingerprint,
@@ -422,7 +489,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
                     port: dto.port ?? candidatePort,
                     deviceModel: dto.deviceModel,
                     deviceType: dto.deviceType,
-                    version: dto.version ?? "3.0.0",
+                    version: dto.version ?? "3.0.1",
                     https: dto.protocolType == ProtocolType.https.rawValue,
                     download: dto.download ?? false,
                     lastSeen: Date()
@@ -436,9 +503,112 @@ final class UDPDiscoveryService: @unchecked Sendable {
         }
     }
 
+    private func probeHostWithCurl(_ host: String, timeout: TimeInterval, requestBodyFile: URL) async {
+        for candidatePort in candidateProbePorts() {
+            guard let url = URL(string: "\(protocolType.rawValue)://\(host):\(candidatePort)/api/localsend/v2/register") else {
+                continue
+            }
+
+            do {
+                let result = try await performCurlProbe(url: url, requestBodyFile: requestBodyFile, timeout: timeout)
+                guard 200..<300 ~= result.statusCode else { continue }
+
+                let dto = try JSONDecoder().decode(RegisterDto.self, from: result.body)
+                let device = Device(
+                    id: dto.fingerprint,
+                    alias: dto.alias,
+                    ip: host,
+                    port: dto.port ?? candidatePort,
+                    deviceModel: dto.deviceModel,
+                    deviceType: dto.deviceType,
+                    version: dto.version ?? "3.0.1",
+                    https: dto.protocolType == ProtocolType.https.rawValue,
+                    download: dto.download ?? false,
+                    lastSeen: Date()
+                )
+                FileLogger.log("✅ Discovery: HTTP subnet probe found [\(device.alias)] at \(device.ip):\(device.port)")
+                onDeviceFound?(device)
+                return
+            } catch {
+                continue
+            }
+        }
+    }
+
+    private func performCurlProbe(url: URL, requestBodyFile: URL, timeout: TimeInterval) async throws -> CurlProbeResult {
+        let responseFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("airsend-discovery-response-\(UUID().uuidString).tmp")
+        defer { try? FileManager.default.removeItem(at: responseFile) }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: curlPath)
+
+        var arguments = [
+            "-sS",
+            "--http1.1",
+            "--connect-timeout", String(format: "%.2f", max(0.2, timeout)),
+            "--max-time", String(format: "%.2f", max(0.2, timeout)),
+            "--output", responseFile.path,
+            "--write-out", "%{http_code}",
+            "-X", "POST",
+            "-H", "Content-Type: application/json",
+            "-H", "Connection: close",
+            "--data-binary", "@\(requestBodyFile.path)"
+        ]
+        if protocolType == .https {
+            arguments.append("-k")
+        }
+        arguments.append(url.absoluteString)
+        process.arguments = arguments
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        let terminationStatus: Int32 = try await withCheckedThrowingContinuation { continuation in
+            process.terminationHandler = { proc in
+                continuation.resume(returning: proc.terminationStatus)
+            }
+
+            do {
+                try process.run()
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
+
+        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        let responseBody = (try? Data(contentsOf: responseFile)) ?? Data()
+
+        guard terminationStatus == 0 else {
+            let stderr = String(data: stderrData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? "curl failed"
+            throw NSError(
+                domain: "UDPDiscoveryServiceCurl",
+                code: Int(terminationStatus),
+                userInfo: [NSLocalizedDescriptionKey: stderr]
+            )
+        }
+
+        let statusCode = Int(
+            String(data: stdoutData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        ) ?? -1
+        return CurlProbeResult(statusCode: statusCode, body: responseBody)
+    }
+
     private func candidateProbePorts() -> [Int] {
         var ports: [Int] = []
-        for port in [Int(NetworkPorts.transferPort), 53319, Int(NetworkPorts.discoveryPort)] where !ports.contains(port) {
+        let orderedPorts: [Int]
+        if protocolType == .http {
+            orderedPorts = [53319, Int(NetworkPorts.transferPort), Int(NetworkPorts.discoveryPort)]
+        } else {
+            orderedPorts = [Int(NetworkPorts.transferPort), 53319, Int(NetworkPorts.discoveryPort)]
+        }
+
+        for port in orderedPorts where !ports.contains(port) {
             ports.append(port)
         }
         return ports
@@ -565,6 +735,11 @@ final class UDPDiscoveryService: @unchecked Sendable {
             || lower.hasPrefix("bridge")
             || lower.hasPrefix("anpi")
     }
+}
+
+private struct CurlProbeResult {
+    let statusCode: Int
+    let body: Data
 }
 
 // Helper to decode MulticastDto correctly since we have custom keys

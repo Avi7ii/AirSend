@@ -21,6 +21,11 @@
 - `AirSend-v3.5.0-macOS.zip`
 - `AirSend_Magisk_v3.5.0.zip`
 
+### 更新建议
+
+- 建议更新最新的 Mac 版本。
+- Magisk 模块可以不更新，因为这次除了版本号之外没有任何改动。
+
 ## English
 
 `v3.5.0` brings the two recent feature lines into one release: the new menu-bar settings entry and the DropZone drag-and-drop stability rewrite.
@@ -43,3 +48,8 @@ The point of this release is not to add flashy features, but to make the core wo
 
 - `AirSend-v3.5.0-macOS.zip`
 - `AirSend_Magisk_v3.5.0.zip`
+
+### Update Recommendation
+
+- Updating to the latest Mac build is recommended.
+- You can skip updating the Magisk module, because this release does not change anything in it except the version number.

@@ -48,6 +48,7 @@ Android/airsend_daemon/target/
 # Release Assets & Temp
 *.zip
 *.icns
+!AirSend-macOS/AppIcon.icns
 # Local Misc
 *.pdf
 AirSend_Magisk_v*.zip

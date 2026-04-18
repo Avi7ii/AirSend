@@ -180,7 +180,6 @@ final class UDPDiscoveryService: @unchecked Sendable {
     func sendCampusPacket(_ data: Data) {
         if let group {
             group.send(content: data) { _ in }
-            return
         }
         broadcastConnection?.send(content: data, completion: .contentProcessed({ _ in }))
     }

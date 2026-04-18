@@ -751,6 +751,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private var pendingDragPayloadURLs: [URL] = []
     private var activeDragSessionID: UUID?
     private var resolvedDragSessionID: UUID?
+    private var lastIdleDragPasteboardChangeCount: Int?
     private var observedDragPasteboardChangeCount: Int?
     private var observedDragStartPoint: NSPoint?
     private var observedDragMovedEnough = false
@@ -830,15 +831,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
 
     private func checkForNearbyFileDragTrigger() {
+        let dragPasteboard = NSPasteboard(name: .drag)
         guard (NSEvent.pressedMouseButtons & 0x1) != 0 else {
+            lastIdleDragPasteboardChangeCount = dragPasteboard.changeCount
             resetObservedDragCandidate()
             return
         }
         let mouseLocation = NSEvent.mouseLocation
         guard let triggerFrame = statusBarActivationFrame() else { return }
-        let dragPasteboard = NSPasteboard(name: .drag)
         let inspection = LocalFileDrag.inspectLocalFileDrag(from: dragPasteboard)
-        let urls = inspection.looksLikeStrictLocalFileDrag ? inspection.urls : []
+        let hasFreshDragPasteboardPayload = lastIdleDragPasteboardChangeCount.map {
+            dragPasteboard.changeCount != $0
+        } ?? true
+        let urls = (inspection.looksLikeStrictLocalFileDrag && hasFreshDragPasteboardPayload) ? inspection.urls : []
         let isRecognizedLocalFileDrag = !urls.isEmpty
         updateObservedDragCandidate(changeCount: dragPasteboard.changeCount, origin: mouseLocation, hasRecognizedPayload: isRecognizedLocalFileDrag)
         let hasConfirmedDragMovement = isRecognizedLocalFileDrag && observedDragMovedEnough

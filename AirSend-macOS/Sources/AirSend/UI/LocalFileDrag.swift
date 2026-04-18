@@ -8,7 +8,38 @@ enum LocalFileDrag {
     ]
     @MainActor private static var cachedURLs: [URL] = []
     @MainActor private static var cacheDate: Date?
-    private static let cacheMaxAge: TimeInterval = 5
+    private static let cacheMaxAge: TimeInterval = 1.2
+    private static let suspiciousRichContentTypes: Set<String> = [
+        NSPasteboard.PasteboardType.URL.rawValue,
+        NSPasteboard.PasteboardType.string.rawValue,
+        NSPasteboard.PasteboardType.html.rawValue,
+        NSPasteboard.PasteboardType.rtf.rawValue,
+        NSPasteboard.PasteboardType.rtfd.rawValue,
+        NSPasteboard.PasteboardType.tiff.rawValue,
+        "public.url",
+        "public.url-name",
+        "public.html",
+        "public.rtf",
+        "public.utf8-plain-text",
+        "public.utf16-external-plain-text",
+        "public.png",
+        "public.jpeg",
+        "public.tiff",
+        "public.webp",
+        "Apple Web Archive pasteboard type",
+        "com.apple.webarchive",
+        "com.apple.flat-rtfd",
+        "com.apple.cocoa.pasteboard.promised-file-content-type",
+        "org.chromium.image-url"
+    ]
+
+    struct Inspection {
+        let urls: [URL]
+        let looksLikeStrictLocalFileDrag: Bool
+        let typeNames: Set<String>
+        let hasLegacyFinderFileList: Bool
+        let hasSuspiciousRichContentMarkers: Bool
+    }
 
     static func validLocalFileURLs(from pasteboard: NSPasteboard) -> [URL] {
         var candidateURLs: [URL] = []
@@ -41,13 +72,38 @@ enum LocalFileDrag {
         return filterExistingLocalFileURLs(deduped)
     }
 
+    static func inspectLocalFileDrag(from pasteboard: NSPasteboard) -> Inspection {
+        let urls = validLocalFileURLs(from: pasteboard)
+        let typeNames = pasteboardTypeNames(from: pasteboard)
+        let hasLegacyFinderFileList = typeNames.contains(legacyFilenamesType.rawValue)
+            || (pasteboard.propertyList(forType: legacyFilenamesType) as? [String])?.isEmpty == false
+        let hasSuspiciousRichContentMarkers = !typeNames.isDisjoint(with: suspiciousRichContentTypes)
+        let hasEphemeralPaths = urls.contains { isEphemeralDragURL($0) }
+        let looksLikeStrictLocalFileDrag = !urls.isEmpty
+            && !hasEphemeralPaths
+            && (hasLegacyFinderFileList || !hasSuspiciousRichContentMarkers)
+
+        return Inspection(
+            urls: urls,
+            looksLikeStrictLocalFileDrag: looksLikeStrictLocalFileDrag,
+            typeNames: typeNames,
+            hasLegacyFinderFileList: hasLegacyFinderFileList,
+            hasSuspiciousRichContentMarkers: hasSuspiciousRichContentMarkers
+        )
+    }
+
+    static func recognizedLocalFileURLs(from pasteboard: NSPasteboard) -> [URL] {
+        let inspection = inspectLocalFileDrag(from: pasteboard)
+        return inspection.looksLikeStrictLocalFileDrag ? inspection.urls : []
+    }
+
     static func containsValidLocalFiles(in pasteboard: NSPasteboard) -> Bool {
-        !validLocalFileURLs(from: pasteboard).isEmpty
+        !recognizedLocalFileURLs(from: pasteboard).isEmpty
     }
 
     @MainActor
     static func stageValidLocalFileURLs(from pasteboard: NSPasteboard) -> [URL] {
-        let urls = validLocalFileURLs(from: pasteboard)
+        let urls = recognizedLocalFileURLs(from: pasteboard)
         if !urls.isEmpty {
             cachedURLs = urls
             cacheDate = Date()
@@ -81,12 +137,13 @@ enum LocalFileDrag {
     }
 
     static func debugSummary(from pasteboard: NSPasteboard) -> String {
+        let inspection = inspectLocalFileDrag(from: pasteboard)
         let itemSummaries = (pasteboard.pasteboardItems ?? []).enumerated().prefix(4).map { index, item in
             let types = item.types.map(\.rawValue).joined(separator: ",")
             return "[\(index):\(types)]"
         }
         let firstItemTypes = (pasteboard.types ?? []).map(\.rawValue).joined(separator: ",")
-        return "items=\(pasteboard.pasteboardItems?.count ?? 0) first=\(firstItemTypes) \(itemSummaries.joined(separator: " "))"
+        return "items=\(pasteboard.pasteboardItems?.count ?? 0) changeCount=\(pasteboard.changeCount) strict=\(inspection.looksLikeStrictLocalFileDrag) urls=\(inspection.urls.count) legacy=\(inspection.hasLegacyFinderFileList) rich=\(inspection.hasSuspiciousRichContentMarkers) first=\(firstItemTypes) \(itemSummaries.joined(separator: " "))"
     }
 
     static func filterExistingLocalFileURLs(_ urls: [URL]) -> [URL] {
@@ -106,5 +163,30 @@ enum LocalFileDrag {
             }
         }
         return result
+    }
+
+    private static func pasteboardTypeNames(from pasteboard: NSPasteboard) -> Set<String> {
+        var result = Set((pasteboard.types ?? []).map(\.rawValue))
+        for item in pasteboard.pasteboardItems ?? [] {
+            result.formUnion(item.types.map(\.rawValue))
+        }
+        return result
+    }
+
+    private static func isEphemeralDragURL(_ url: URL) -> Bool {
+        let path = url.standardizedFileURL.path
+        let temporaryRoot = URL(fileURLWithPath: NSTemporaryDirectory()).standardizedFileURL.path
+        let homeCachesRoot = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Caches", isDirectory: true)
+            .standardizedFileURL.path
+
+        return path.hasPrefix(temporaryRoot)
+            || path.hasPrefix("/private/var/folders/")
+            || path.hasPrefix(homeCachesRoot)
+            || path.contains("/TemporaryItems/")
+            || path.contains("/com.apple.WebKit/")
+            || path.contains("/Google/Chrome/")
+            || path.contains("/Microsoft Edge/")
+            || path.contains("/Firefox/Profiles/")
     }
 }

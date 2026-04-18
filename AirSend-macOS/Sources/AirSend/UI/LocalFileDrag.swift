@@ -11,21 +11,34 @@ enum LocalFileDrag {
     private static let cacheMaxAge: TimeInterval = 5
 
     static func validLocalFileURLs(from pasteboard: NSPasteboard) -> [URL] {
-        guard containsSupportedFileType(in: pasteboard) else { return [] }
-
+        var candidateURLs: [URL] = []
         let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL] {
-            let filtered = filterExistingLocalFileURLs(urls)
-            if !filtered.isEmpty {
-                return filtered
+            candidateURLs.append(contentsOf: urls)
+        }
+
+        if let items = pasteboard.pasteboardItems {
+            for item in items {
+                if let type = item.availableType(from: [.fileURL]),
+                   let rawValue = item.string(forType: type),
+                   let url = URL(string: rawValue) {
+                    candidateURLs.append(url)
+                }
+
+                if let type = item.availableType(from: [legacyFilenamesType]),
+                   let rawPath = item.string(forType: type),
+                   !rawPath.isEmpty {
+                    candidateURLs.append(URL(fileURLWithPath: rawPath))
+                }
             }
         }
 
         if let paths = pasteboard.propertyList(forType: legacyFilenamesType) as? [String] {
-            return filterExistingLocalFileURLs(paths.map { URL(fileURLWithPath: $0) })
+            candidateURLs.append(contentsOf: paths.map { URL(fileURLWithPath: $0) })
         }
 
-        return []
+        let deduped = dedupeFileURLs(candidateURLs)
+        return filterExistingLocalFileURLs(deduped)
     }
 
     static func containsValidLocalFiles(in pasteboard: NSPasteboard) -> Bool {
@@ -67,6 +80,15 @@ enum LocalFileDrag {
         cacheDate = nil
     }
 
+    static func debugSummary(from pasteboard: NSPasteboard) -> String {
+        let itemSummaries = (pasteboard.pasteboardItems ?? []).enumerated().prefix(4).map { index, item in
+            let types = item.types.map(\.rawValue).joined(separator: ",")
+            return "[\(index):\(types)]"
+        }
+        let firstItemTypes = (pasteboard.types ?? []).map(\.rawValue).joined(separator: ",")
+        return "items=\(pasteboard.pasteboardItems?.count ?? 0) first=\(firstItemTypes) \(itemSummaries.joined(separator: " "))"
+    }
+
     static func filterExistingLocalFileURLs(_ urls: [URL]) -> [URL] {
         urls.filter { url in
             guard url.isFileURL else { return false }
@@ -74,8 +96,15 @@ enum LocalFileDrag {
         }
     }
 
-    private static func containsSupportedFileType(in pasteboard: NSPasteboard) -> Bool {
-        guard let types = pasteboard.types else { return false }
-        return types.contains(.fileURL) || types.contains(legacyFilenamesType)
+    private static func dedupeFileURLs(_ urls: [URL]) -> [URL] {
+        var seen = Set<String>()
+        var result: [URL] = []
+        for url in urls {
+            let key = url.standardizedFileURL.path
+            if seen.insert(key).inserted {
+                result.append(url)
+            }
+        }
+        return result
     }
 }

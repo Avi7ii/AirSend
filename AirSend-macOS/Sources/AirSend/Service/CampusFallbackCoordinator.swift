@@ -367,6 +367,25 @@ actor CampusFallbackCoordinator {
             return
         }
 
+        if let existing = incoming[envelope.transferId],
+           existing.sourceIP == sourceIP,
+           existing.sessionNonce == envelope.sessionNonce,
+           existing.senderId == envelope.senderId {
+            var refreshed = existing
+            refreshed.lastActivityAt = Date()
+            incoming[envelope.transferId] = refreshed
+            try await sendRepeated(
+                envelope: CampusEnvelope.base(
+                    type: "accept",
+                    transferId: envelope.transferId,
+                    sessionNonce: envelope.sessionNonce,
+                    senderId: fingerprint,
+                    targetId: envelope.senderId
+                )
+            )
+            return
+        }
+
         let request = TransferRequest(
             sessionId: envelope.transferId,
             senderAlias: envelope.senderAlias ?? "Campus Sender",
@@ -419,7 +438,15 @@ actor CampusFallbackCoordinator {
             windowChunks: [:]
         )
 
-        try send(envelope: CampusEnvelope.base(type: "accept", transferId: envelope.transferId, sessionNonce: envelope.sessionNonce, senderId: fingerprint, targetId: envelope.senderId))
+        try await sendRepeated(
+            envelope: CampusEnvelope.base(
+                type: "accept",
+                transferId: envelope.transferId,
+                sessionNonce: envelope.sessionNonce,
+                senderId: fingerprint,
+                targetId: envelope.senderId
+            )
+        )
     }
 
     private func handleChunk(_ envelope: CampusEnvelope, sourceIP: String) async throws {
@@ -487,7 +514,7 @@ actor CampusFallbackCoordinator {
             success: nil,
             message: nil
         )
-        try send(envelope: response)
+        try await sendRepeated(envelope: response)
     }
 
     private func handleFinish(_ envelope: CampusEnvelope, sourceIP: String) async throws {
@@ -626,11 +653,11 @@ actor CampusFallbackCoordinator {
     }
 
     private func awaitPrepareAccept(transferId: String, prepare: CampusEnvelope) async throws -> Bool {
-        for _ in 0..<4 {
+        for _ in 0..<6 {
             _ = try ensureOutgoingActive(transferId)
             touchOutgoing(transferId)
             try send(envelope: prepare)
-            let deadline = Date().addingTimeInterval(0.9)
+            let deadline = Date().addingTimeInterval(1.5)
             while Date() < deadline {
                 pruneStaleTransfers()
                 let state = try ensureOutgoingActive(transferId)
@@ -644,7 +671,7 @@ actor CampusFallbackCoordinator {
     }
 
     private func awaitWindowResult(transferId: String, windowStart: Int) async throws -> OutgoingWindowResult {
-        let deadline = Date().addingTimeInterval(1.6)
+        let deadline = Date().addingTimeInterval(3.5)
         while Date() < deadline {
             pruneStaleTransfers()
             _ = try ensureOutgoingActive(transferId)

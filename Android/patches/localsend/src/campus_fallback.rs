@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::Path;
 use std::time::Duration;
 
@@ -365,6 +365,27 @@ impl Client {
             return Ok(());
         }
 
+        {
+            let mut campus = self.campus_fallback.lock().await;
+            if let Some(existing) = campus.incoming.get_mut(&envelope.transfer_id) {
+                if existing.source_ip == source_ip
+                    && existing.session_nonce == envelope.session_nonce
+                    && existing.sender_id == envelope.sender_id
+                {
+                    existing.last_activity_at = Instant::now();
+                    let accept = CampusEnvelope::base(
+                        "accept",
+                        envelope.transfer_id,
+                        envelope.session_nonce,
+                        self.device.fingerprint.clone(),
+                        envelope.sender_id,
+                    );
+                    drop(campus);
+                    return self.send_campus_message_repeated(&accept, 3).await;
+                }
+            }
+        }
+
         let state = IncomingTransferState {
             sender_id: envelope.sender_id.clone(),
             sender_alias: envelope
@@ -394,7 +415,7 @@ impl Client {
             self.device.fingerprint.clone(),
             envelope.sender_id,
         );
-        self.send_campus_message(&accept).await
+        self.send_campus_message_repeated(&accept, 3).await
     }
 
     async fn handle_campus_chunk(
@@ -488,7 +509,7 @@ impl Client {
         if !missing.is_empty() {
             response.missing = Some(missing);
         }
-        self.send_campus_message(&response).await
+        self.send_campus_message_repeated(&response, 3).await
     }
 
     async fn handle_campus_finish(
@@ -619,8 +640,22 @@ impl Client {
             "Campus packet tx type={} transfer={} from={} to={}",
             message.kind, message.transfer_id, message.sender_id, message.target_id
         );
-        self.socket.send_to(&payload, self.multicast_addr).await?;
-        Ok(())
+        let broadcast_addr = SocketAddrV4::new(Ipv4Addr::new(255, 255, 255, 255), self.discovery_port);
+
+        let multicast_result = self.socket.send_to(&payload, self.multicast_addr).await;
+        let broadcast_result = self.socket.send_to(&payload, broadcast_addr).await;
+
+        match (multicast_result, broadcast_result) {
+            (Ok(_), _) | (_, Ok(_)) => Ok(()),
+            (Err(multicast_err), Err(broadcast_err)) => Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!(
+                    "Campus multicast send failed: {}; broadcast send failed: {}",
+                    multicast_err, broadcast_err
+                ),
+            )
+            .into()),
+        }
     }
 
     async fn send_campus_message_repeated(
@@ -642,12 +677,12 @@ impl Client {
         transfer_id: &str,
         prepare: &CampusEnvelope,
     ) -> crate::error::Result<bool> {
-        for _ in 0..4 {
+        for _ in 0..6 {
             self.ensure_campus_outgoing_active(transfer_id).await?;
             self.touch_campus_outgoing(transfer_id).await;
             self.send_campus_message(prepare).await?;
             let started = Instant::now();
-            while started.elapsed() < Duration::from_millis(900) {
+            while started.elapsed() < Duration::from_millis(1500) {
                 self.prune_campus_state().await;
                 self.ensure_campus_outgoing_active(transfer_id).await?;
                 {
@@ -673,7 +708,7 @@ impl Client {
         window_start: usize,
     ) -> crate::error::Result<OutgoingWindowResult> {
         let started = Instant::now();
-        while started.elapsed() < Duration::from_millis(1600) {
+        while started.elapsed() < Duration::from_millis(3500) {
             self.prune_campus_state().await;
             self.ensure_campus_outgoing_active(transfer_id).await?;
             {

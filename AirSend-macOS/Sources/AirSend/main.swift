@@ -31,6 +31,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private var menuScanTimer: Timer?
     private var isStatusMenuOpen = false
     private var pendingDiscoveryMenuReopen = false
+    private var settingsWindowController: AirSendSettingsWindowController?
     
     // 🔋 功耗优化：广播与清理定时器（连接设备后停止）
     private var broadcastTimer: Timer?
@@ -64,6 +65,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         get { UserDefaults.standard.bool(forKey: "auto_clipboard_sync_enabled") }
         set {
             UserDefaults.standard.set(newValue, forKey: "auto_clipboard_sync_enabled")
+            updateMenu()
+        }
+    }
+
+    private let autoScreenshotSyncStorage = "auto_screenshot_sync_enabled_v1"
+    private var isAutoScreenshotSyncEnabled: Bool {
+        get {
+            let defaults = UserDefaults.standard
+            if defaults.object(forKey: autoScreenshotSyncStorage) == nil {
+                return isAutoClipboardSyncEnabled
+            }
+            return defaults.bool(forKey: autoScreenshotSyncStorage)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: autoScreenshotSyncStorage)
             updateMenu()
         }
     }
@@ -276,7 +292,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         if value.isEmpty {
             return "Android Device"
         }
-        
+
         let lower = value.lowercased()
         if lower == "ossi" || lower == "pkx110" || lower == "op60f5l1" {
             return "OnePlus 13T"
@@ -314,6 +330,159 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     
     private func displaySubtitle(for candidate: Device) -> String {
         "\(candidate.ip) • \(shortFingerprint(candidate.id))"
+    }
+
+    private func settingsDeviceTypeLabel(for device: Device) -> String {
+        switch (device.deviceType ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "mobile":
+            return "Phone"
+        case "desktop":
+            return "Computer"
+        case "tablet":
+            return "Tablet"
+        case "server":
+            return "Server"
+        case "web":
+            return "Web"
+        case "headless":
+            return "Headless"
+        default:
+            return "Device"
+        }
+    }
+
+    private func settingsLastSeenLabel(for device: Device) -> String {
+        let seconds = max(0, Int(Date().timeIntervalSince(device.lastSeen)))
+        switch seconds {
+        case ..<6:
+            return "Live"
+        case ..<60:
+            return "\(seconds)s ago"
+        default:
+            return "\(seconds / 60)m ago"
+        }
+    }
+
+    private func makeSettingsDeviceSummaries(from groups: [DeviceGroupViewModel]) -> [AirSendSettingsDeviceSummary] {
+        groups.map { group in
+            let primary = group.primary
+            let model = isAndroidModuleDevice(primary)
+                ? normalizedAndroidModuleModelName(primary.deviceModel)
+                : ((primary.deviceModel ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
+            let version = primary.version.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            return AirSendSettingsDeviceSummary(
+                id: group.key,
+                title: displayTitle(for: group),
+                model: model.isEmpty ? settingsDeviceTypeLabel(for: primary) : model,
+                deviceType: settingsDeviceTypeLabel(for: primary),
+                ipAddress: primary.ip,
+                port: primary.port,
+                protocolLabel: primary.https ? "HTTPS" : "HTTP",
+                versionLabel: version,
+                fingerprintSuffix: shortFingerprint(primary.id),
+                statusLabel: settingsLastSeenLabel(for: primary),
+                peerCount: group.candidates.count,
+                isSelected: selectedDeviceGroupKey == group.key
+            )
+        }
+    }
+
+    private func makeSettingsSnapshot() -> AirSendSettingsSnapshot {
+        let groups = buildDeviceGroups()
+        let selectedGroup = groups.first(where: { $0.key == selectedDeviceGroupKey })
+        let selectedTitle: String
+        let selectedSubtitle: String
+
+        if selectedDeviceGroupKey == broadcastSelectionKey {
+            selectedTitle = "All Devices"
+            selectedSubtitle = "Broadcast to every online device"
+        } else if let selectedGroup {
+            selectedTitle = displayTitle(for: selectedGroup)
+            selectedSubtitle = displaySubtitle(for: selectedGroup)
+        } else {
+            selectedTitle = "Target Offline"
+            selectedSubtitle = "Choose another device or rescan"
+        }
+
+        return AirSendSettingsSnapshot(
+            autoClipboardSyncEnabled: isAutoClipboardSyncEnabled,
+            autoScreenshotSyncEnabled: isAutoScreenshotSyncEnabled,
+            autoUpdateEnabled: isAutoUpdateEnabled,
+            launchAtLoginEnabled: isLaunchAtLoginEnabled,
+            compatibilityModeEnabled: preferredLocalProtocol == .http,
+            discoveredDeviceCount: groups.count,
+            rememberedDeviceCount: historyDeviceGroupKeys.count,
+            selectedTargetTitle: selectedTitle,
+            selectedTargetSubtitle: selectedSubtitle,
+            selectedTargetIsBroadcast: selectedDeviceGroupKey == broadcastSelectionKey,
+            protocolLabel: preferredLocalProtocol == .http ? "HTTP Compatibility" : "HTTPS Default",
+            fingerprintSuffix: shortFingerprint(fingerprint),
+            currentVersion: UpdateService.shared.currentVersion,
+            nearbyDevices: makeSettingsDeviceSummaries(from: groups)
+        )
+    }
+
+    private func ensureSettingsWindowController() -> AirSendSettingsWindowController {
+        if let settingsWindowController {
+            settingsWindowController.store.update(snapshot: makeSettingsSnapshot())
+            return settingsWindowController
+        }
+
+        let store = AirSendSettingsStore(
+            snapshot: makeSettingsSnapshot(),
+            actions: .init(
+                setAutoClipboardSyncEnabled: { [weak self] enabled in
+                    self?.setAutoClipboardSyncEnabled(enabled, showInfoIfEnabling: true)
+                },
+                setAutoScreenshotSyncEnabled: { [weak self] enabled in
+                    self?.setAutoScreenshotSyncEnabled(enabled, showInfoIfEnabling: true)
+                },
+                setAutoUpdateEnabled: { [weak self] enabled in
+                    self?.setAutoUpdateEnabled(enabled)
+                },
+                setLaunchAtLoginEnabled: { [weak self] enabled in
+                    self?.setLaunchAtLoginEnabled(enabled)
+                },
+                setCompatibilityModeEnabled: { [weak self] enabled in
+                    self?.setCompatibilityModeEnabled(enabled)
+                },
+                sendClipboardNow: { [weak self] in
+                    self?.sendClipboard()
+                },
+                rescan: { [weak self] in
+                    self?.performManualRescan(reopenMenu: false)
+                },
+                addDeviceByIP: { [weak self] in
+                    self?.addDeviceByIP()
+                },
+                clearDiscoveredDevices: { [weak self] in
+                    self?.clearDeviceHistory()
+                },
+                resetIdentity: { [weak self] in
+                    self?.resetIdentity(nil)
+                },
+                checkForUpdates: { [weak self] in
+                    self?.manualCheckUpdate()
+                },
+                selectBroadcastTarget: { [weak self] in
+                    self?.selectedDeviceGroupKey = self?.broadcastSelectionKey ?? "broadcast"
+                },
+                selectDeviceTarget: { [weak self] groupKey in
+                    self?.selectedDeviceGroupKey = groupKey
+                },
+                openAndroidRepository: { [weak self] in
+                    self?.openAndroidRepository()
+                }
+            )
+        )
+        let controller = AirSendSettingsWindowController(store: store)
+        settingsWindowController = controller
+        return controller
+    }
+
+    private func refreshSettingsWindowIfNeeded() {
+        settingsWindowController?.store.update(snapshot: makeSettingsSnapshot())
     }
     
     private func sortedCandidates(for groupKey: String, devices: [Device]) -> [Device] {
@@ -1231,7 +1400,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         // 🚀 新增图片剪贴板监听
         clipboardService.onNewImage = { [weak self] imageData in
             guard let self = self else { return }
-            guard self.isAutoClipboardSyncEnabled else { return }
+            guard self.isAutoScreenshotSyncEnabled else { return }
             
             let targets = self.targetGroupsForCurrentSelection()
             
@@ -1673,13 +1842,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         menu.addItem(NSMenuItem(title: "Send Clipboard", action: #selector(sendClipboard), keyEquivalent: "s"))
         let autoClipboardItem = NSMenuItem()
         autoClipboardItem.view = AutoClipboardToggleMenuItemView(
-            title: "Auto Send Clipboard",
+            title: "Auto Sync Clipboard Text",
             isOn: isAutoClipboardSyncEnabled,
             onToggle: { [weak self] enabled in
                 self?.setAutoClipboardSyncEnabled(enabled, showInfoIfEnabling: true)
             }
         )
         menu.addItem(autoClipboardItem)
+        let autoScreenshotItem = NSMenuItem()
+        autoScreenshotItem.view = AutoClipboardToggleMenuItemView(
+            title: "Auto Sync Screenshots",
+            isOn: isAutoScreenshotSyncEnabled,
+            onToggle: { [weak self] enabled in
+                self?.setAutoScreenshotSyncEnabled(enabled, showInfoIfEnabling: true)
+            }
+        )
+        menu.addItem(autoScreenshotItem)
         menu.addItem(NSMenuItem.separator())
         
         let groups = buildDeviceGroups()
@@ -1753,7 +1931,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         let launchItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin(_:)), keyEquivalent: "")
         launchItem.state = isLaunchAtLoginEnabled ? .on : .off
         menu.addItem(launchItem)
-        
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettingsWindow(_:)), keyEquivalent: ",")
+        settingsItem.keyEquivalentModifierMask = [.command]
+        menu.addItem(settingsItem)
+
         menu.addItem(NSMenuItem.separator())
         
         // 7. VERSION & UPDATE
@@ -1811,6 +1992,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     func updateMenu() {
         setupMenu()
         updateWindowStatus()
+        refreshSettingsWindowIfNeeded()
     }
 
     private func refreshOpenMenuAfterDiscoveryIfNeeded(reason: String) {
@@ -1850,25 +2032,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             print("No text in clipboard")
         }
     }
-    
-    @objc func scanForDevices(_ sender: NSMenuItem) {
+
+    private func performManualRescan(reopenMenu: Bool) {
         print("Manual scan triggered - preserving current discovery state")
 
         discoveryService.probePreferredHosts(reason: "manual-refresh-preferred")
         discoveryService.triggerScan()
-        
-        // Prevent menu from closing and show immediate feedback
-        // The menu normally closes on action. We can pop it back up immediately
-        // or just let the user re-open it. To really simulate Wi-Fi behavior
-        // where you stay IN the menu, we'd need a more complex view-based menu.
-        // For now, let's just make it fast and responsive.
-        
-        // Trick: Reset the menu to show "Scanning" status without closing 
-        // if it was triggered via a key equivalent. 
-        // If clicked, it WILL close. To stay open, we re-pop it.
+
+        guard reopenMenu else { return }
         DispatchQueue.main.async {
             self.statusItem.button?.performClick(nil)
         }
+    }
+
+    @objc func scanForDevices(_ sender: NSMenuItem) {
+        performManualRescan(reopenMenu: true)
     }
     
     @objc func resetIdentity(_ sender: AnyObject?) {
@@ -1937,32 +2115,110 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             }
         }
     }
-    
-    private func setAutoClipboardSyncEnabled(_ enabled: Bool, showInfoIfEnabling: Bool) {
-        if isAutoClipboardSyncEnabled != enabled {
-            isAutoClipboardSyncEnabled = enabled
-        }
-        
-        guard enabled, showInfoIfEnabling else {
-            return
-        }
-        
+
+    private func openAndroidRepository() {
+        guard let url = URL(string: androidAirSendRepository) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func showAndroidIntegrationAlert(featureName: String, description: String) {
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "Auto Clipboard Sync Requires AirSend on Android"
+        alert.messageText = "\(featureName) Requires AirSend on Android"
         alert.informativeText = """
-        The official LocalSend app can receive clipboard content manually, but background auto-send is only supported with the AirSend Android build.
-        
-        This setup requires root-level integration (Magisk + LSPosed). It is intended for users with Android modding experience.
-        
+        \(description)
+
+        The official LocalSend app can receive clipboard content manually, but silent background sync is only supported with the AirSend Android build.
+
+        This setup requires root-level integration (Magisk + LSPosed) and is intended for users with Android modding experience.
+
         Repository: \(androidAirSendRepository)
         """
         alert.addButton(withTitle: "Open Repository")
         alert.addButton(withTitle: "Continue")
-        
+
         let response = alert.runModal()
-        if response == .alertFirstButtonReturn, let url = URL(string: androidAirSendRepository) {
-            NSWorkspace.shared.open(url)
+        if response == .alertFirstButtonReturn {
+            openAndroidRepository()
+        }
+    }
+
+    private func setAutoClipboardSyncEnabled(_ enabled: Bool, showInfoIfEnabling: Bool) {
+        if isAutoClipboardSyncEnabled != enabled {
+            isAutoClipboardSyncEnabled = enabled
+        }
+
+        guard enabled, showInfoIfEnabling else {
+            return
+        }
+
+        showAndroidIntegrationAlert(
+            featureName: "Auto Clipboard Sync",
+            description: "New plain text copied on your Mac clipboard will be pushed to the selected Android target."
+        )
+    }
+
+    private func setAutoScreenshotSyncEnabled(_ enabled: Bool, showInfoIfEnabling: Bool) {
+        if isAutoScreenshotSyncEnabled != enabled {
+            isAutoScreenshotSyncEnabled = enabled
+        }
+
+        guard enabled, showInfoIfEnabling else {
+            return
+        }
+
+        showAndroidIntegrationAlert(
+            featureName: "Auto Screenshot Sync",
+            description: "Copied screenshots and images on your Mac are converted to PNG and pushed to the selected Android target."
+        )
+    }
+
+    private func setAutoUpdateEnabled(_ enabled: Bool) {
+        guard isAutoUpdateEnabled != enabled else { return }
+        isAutoUpdateEnabled = enabled
+        print("🚨 App: Auto-update toggled to [\(isAutoUpdateEnabled)]")
+    }
+
+    private func setLaunchAtLoginEnabled(_ enabled: Bool) {
+        guard #available(macOS 13.0, *) else { return }
+        let service = SMAppService()
+        do {
+            if enabled {
+                if service.status != .enabled {
+                    try service.register()
+                    logTransfer("🚀 Launch at Login enabled.")
+                }
+            } else if service.status == .enabled {
+                try service.unregister()
+                logTransfer("🚀 Launch at Login disabled.")
+            }
+            updateMenu()
+        } catch {
+            logTransfer("❌ Failed to toggle Launch at Login: \(error)")
+            refreshSettingsWindowIfNeeded()
+        }
+    }
+
+    private func setCompatibilityModeEnabled(_ enabled: Bool) {
+        let targetProtocol: ProtocolType = enabled ? .http : .https
+        guard preferredLocalProtocol != targetProtocol else { return }
+
+        preferredLocalProtocol = targetProtocol
+        logTransfer(
+            enabled
+                ? "🌐 Compatibility mode toggled on. Future inbound LAN transfers will prefer plain HTTP."
+                : "🔐 Compatibility mode toggled off. Future inbound LAN transfers will prefer HTTPS."
+        )
+
+        Task { @MainActor in
+            await restartNetworkingStack()
+        }
+    }
+
+    @objc private func openSettingsWindow(_ sender: AnyObject?) {
+        DispatchQueue.main.async {
+            let controller = self.ensureSettingsWindowController()
+            controller.showSettingsWindow()
         }
     }
     
@@ -2136,21 +2392,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
     
     @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {
-        if #available(macOS 13.0, *) {
-            let service = SMAppService()
-            do {
-                if service.status == SMAppService.Status.enabled {
-                    try service.unregister()
-                    logTransfer("🚀 Launch at Login disabled.")
-                } else {
-                    try service.register()
-                    logTransfer("🚀 Launch at Login enabled.")
-                }
-                updateMenu() // Refresh checkmark
-            } catch {
-                logTransfer("❌ Failed to toggle Launch at Login: \(error)")
-            }
-        }
+        setLaunchAtLoginEnabled(!isLaunchAtLoginEnabled)
     }
     
     // MARK: - Update Logic
@@ -2161,22 +2403,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
     
     @objc func toggleAutoUpdate(_ sender: NSMenuItem) {
-        isAutoUpdateEnabled.toggle()
-        print("🚨 App: Auto-update toggled to [\(isAutoUpdateEnabled)]")
+        setAutoUpdateEnabled(!isAutoUpdateEnabled)
     }
 
     @objc private func toggleLanCompatibilityMode(_ sender: NSMenuItem) {
-        let enablingCompatibility = preferredLocalProtocol != .http
-        preferredLocalProtocol = enablingCompatibility ? .http : .https
-        logTransfer(
-            enablingCompatibility
-                ? "🌐 Compatibility mode toggled on. Future inbound LAN transfers will prefer plain HTTP."
-                : "🔐 Compatibility mode toggled off. Future inbound LAN transfers will prefer HTTPS."
-        )
-
-        Task { @MainActor in
-            await restartNetworkingStack()
-        }
+        setCompatibilityModeEnabled(preferredLocalProtocol != .http)
     }
 }
 

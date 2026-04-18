@@ -3,8 +3,31 @@
 MODDIR=${0%/*}
 PACKAGE_NAME="com.airsend"
 APK_SOURCE="$MODDIR/system/app/AirSend/AirSend.apk"
-DAEMON_BIN="/system/bin/airsend_daemon"
-LOG_PATH="/data/local/tmp/airsend_daemon.log"
+DAEMON_BIN="$MODDIR/system/bin/airsend_daemon"
+LOG_DIR="/data/adb/airsend/logs"
+LOG_PATH="$LOG_DIR/airsend_daemon.log"
+LOG_ROTATED_PATH="$LOG_DIR/airsend_daemon.log.1"
+LEGACY_LOG_PATH="/data/local/tmp/airsend_daemon.log"
+LOG_MAX_BYTES=4194304
+
+prepare_runtime_dirs() {
+  mkdir -p "$LOG_DIR"
+  chmod 0755 "$LOG_DIR" 2>/dev/null || true
+}
+
+rotate_log_if_needed() {
+  if [ ! -f "$LOG_PATH" ]; then
+    return 0
+  fi
+
+  log_size="$(wc -c < "$LOG_PATH" 2>/dev/null || echo 0)"
+  if [ "${log_size:-0}" -lt "$LOG_MAX_BYTES" ]; then
+    return 0
+  fi
+
+  rm -f "$LOG_ROTATED_PATH"
+  mv "$LOG_PATH" "$LOG_ROTATED_PATH"
+}
 
 log_line() {
   echo "$(date): $1" >> "$LOG_PATH"
@@ -101,20 +124,23 @@ ensure_payload_app_installed() {
 }
 
 start_daemon() {
-  if pgrep -f "$DAEMON_BIN" > /dev/null; then
+  if pgrep -x airsend_daemon > /dev/null; then
     log_line "AirSend daemon is already running, skipping startup."
     return 0
   fi
 
+  rm -f "$LEGACY_LOG_PATH"
   log_line "Starting AirSend daemon..."
   nohup "$DAEMON_BIN" >> "$LOG_PATH" 2>&1 &
   log_line "AirSend daemon started in background."
 }
 
 for i in $(seq 1 30); do
-  [ -d "/data/local/tmp" ] && break
+  [ -d "/data/adb" ] && break
   sleep 2
 done
 
+prepare_runtime_dirs
+rotate_log_if_needed
 start_daemon
 ensure_payload_app_installed

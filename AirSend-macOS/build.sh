@@ -4,6 +4,7 @@ set -e
 APP_NAME="AirSend"
 BUILD_DIR=".build/arm64-apple-macosx/debug"
 EXECUTABLE_NAME="AirSend"
+ICON_PATH="AppIcon.icns"
 
 clean_bundle_xattrs() {
     local bundle_path="$1"
@@ -30,9 +31,11 @@ cp -X "$BUILD_DIR/$EXECUTABLE_NAME" "$APP_NAME.app/Contents/MacOS/$APP_NAME"
 cp -X Info.plist "$APP_NAME.app/Contents/Info.plist"
 
 # Copy Icon
-if [ -f "AppIcon.icns" ]; then
-    cp -X AppIcon.icns "$APP_NAME.app/Contents/Resources/AppIcon.icns"
+if [ ! -f "$ICON_PATH" ]; then
+    echo "❌ Missing required app icon: $ICON_PATH" >&2
+    exit 1
 fi
+cp -X "$ICON_PATH" "$APP_NAME.app/Contents/Resources/AppIcon.icns"
 
 # Remove quarantine attribute (fix "App is damaged" error)
 clean_bundle_xattrs "$APP_NAME.app"

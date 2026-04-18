@@ -7,6 +7,7 @@ func logTransfer(_ message: String) {
 
 struct FileLogger {
     private static let logQueue = DispatchQueue(label: "com.airsend.logger", qos: .background)
+    static func bootstrap() {}
     static func log(_ message: String) {
         let formatter = ISO8601DateFormatter()
         let timestamp = formatter.string(from: Date())

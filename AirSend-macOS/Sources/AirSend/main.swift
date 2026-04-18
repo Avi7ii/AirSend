@@ -743,59 +743,306 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         updateWindowStatus()
     }
 
-    // Drag Detection
-    var lastDragCount: Int = 0
-    var dragMonitorTimer: Timer?
-    var isDragging: Bool = false
-    var isDragInsideWindow: Bool = false // State Priority
-    private var dropTimeoutWorkItem: DispatchWorkItem?
-    private var hasFreshDragPayloadChange: Bool = false
-    private let idleDragTimerInterval: TimeInterval = 1.0
-    private let nearIconTriggerRadius: CGFloat = 140
-
-    private func statusButtonScreenFrame() -> NSRect? {
-        guard let button = statusItem.button, let window = button.window else { return nil }
-        let frameInWindow = button.convert(button.bounds, to: nil)
-        return window.convertToScreen(frameInWindow)
-    }
-
-    private func hasFilePayloadInDragPasteboard() -> Bool {
-        guard NSEvent.pressedMouseButtons != 0 else { return false }
-        return !LocalFileDrag.stageValidLocalFileURLs(from: NSPasteboard(name: .drag)).isEmpty
-    }
+    // Drag Handoff
+    private var dragProximityMonitorTimer: Timer?
+    private var dragReleaseMonitorTimer: Timer?
+    private var dragReleaseMouseUpMonitor: Any?
+    private var dragReleaseRecoveryWorkItem: DispatchWorkItem?
+    private var pendingDragPayloadURLs: [URL] = []
+    private var activeDragSessionID: UUID?
+    private var resolvedDragSessionID: UUID?
+    private let dragProximityPollInterval: TimeInterval = 0.05
+    private let dragActivationBandHeight: CGFloat = 132
+    private let dragActivationLeftReach: CGFloat = 250
+    private let dragActivationFallbackWidth: CGFloat = 320
+    private let dragActivationPreviewKeepaliveInset: CGFloat = 28
+    private let dragReleasePollInterval: TimeInterval = 0.05
+    private let dragReleaseGraceDelay: TimeInterval = 0.18
+    private let dragReleaseFallbackInset: CGFloat = 60
 
     private func filterValidLocalDropURLs(_ urls: [URL]) -> [URL] {
         LocalFileDrag.filterExistingLocalFileURLs(urls)
     }
+
+    private func startDragProximityMonitoring() {
+        guard dragProximityMonitorTimer == nil else { return }
+        let timer = Timer(timeInterval: dragProximityPollInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.checkForNearbyFileDragTrigger()
+            }
+        }
+        timer.tolerance = dragProximityPollInterval * 0.5
+        RunLoop.main.add(timer, forMode: .common)
+        dragProximityMonitorTimer = timer
+    }
+
+    private func isReasonableStatusAnchorFrame(_ frame: NSRect, within screenFrame: NSRect) -> Bool {
+        guard frame.width > 0, frame.height > 0 else { return false }
+        guard frame.intersects(screenFrame.insetBy(dx: -80, dy: -80)) else { return false }
+        let topBandHeight = max(96.0, NSStatusBar.system.thickness * 3)
+        return frame.maxY >= screenFrame.maxY - topBandHeight
+    }
+
+    private func statusBarActivationFrame() -> NSRect? {
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) } ?? NSScreen.main
+        let screenFrame = screen?.frame ?? .zero
+
+        let baseFrame: NSRect
+        if let button = statusItem.button, let window = button.window {
+            let frameInWindow = button.convert(button.bounds, to: nil)
+            let buttonFrame = window.convertToScreen(frameInWindow)
+            let statusWindowFrame = window.frame
+
+            if isReasonableStatusAnchorFrame(buttonFrame, within: screenFrame) {
+                baseFrame = buttonFrame
+            } else if isReasonableStatusAnchorFrame(statusWindowFrame, within: screenFrame) {
+                baseFrame = statusWindowFrame
+            } else {
+                baseFrame = NSRect(
+                    x: screenFrame.maxX - dragActivationFallbackWidth,
+                    y: screenFrame.maxY - max(NSStatusBar.system.thickness + 6, 28),
+                    width: dragActivationFallbackWidth,
+                    height: max(NSStatusBar.system.thickness + 6, 28)
+                )
+            }
+        } else {
+            baseFrame = NSRect(
+                x: screenFrame.maxX - dragActivationFallbackWidth,
+                y: screenFrame.maxY - max(NSStatusBar.system.thickness + 6, 28),
+                width: dragActivationFallbackWidth,
+                height: max(NSStatusBar.system.thickness + 6, 28)
+            )
+        }
+
+        let activationMinX = max(screenFrame.minX, baseFrame.minX - dragActivationLeftReach)
+        return NSRect(
+            x: activationMinX,
+            y: screenFrame.maxY - dragActivationBandHeight,
+            width: screenFrame.maxX - activationMinX,
+            height: dragActivationBandHeight
+        )
+    }
+
+    private func checkForNearbyFileDragTrigger() {
+        guard NSEvent.pressedMouseButtons != 0 else { return }
+        let mouseLocation = NSEvent.mouseLocation
+        guard let triggerFrame = statusBarActivationFrame() else { return }
+        let dragPasteboard = NSPasteboard(name: .drag)
+        let urls = LocalFileDrag.validLocalFileURLs(from: dragPasteboard)
+        let isLocalFileDrag = !urls.isEmpty
+        let isWithinActivationBand = triggerFrame.contains(mouseLocation)
+        let isWithinDropZoneKeepalive = dropZoneWindow.dragReleaseFallbackFrame(inset: dragActivationPreviewKeepaliveInset).contains(mouseLocation)
+        let shouldKeepPreviewVisible = isWithinActivationBand || isWithinDropZoneKeepalive || dropZoneWindow.isAcceptingDragSession || dropZoneWindow.isHoveringDropTarget
+
+        if dropZoneWindow.isPreviewActive || activeDragSessionID != nil || !pendingDragPayloadURLs.isEmpty {
+            guard !dropZoneWindow.isPerformingDrop,
+                  !dropZoneWindow.isShowingSuccess,
+                  !dropZoneWindow.isShowingError else { return }
+
+            if !isLocalFileDrag || !shouldKeepPreviewVisible {
+                FileLogger.log("🧭 [DragProximity] Drag left activation zone; dismissing preview. activationBand=\(isWithinActivationBand) keepalive=\(isWithinDropZoneKeepalive) accepting=\(dropZoneWindow.isAcceptingDragSession)")
+                clearTransientDragState()
+                dropZoneWindow.hide()
+            }
+            return
+        }
+
+        guard isLocalFileDrag, isWithinActivationBand else { return }
+
+        FileLogger.log("🧲 [DragProximity] Status-bar activation band triggered with \(urls.count) file(s). triggerFrame=\(triggerFrame.debugDescription)")
+        beginDropZonePreview(with: urls)
+    }
+
+    private func startDragReleaseMonitoring() {
+        if dragReleaseMouseUpMonitor == nil {
+            dragReleaseMouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] _ in
+                Task { @MainActor in
+                    self?.handleDragReleaseIfNeeded(trigger: "global-mouse-up")
+                }
+            }
+        }
+        guard dragReleaseMonitorTimer == nil else { return }
+        let timer = Timer(timeInterval: dragReleasePollInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleDragReleaseIfNeeded(trigger: "poll")
+            }
+        }
+        timer.tolerance = dragReleasePollInterval * 0.5
+        RunLoop.main.add(timer, forMode: .common)
+        dragReleaseMonitorTimer = timer
+    }
+
+    private func stopDragReleaseMonitoring() {
+        dragReleaseMonitorTimer?.invalidate()
+        dragReleaseMonitorTimer = nil
+        if let dragReleaseMouseUpMonitor {
+            NSEvent.removeMonitor(dragReleaseMouseUpMonitor)
+            self.dragReleaseMouseUpMonitor = nil
+        }
+    }
+
+    private func beginDragSession(with urls: [URL]) {
+        activeDragSessionID = UUID()
+        resolvedDragSessionID = nil
+        pendingDragPayloadURLs = urls
+        dragReleaseRecoveryWorkItem?.cancel()
+        dragReleaseRecoveryWorkItem = nil
+    }
+
+    private func markCurrentDragSessionResolved(trigger: String) -> Bool {
+        guard let activeDragSessionID else {
+            FileLogger.log("ℹ️ [DragSession] Resolving drop via \(trigger) without an active session ID.")
+            dragReleaseRecoveryWorkItem?.cancel()
+            dragReleaseRecoveryWorkItem = nil
+            return true
+        }
+
+        guard resolvedDragSessionID != activeDragSessionID else {
+            FileLogger.log("🛑 [DragSession] Ignoring duplicate drop resolution via \(trigger).")
+            return false
+        }
+
+        resolvedDragSessionID = activeDragSessionID
+        dragReleaseRecoveryWorkItem?.cancel()
+        dragReleaseRecoveryWorkItem = nil
+        return true
+    }
+
+    private func handleDragReleaseIfNeeded(trigger: String) {
+        guard NSEvent.pressedMouseButtons == 0 else { return }
+        stopDragReleaseMonitoring()
+
+        if let activeDragSessionID, resolvedDragSessionID == activeDragSessionID {
+            return
+        }
+
+        guard !dropZoneWindow.isPerformingDrop,
+              !dropZoneWindow.isShowingSuccess,
+              !dropZoneWindow.isShowingError else {
+            return
+        }
+
+        let releasePoint = NSEvent.mouseLocation
+        let fallbackFrame = dropZoneWindow.dragReleaseFallbackFrame(inset: dragReleaseFallbackInset)
+        let wasHoveringDropTarget = dropZoneWindow.isAcceptingDragSession || dropZoneWindow.isHoveringDropTarget
+        guard !pendingDragPayloadURLs.isEmpty, fallbackFrame.contains(releasePoint) || wasHoveringDropTarget else {
+            FileLogger.log("🧭 [DragRelease] Mouse up outside drop fallback zone via \(trigger). Dismissing preview.")
+            clearTransientDragState()
+            dropZoneWindow.hide()
+            return
+        }
+
+        let sessionID = activeDragSessionID
+        FileLogger.log("⌛️ [DragRelease] Mouse up near drop zone via \(trigger). Waiting \(Int(dragReleaseGraceDelay * 1000))ms for AppKit drop.")
+        let workItem = DispatchWorkItem { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                if let sessionID, self.activeDragSessionID != sessionID {
+                    return
+                }
+                if let sessionID, self.resolvedDragSessionID == sessionID {
+                    return
+                }
+                guard !self.dropZoneWindow.isPerformingDrop,
+                      !self.dropZoneWindow.isShowingSuccess,
+                      !self.dropZoneWindow.isShowingError,
+                      !self.pendingDragPayloadURLs.isEmpty else {
+                    return
+                }
+
+                let stillNearFallback = self.dropZoneWindow.dragReleaseFallbackFrame(inset: self.dragReleaseFallbackInset).contains(releasePoint)
+                guard stillNearFallback || wasHoveringDropTarget else {
+                    FileLogger.log("🧭 [DragRelease] Grace period ended outside fallback zone. Dismissing preview.")
+                    self.clearTransientDragState()
+                    self.dropZoneWindow.hide()
+                    return
+                }
+
+                FileLogger.log("🎣 [DragRelease] Recovering drop after grace period via \(trigger) with \(self.pendingDragPayloadURLs.count) file(s)")
+                self.didPerformDrop(urls: self.pendingDragPayloadURLs)
+            }
+        }
+        dragReleaseRecoveryWorkItem?.cancel()
+        dragReleaseRecoveryWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + dragReleaseGraceDelay, execute: workItem)
+    }
+
+    private func clearTransientDragState(preserveResolutionState: Bool = false) {
+        stopDragReleaseMonitoring()
+        dragReleaseRecoveryWorkItem?.cancel()
+        dragReleaseRecoveryWorkItem = nil
+        pendingDragPayloadURLs = []
+        dropZoneWindow.setPreviewDragActive(false)
+        dropZoneWindow.setPreviewHoverActive(false)
+        LocalFileDrag.clearCachedDragPayload()
+        if !preserveResolutionState {
+            activeDragSessionID = nil
+            resolvedDragSessionID = nil
+        }
+    }
+
+    private func beginDropZonePreview(with urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        if let activeDragSessionID,
+           resolvedDragSessionID != activeDragSessionID,
+           (dropZoneWindow.isPreviewActive || dropZoneWindow.isAcceptingDragSession || !pendingDragPayloadURLs.isEmpty) {
+            pendingDragPayloadURLs = urls
+            FileLogger.log("🔁 [DragHandoff] Preview already active; refreshing payload without resetting window.")
+            return
+        }
+        dropZoneWindow.setPreferredAnchorPoint(NSEvent.mouseLocation)
+        dropZoneWindow.prepareForDragPreview()
+        beginDragSession(with: urls)
+        startDragReleaseMonitoring()
+        dropZoneWindow.prewarmForDrag(under: statusItem)
+        dropZoneWindow.setPreviewDragActive(true)
+        dropZoneWindow.setPreviewHoverActive(false)
+        updateWindowStatus()
+        FileLogger.log("🚀 [DragHandoff] Showing drop zone preview for \(urls.count) file(s)")
+        dropZoneWindow.show(under: statusItem)
+    }
+
+    private func handleDropZoneDragEnter() {
+        dropZoneWindow.setPreviewDragActive(true)
+        dropZoneWindow.setPreviewHoverActive(true)
+        FileLogger.log("🎯 [DragHandoff] Drag entered drop zone window")
+    }
+
+    private func handleDropZoneDragExit() {
+        dropZoneWindow.setPreviewHoverActive(false)
+        FileLogger.log("🚪 [DragHandoff] Drag exited drop zone window; proximity monitor will decide whether preview stays visible")
+    }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        FileLogger.bootstrap()
+
         // Create the status item in the menu bar
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem.autosaveName = "Item-0"
+        statusItem.behavior = .removalAllowed
         
         if let button = statusItem.button {
             // Use a system symbol for the icon
             button.image = NSImage(systemSymbolName: "paperplane.fill", accessibilityDescription: "LocalSend")
-            
-            // Setup Drag & Drop
+            button.imagePosition = .imageOnly
+
             let dropView = DropTargetView(frame: button.bounds)
             dropView.autoresizingMask = [.width, .height]
             dropView.delegate = self
             button.addSubview(dropView)
         }
-        
+
         // Initialize Drop Zone Window
         dropZoneWindow = DropZoneWindow()
         dropZoneWindow.onDrop = { [weak self] urls in
             self?.didPerformDrop(urls: urls)
         }
         dropZoneWindow.onDragEnter = { [weak self] in
-            self?.isDragInsideWindow = true // Enter: Lock visibility
-            self?.hideWorkItem?.cancel()
-            self?.hideWorkItem = nil
+            self?.handleDropZoneDragEnter()
         }
         dropZoneWindow.onDragExit = { [weak self] in
-            self?.isDragInsideWindow = false // Exit: Unlock visibility
-            // Rely on checkDragState to handle hiding based on Safe Zone
+            self?.handleDropZoneDragExit()
         }
         dropZoneWindow.onClickDuringTransfer = { [weak self] in
             guard let self = self else { return }
@@ -805,6 +1052,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             self.updateStatusItemIcon(showDot: true) // Show dot indicator
             self.updateMenu() // Refresh menu to include progress row
         }
+
+        dropZoneWindow.parkHidden(under: statusItem)
+        startDragProximityMonitoring()
         
         loadDevices()
         migrateSelectionAndHistoryToV2IfNeeded()
@@ -838,246 +1088,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
     }
     
-    func startDragMonitoring() {
-        lastDragCount = NSPasteboard(name: .drag).changeCount
-        
-        // 空闲态 1.0s 慢检，检测到 drag 后切 0.1s 快检
-        setDragTimerInterval(idleDragTimerInterval)
-    }
-    
-    private func setDragTimerInterval(_ interval: TimeInterval) {
-        dragMonitorTimer?.invalidate()
-        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.checkDragState()
-            }
-        }
-        timer.tolerance = interval * 0.5 // 🔋 允许 macOS 合并定时器唤醒
-        dragMonitorTimer = timer
-    }
-    
-    func checkDragState() {
-        let currentCount = NSPasteboard(name: .drag).changeCount
-        let hasPayload = hasFilePayloadInDragPasteboard()
-        let detectedByChangeCount = (currentCount != lastDragCount)
-
-        // Only activate on a fresh drag pasteboard change that contains real local files.
-        // This avoids reusing stale drag pasteboard contents during text selection or window moves.
-        if detectedByChangeCount && hasPayload {
-            // 检测到新的 drag，更新计数并标记状态
-            lastDragCount = currentCount
-            hasFreshDragPayloadChange = true
-            isDragging = true
-            dropZoneWindow.isDuringDrag = true  // 同步到 DropZoneWindow，让 show() 使用 orderFront
-            // 🔋 升速到 0.1s（仅在空闲态时切换，避免重复 invalidate）
-            if dragMonitorTimer?.timeInterval != 0.1 {
-                setDragTimerInterval(0.1)
-            }
-            
-            // ━━━ 关键：立刻预热窗口（不可见） ━━━
-            // 必须在 drag 到达窗口区域之前就完成窗口操作（定位、orderFront），
-            // 但保持 alpha=0，不提前打扰用户。
-            // 后续仅在 near-icon/safe-zone 触发 show()，只做 alpha 淡入，
-            // 避免 drag 飞行中执行 orderFront 导致 draggingExited 弹回。
-            if !dropZoneWindow.isPerformingDrop && !dropZoneWindow.isShowingSuccess {
-                updateWindowStatus()
-                dropZoneWindow.prewarmForDrag(under: statusItem)
-            }
-        }
-
-        // 兜底：若窗口可见但没有被标记为 dragging，且鼠标已释放，清理卡住状态。
-        if !isDragging,
-           NSEvent.pressedMouseButtons == 0,
-           dropZoneWindow.alphaValue > 0.01,
-           !dropZoneWindow.isAcceptingDragSession,
-           !dropZoneWindow.isPerformingDrop,
-           !dropZoneWindow.isShowingSuccess,
-           !dropZoneWindow.isShowingError {
-            dropZoneWindow.isDuringDrag = false
-            dropZoneWindow.isIconExpanded = false
-            dropZoneWindow.isBorderHighlighted = false
-            dropZoneWindow.hide()
-        }
-        
-        // 如果正在拖拽，检查鼠标是否松手
-        if isDragging {
-            let pressedButtons = NSEvent.pressedMouseButtons
-            if pressedButtons == 0 {
-                // 用户松手了
-                let mouseLoc = NSEvent.mouseLocation
-                let windowFrame = dropZoneWindow.frame
-                let isMouseInWindow = NSMouseInRect(mouseLoc, windowFrame, false)
-                
-                isDragging = false
-                dropZoneWindow.isDuringDrag = false  // 同步：drag 结束
-                // 降速回空闲监测频率
-                setDragTimerInterval(idleDragTimerInterval)
-                
-                // ━━━ 终极兜底：Drag Pasteboard 直读 ━━━
-                // 问题根源：用户通过窗口时 enter/exit 抖动，松手时鼠标已在窗口外，
-                // AppKit 不会调用 performDragOperation。
-                // 方案：检测到松手时，若鼠标在窗口附近（60px 缓冲区）且曾进入过窗口，
-                // 直接从 NSPasteboard(name: .drag) 读取文件，绕开 AppKit 边界判定。
-                let hadDragNearWindow = isDragInsideWindow
-                    || dropZoneWindow.isAcceptingDragSession
-                    || isMouseInWindow
-                let expandedFrame = windowFrame.insetBy(dx: -60, dy: -60)
-                let isNearWindow = expandedFrame.contains(mouseLoc)
-                
-                if hadDragNearWindow && isNearWindow && !dropZoneWindow.isPerformingDrop {
-                    if !hasFreshDragPayloadChange {
-                        FileLogger.log("⚠️ [DragFallback] No fresh changeCount edge. Probing pasteboard directly.")
-                    }
-                    let validURLs = LocalFileDrag.stagedOrCurrentLocalFileURLs(from: NSPasteboard(name: .drag))
-                    if !validURLs.isEmpty {
-                        FileLogger.log("🎣 [DragFallback] Pasteboard 兜底捕获：\(validURLs.count) 个文件。mouseLoc=\(mouseLoc), inWindow=\(isMouseInWindow)")
-                        dropZoneWindow.isPerformingDrop = true
-                        isDragInsideWindow = false
-                        didPerformDrop(urls: validURLs)
-                        return
-                    } else {
-                        FileLogger.log("⚠️ [DragFallback] Pasteboard 无文件（松手位置：\(mouseLoc)，窗口：\(windowFrame)）")
-                    }
-                }
-                
-                // 原有流程：若 drop 即将发生（AppKit 还未决定），等待 performDragOperation
-                let isDropImminent = isMouseInWindow
-                    || dropZoneWindow.isAcceptingDragSession
-                    || isDragInsideWindow
-                
-                if isDropImminent {
-                    dropTimeoutWorkItem?.cancel()
-                    let item = DispatchWorkItem { [weak self] in
-                        Task { @MainActor in
-                            guard let self = self else { return }
-                            if !self.dropZoneWindow.isShowingSuccess
-                                && !self.dropZoneWindow.isPerformingDrop
-                                && !self.dropZoneWindow.isAcceptingDragSession {
-                                FileLogger.log("🚨 App: Drop timeout (1.5s)，force hiding.")
-                                self.hasFreshDragPayloadChange = false
-                                LocalFileDrag.clearCachedDragPayload()
-                                self.dropZoneWindow.hide()
-                            }
-                        }
-                    }
-                    self.dropTimeoutWorkItem = item
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: item)
-                    return
-                }
-                
-                // 窗口外松手，正常隐藏
-                hasFreshDragPayloadChange = false
-                LocalFileDrag.clearCachedDragPayload()
-                dropZoneWindow.hide()
-                return
-            }
-
-            
-            // 统一逻辑：鼠标按下期间的展示控制
-            // 1. 状态优先：如果我们在窗口内（通过 DragEnter/Exit 事件），强制显示
-            if isDragInsideWindow {
-                if dropZoneWindow.alphaValue < 1 {
-                    updateWindowStatus()
-                    dropZoneWindow.show(under: statusItem)
-                }
-            }
-
-            // 2. 近距离 & Safe Zone 逻辑
-            if let buttonFrame = statusButtonScreenFrame() {
-                let mouseLoc = NSEvent.mouseLocation
-                let windowFrame = dropZoneWindow.frame
-                
-                let isMouseInWindow = NSMouseInRect(mouseLoc, windowFrame, false)
-                
-                let buttonCenter = CGPoint(x: buttonFrame.midX, y: buttonFrame.midY)
-                let distance = hypot(mouseLoc.x - buttonCenter.x, mouseLoc.y - buttonCenter.y)
-                let isNearIcon = distance < nearIconTriggerRadius
-                
-                let isInSafeZone: Bool
-                if dropZoneWindow.alphaValue > 0 {
-                    let safeZone = windowFrame.insetBy(dx: -120, dy: -120)
-                    isInSafeZone = safeZone.contains(mouseLoc)
-                } else {
-                    isInSafeZone = false
-                }
-                
-                if !dropZoneWindow.isShowingSuccess {
-                    dropZoneWindow.isIconExpanded = isMouseInWindow
-                    dropZoneWindow.isBorderHighlighted = isMouseInWindow
-                }
-                
-                let shouldStayVisible = !isMinimizedToMenu && (
-                    isMouseInWindow || isNearIcon || isInSafeZone ||
-                    dropZoneWindow.isShowingSuccess || dropZoneWindow.isShowingError ||
-                    dropZoneWindow.isPerformingDrop || dropZoneWindow.isAcceptingDragSession
-                )
-                if shouldStayVisible {
-                    if dropZoneWindow.alphaValue < 1 {
-                        updateWindowStatus()
-                        dropZoneWindow.show(under: statusItem)
-                    }
-                } else {
-                    if dropZoneWindow.alphaValue > 0 {
-                        dropZoneWindow.hide()
-                    }
-                }
-            }
-        }
-    }
-    
     // MARK: - DropTargetViewDelegate
-    private var hideWorkItem: DispatchWorkItem?
 
-    func didEnterDrag() {
-        // Cancel any pending hide
-        hideWorkItem?.cancel()
-        hideWorkItem = nil
-
-        // Some drag sources don't update NSPasteboard.changeCount in time.
-        // Latch drag-active state as soon as AppKit tells us drag entered.
-        isDragging = true
-        hasFreshDragPayloadChange = true
-        dropZoneWindow.isDuringDrag = true
-        lastDragCount = NSPasteboard(name: .drag).changeCount
-        _ = LocalFileDrag.stageValidLocalFileURLs(from: NSPasteboard(name: .drag))
-        if dragMonitorTimer?.timeInterval != 0.1 {
-            setDragTimerInterval(0.1)
-        }
-        
-        if !dropZoneWindow.isPerformingDrop && !dropZoneWindow.isShowingSuccess {
-            updateWindowStatus()
-        }
-        dropZoneWindow.show(under: statusItem)
+    func didEnterDrag(urls: [URL]) {
+        beginDropZonePreview(with: urls)
     }
-    
+
     func didExitDrag() {
-        // Fail-safe: clean stale drag state if the button is already released.
-        if NSEvent.pressedMouseButtons == 0,
-           !dropZoneWindow.isAcceptingDragSession,
-           !dropZoneWindow.isPerformingDrop,
-           !dropZoneWindow.isShowingSuccess,
-           !dropZoneWindow.isShowingError {
-            isDragging = false
-            hasFreshDragPayloadChange = false
-            dropZoneWindow.isDuringDrag = false
-            LocalFileDrag.clearCachedDragPayload()
-            if dragMonitorTimer?.timeInterval != idleDragTimerInterval {
-                setDragTimerInterval(idleDragTimerInterval)
-            }
-            dropZoneWindow.hide()
-        }
-    }
-    
-    private func scheduleHide(delay: TimeInterval = 0.2) {
-        hideWorkItem?.cancel()
-        let item = DispatchWorkItem { [weak self] in
-            // Don't hide if showing success OR performing drop
-            if self?.dropZoneWindow.isShowingSuccess == false && self?.dropZoneWindow.isPerformingDrop == false {
-                self?.dropZoneWindow.hide()
-            }
-        }
-        hideWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+        guard !dropZoneWindow.isAcceptingDragSession,
+              !dropZoneWindow.isPerformingDrop,
+              !dropZoneWindow.isShowingSuccess,
+              !dropZoneWindow.isShowingError else { return }
+
+        FileLogger.log("↘️ [DragHandoff] Drag left status item; preview stays pinned until mouse up")
     }
     
     private func sendTextWithFallback(_ text: String, to group: DeviceGroupViewModel) async throws {
@@ -1139,14 +1162,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
     
     func didPerformDrop(urls: [URL]) {
-        isDragInsideWindow = false
-        isDragging = false
-        hasFreshDragPayloadChange = false
-        dropZoneWindow.isDuringDrag = false
-        LocalFileDrag.clearCachedDragPayload()
-        if dragMonitorTimer?.timeInterval != idleDragTimerInterval {
-            setDragTimerInterval(idleDragTimerInterval)
-        }
+        FileLogger.log("📦 [Drop] didPerformDrop invoked with \(urls.count) file(s)")
+        guard markCurrentDragSessionResolved(trigger: "didPerformDrop") else { return }
+        clearTransientDragState(preserveResolutionState: true)
         let validURLs = filterValidLocalDropURLs(urls)
         guard !validURLs.isEmpty else {
             logTransfer("⚠️ Drop ignored: payload is not a valid local file list.")
@@ -1615,7 +1633,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
         await startTransferServer()
         startClipboardService()
-        startDragMonitoring()
         updateMenu()
     }
     

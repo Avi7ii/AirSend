@@ -151,7 +151,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
     func sendAnnouncement(isAnnouncement: Bool = true) {
         let dto = MulticastDto(
             alias: alias,
-            version: "3.0.1",
+            version: "3.5.0",
             deviceModel: deviceModel,
             deviceType: deviceType.rawValue,
             fingerprint: fingerprint,
@@ -407,7 +407,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
 
         let registerDto = RegisterDto(
             alias: alias,
-            version: "3.0.1",
+            version: "3.5.0",
             deviceModel: deviceModel,
             deviceType: deviceType.rawValue,
             fingerprint: fingerprint,
@@ -455,7 +455,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
     private func probeHost(_ host: String, timeout: TimeInterval, session: URLSession) async {
         let registerDto = RegisterDto(
             alias: alias,
-            version: "3.0.1",
+            version: "3.5.0",
             deviceModel: deviceModel,
             deviceType: deviceType.rawValue,
             fingerprint: fingerprint,
@@ -489,7 +489,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
                     port: dto.port ?? candidatePort,
                     deviceModel: dto.deviceModel,
                     deviceType: dto.deviceType,
-                    version: dto.version ?? "3.0.1",
+                    version: dto.version ?? "3.5.0",
                     https: dto.protocolType == ProtocolType.https.rawValue,
                     download: dto.download ?? false,
                     lastSeen: Date()
@@ -521,7 +521,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
                     port: dto.port ?? candidatePort,
                     deviceModel: dto.deviceModel,
                     deviceType: dto.deviceType,
-                    version: dto.version ?? "3.0.1",
+                    version: dto.version ?? "3.5.0",
                     https: dto.protocolType == ProtocolType.https.rawValue,
                     download: dto.download ?? false,
                     lastSeen: Date()

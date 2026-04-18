@@ -5,6 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ANDROID_DIR="$ROOT_DIR/Android"
 DAEMON_DIR="$ANDROID_DIR/airsend_daemon"
 MAGISK_DIR="$ROOT_DIR/magisk_module"
+MODULE_VERSION="$(sed -n 's/^version=//p' "$MAGISK_DIR/module.prop" | head -n1)"
+if [[ -z "$MODULE_VERSION" ]]; then
+  MODULE_VERSION="latest"
+fi
 
 DAEMON_TARGET_ABI="${DAEMON_TARGET_ABI:-arm64-v8a}"
 APK_VARIANT="${APK_VARIANT:-debug}" # debug | release
@@ -12,7 +16,7 @@ APK_VARIANT="${APK_VARIANT:-debug}" # debug | release
 DAEMON_DST="$MAGISK_DIR/system/bin/airsend_daemon"
 APK_DST_DIR="$MAGISK_DIR/system/app/AirSend"
 APK_DST="$APK_DST_DIR/AirSend.apk"
-ZIP_OUTPUT="${ZIP_OUTPUT:-$ROOT_DIR/AirSend_Magisk_latest.zip}"
+ZIP_OUTPUT="${ZIP_OUTPUT:-$ROOT_DIR/AirSend_Magisk_${MODULE_VERSION}.zip}"
 
 log() {
   printf '[build-magisk] %s\n' "$1"

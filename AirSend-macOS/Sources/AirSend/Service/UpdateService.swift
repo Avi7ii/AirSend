@@ -5,7 +5,7 @@ import Cocoa
 class UpdateService {
     static let shared = UpdateService()
     
-    var currentVersion = "3.0.1"
+    var currentVersion = "3.5.0"
     
     private let owner = "Avi7ii"
     private let repo = "AirSend"

@@ -2121,7 +2121,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     port: Int(NetworkPorts.transferPort),
                     deviceModel: "Remote Device",
                     deviceType: "desktop",
-                    version: "3.0.1",
+                    version: "3.5.0",
                     https: false,
                     download: true,
                     lastSeen: Date()
@@ -2508,7 +2508,7 @@ private enum SelfTestRunner {
             port: goodPort,
             deviceModel: model,
             deviceType: deviceType,
-            version: "3.0.1",
+            version: "3.5.0",
             https: deviceUsesHTTPS,
             download: true,
             lastSeen: Date()
@@ -2520,7 +2520,7 @@ private enum SelfTestRunner {
             port: badPort,
             deviceModel: model,
             deviceType: deviceType,
-            version: "3.0.1",
+            version: "3.5.0",
             https: deviceUsesHTTPS,
             download: true,
             lastSeen: Date()

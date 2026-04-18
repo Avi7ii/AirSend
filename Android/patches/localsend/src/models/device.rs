@@ -155,7 +155,7 @@ impl DeviceInfo {
 
         Self {
             alias: "AirSend Android Module".to_string(),
-            version: "3.0.1".to_string(),
+            version: "3.5.0".to_string(),
             device_model: model,
             device_type: Some(DeviceType::Headless),
             fingerprint,

@@ -27,6 +27,7 @@ logs/
 # Development
 .agent/
 .gemini/
+.superpowers/
 .antigravityignore
 *.tmp
 *.temp

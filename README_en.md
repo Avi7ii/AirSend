@@ -46,7 +46,7 @@ It consists of two parts:
 | Image Clipboard Sync   | ❌                                  | ❌                              | ✅ Universal Clipboard inside Apple ecosystem | ✅ Copied images on Mac auto-send to Android  |
 | Android Background     | Depends on system process management | Depends on Android background policy | ❌ No Android support              | Rust daemon, independent of App lifecycle    |
 | System-Level Clipboard | ❌                                  | ❌                              | ❌ No Android support                   | ✅ (Requires Root + LSPosed)                  |
-| Drag-and-drop UX       | ✅ Standard window drag target      | ✅ Plugin / share entry         | ✅ Finder / Share menu                  | ✅ Pop-up drag-and-drop sending               |
+| Drag-and-drop UX       | ❌                                  | ❌                              | ❌                                      | ✅ Pop-up drag-and-drop sending               |
 | Protocol Compatibility | ✅ LocalSend standard               | ✅ Independent protocol ecosystem | ✅ Native Apple ecosystem capability | ✅ Fully compatible with LocalSend            |
 
 </div>

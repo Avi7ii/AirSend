@@ -33,23 +33,21 @@ It consists of two parts:
 
 ---
 
-<h2 align="center"> ⚖️ How it compares to official LocalSend </h2>
+<h2 align="center"> ⚖️ How it compares to similar tools </h2>
 
 <div align="center">
 
-| Feature                | Official LocalSend                   | AirSend                                         |
-| ---------------------- | ------------------------------------ | ----------------------------------------------- |
-| macOS UI               | Flutter cross-platform main window   | Pure Swift native menu bar, no main window      |
-| RAM Usage              | ~300MB                               | **~20MB**                                       |
-| Clipboard Sync         | ❌                                    | ✅ Two-way automatic (Android ↔ Mac)             |
-| Screenshot Auto-Push   | ❌                                    | ✅ Screenshots appear in Mac Downloads instantly |
-| Image Clipboard Sync   | ❌                                    | ✅ Copied images on Mac auto-send to Android     |
-| Android Background     | Depends on system process management | Rust daemon, independent of App lifecycle       |
-| System-Level Clipboard | ❌                                    | ✅ (Requires Root + LSPosed)                     |
-| Campus LAN path        | ❌ No manual HTTP compatibility path  | ✅ Manual HTTP compatibility mode (default off) |
-| Large campus-subnet discovery | ❌ Easy to lose visibility once multicast is suppressed | ✅ `/24` slice expansion + remembered-host keepalive |
-| Drag-and-drop UX       | Standard window drag target          | ✅ Prewarmed DropZone, anti-bounce, background minimize |
-| Protocol Compatibility | ✅ LocalSend standard                 | ✅ Fully compatible with LocalSend               |
+| Feature                | Official LocalSend                 | KDE Connect                    | Official AirDrop                       | AirSend                                      |
+| ---------------------- | ---------------------------------- | ------------------------------ | -------------------------------------- | -------------------------------------------- |
+| macOS UI               | ✅ Flutter cross-platform main window | ✅ Menu bar / pairing manager | ✅ Native system share entry            | ✅ Pure Swift native menu bar, no main window |
+| RAM Usage              | ~300MB                             | Moderate, resident components  | ✅ Built into the system, no main window | ✅ **~20MB**                                  |
+| Clipboard Sync         | ❌                                  | ✅ Manual / plugin-style sync  | ✅ Universal Clipboard between Apple devices | ✅ Two-way automatic (Android ↔ Mac)          |
+| Screenshot Auto-Push   | ❌                                  | ❌                              | ❌                                      | ✅ Screenshots appear in Mac Downloads instantly |
+| Image Clipboard Sync   | ❌                                  | ❌                              | ✅ Universal Clipboard inside Apple ecosystem | ✅ Copied images on Mac auto-send to Android  |
+| Android Background     | Depends on system process management | Depends on Android background policy | ❌ No Android support              | Rust daemon, independent of App lifecycle    |
+| System-Level Clipboard | ❌                                  | ❌                              | ❌ No Android support                   | ✅ (Requires Root + LSPosed)                  |
+| Drag-and-drop UX       | ✅ Standard window drag target      | ✅ Plugin / share entry         | ✅ Finder / Share menu                  | ✅ Pop-up drag-and-drop sending               |
+| Protocol Compatibility | ✅ LocalSend standard               | ✅ Independent protocol ecosystem | ✅ Native Apple ecosystem capability | ✅ Fully compatible with LocalSend            |
 
 </div>
 

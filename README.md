@@ -46,7 +46,7 @@ AirSend 是一套专为 **Mac + Android** 用户设计的跨平台互联工具�
 | 图片剪贴板同步   | ❌                    | ❌                        | ✅ Apple 生态内通用剪贴板 | ✅ Mac 复制图片自动发到 Android   |
 | Android 后台保活 | 依赖系统进程管理     | 依赖 Android 后台策略    | ❌ 不支持 Android        | Rust 守护进程，脱离 App 生命周期 |
 | 系统级剪贴板访问 | ❌                    | ❌                        | ❌ 不支持 Android        | ✅（需 Root + LSPosed）           |
-| 复杂拖拽体验     | ✅ 常规主窗口拖放     | ✅ 插件入口 / 分享入口    | ✅ Finder / 分享菜单     | ✅ 弹窗拖拽发送                    |
+| 复杂拖拽体验     | ❌                    | ❌                        | ❌                       | ✅ 弹窗拖拽发送                    |
 | 协议兼容性       | ✅ LocalSend 标准协议 | ✅ 独立协议生态          | ✅ Apple 生态原生能力    | ✅ 完全兼容 LocalSend 协议        |
 
 </div>

@@ -135,12 +135,12 @@ AirSend 3.0.0 新增了一个**默认关闭、需手动开启**的 `HTTP 兼容�
 <summary>📖 读图说明（点击展开）</summary>
 <br>
 
-- **蓝色实线**：标准 LocalSend HTTPS 数据面；**黄色虚线**：手动启用的 plain HTTP compatibility 数据面
-- **青色虚线**：UDP 发现、设备注册、`/24` 扩散探测和已知设备回找
-- **红色点线**：独立的 campus UDP fallback，采用 600-byte 分片和 24-chunk 窗口，且仅支持不超过 1 MiB 的 payload
-- **紫色实线**：Android 内部 abstract Unix domain socket IPC，包括 `@airsend_ipc` 和 `@airsend_app_ipc`
-- **Android 三进程域**：Kotlin App 进程负责 Direct Share，LSPosed 代码运行于 `system_server`，Rust/Tokio daemon 作为 root 原生进程常驻
-- **端口分工**：UDP `53317` 用于 AirSend 发现与 fallback；Mac TCP `53318`、Android TCP `53319` 承载 LocalSend-compatible HTTP API 数据面
+1. **先看运行时边界**：左侧是单一 Swift/AppKit macOS 进程；右侧依次拆开 Kotlin App、运行于 `system_server` 的 LSPosed Hook，以及 UID 0 Rust/Tokio daemon。
+2. **再看中间的传输契约**：AirSend 自己负责发现、路由决策与受限恢复；LocalSend-compatible HTTP API 仅作为文件与剪贴板的数据面适配层。
+3. **沿跨边界线路追踪调用**：棕色是 UDP 发现与注册，蓝色是默认 HTTPS / 显式 HTTP compatibility 数据面，红色虚线是独立且仅支持小 payload 的 UDP fallback，紫色虚线只表示 Android 内部 abstract UDS IPC。
+4. **最后看底部三条端到端链路**：分别给出文件传输、剪贴板往返与截图自动推送从触发到落盘的完整路径。
+
+关键约束：UDP `53317` 承载发现与 fallback；Mac TCP `53318`、Android TCP `53319` 承载数据面；HTTP compatibility 必须手动开启；fallback 使用 600-byte 分片与 24-chunk 窗口，payload 上限为 1 MiB。
 
 </details>
 

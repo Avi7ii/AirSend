@@ -135,12 +135,12 @@ The developer-facing diagram below maps AirSend's low-level runtime boundaries, 
 <summary>📖 How to read this diagram (click to expand)</summary>
 <br>
 
-- **Solid blue links**: standard LocalSend HTTPS data plane; **dashed yellow links**: manually enabled plain-HTTP compatibility data plane
-- **Dashed teal links**: UDP discovery, registration, `/24` expansion, and remembered-host re-probing
-- **Dotted red links**: separate campus UDP fallback using 600-byte chunks and 24-chunk windows, limited to payloads no larger than 1 MiB
-- **Solid purple links**: Android abstract Unix domain socket IPC through `@airsend_ipc` and `@airsend_app_ipc`
-- **Three Android process domains**: Kotlin App for Direct Share, LSPosed code inside `system_server`, and a resident root Rust/Tokio daemon
-- **Port roles**: UDP `53317` handles AirSend discovery and fallback; Mac TCP `53318` and Android TCP `53319` carry the LocalSend-compatible HTTP API data plane
+1. **Start with runtime boundaries**: the left side is one Swift/AppKit macOS process; the right side separates the Kotlin App, the LSPosed hook inside `system_server`, and the UID 0 Rust/Tokio daemon.
+2. **Then read the transport contract**: AirSend owns discovery, route selection, and bounded recovery. The LocalSend-compatible HTTP API is only the file and clipboard data-plane adapter.
+3. **Follow the cross-boundary paths**: brown carries UDP discovery and registration, blue carries the default HTTPS / explicit HTTP compatibility data plane, dashed red is the separate small-payload UDP fallback, and dashed purple is Android-only abstract UDS IPC.
+4. **Finish with the three end-to-end traces**: they show the complete file-transfer, clipboard round-trip, and automatic screenshot-push paths from trigger to storage.
+
+Key constraints: UDP `53317` carries discovery and fallback; Mac TCP `53318` and Android TCP `53319` carry the data plane; HTTP compatibility requires explicit user enablement; fallback uses 600-byte chunks with a 24-chunk window and a 1 MiB payload ceiling.
 
 </details>
 

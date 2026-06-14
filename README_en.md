@@ -123,121 +123,24 @@ AirSend 3.0.0 adds a **manual, default-off** `HTTP Compatibility Mode` specifica
 
 <h2 align="center">🕸️ Architecture Overview</h2>
 
-The diagram below shows the role of each module on the macOS and Android sides, along with the communication links between them.
+The developer-facing diagram below maps AirSend's low-level runtime boundaries, technology stack, IPC, LocalSend-compatible API adapter, and complex-LAN recovery paths.
 
-```mermaid
-%%{init: {'theme': 'dark', 'themeVariables': {'background': 'transparent', 'clusterBkg': '#0d0d0d55', 'edgeLabelBackground': '#1a1a2e', 'fontSize': '16px'}}}%%
-flowchart TB
-    classDef mac_node fill:#1d1d1f,stroke:#007aff,stroke-width:2px,color:#fff
-    classDef android_node fill:#0d231e,stroke:#3ddc84,stroke-width:2px,color:#fff
-    classDef daemon_node fill:#2b1a13,stroke:#f86523,stroke-width:2px,color:#fff
-    classDef magic_node fill:#1e1b4b,stroke:#a855f7,stroke-width:2px,color:#fff
-    classDef protocol_line color:#eab308,stroke-width:3px,stroke-dasharray: 5 5
+<p align="center">
+  <img src="docs/architecture/airsend-engineering-architecture.svg" alt="AirSend low-level engineering architecture">
+</p>
 
-    %% ==========================================
-    %% Part 1: macOS Side
-    %% ==========================================
-    subgraph macOS_Side ["💻 macOS Side (Ultimate Native Hub)"]
-        direction TB
-
-        subgraph Mac_App ["App Orchestrator - AppDelegate / @MainActor"]
-            AppCore["Menu Bar App / Device Registry / Wakelock"]:::mac_node
-            DragDetect["Drag Monitor / DropZoneWindow / 1s idle - 0.1s active / 60px boundary fallback"]:::mac_node
-            AppCore --- DragDetect
-        end
-
-        subgraph Mac_Security ["Security Layer"]
-            CertMgr["CertificateManager / Self-Signed X.509 / TLS Fingerprint"]:::mac_node
-            UpdateSvc["UpdateService / GitHub API / Auto Update Check"]:::mac_node
-        end
-
-        subgraph Mac_Network ["Network.framework - Dual Engine"]
-            UDP_Disc["UDPDiscoveryService / Port 53317 / LAN Broadcast / `/24` Expansion / Remembered Host Probe"]:::mac_node
-            HTTP_Trans["HTTPTransferServer / HTTPS Default + HTTP Compatibility / Port 53318 / Per-Conn Queue"]:::mac_node
-            CertMgr -->|"Inject TLS Identity"| HTTP_Trans
-        end
-
-        subgraph Mac_Send ["Send Engines"]
-            FileSender["FileSender / HTTPS Default / HTTP Preflight / Small-Payload Fallback"]:::mac_node
-            ClipSender["ClipboardSender / Text as clipboard.txt / Image as PNG / Compatibility Aware"]:::mac_node
-        end
-
-        subgraph Mac_Clipboard ["Clipboard Engine"]
-            ClipSvc["ClipboardService 3s Poll / TIFF-PNG Priority / changeCount Guard"]:::mac_node
-            Mac_Clip["macOS Clipboard / NSPasteboard"]:::mac_node
-            ClipSvc <-->|"Read / Write + Anti-Echo"| Mac_Clip
-        end
-
-        AppCore -->|"Schedule"| UDP_Disc
-        AppCore -->|"Schedule"| HTTP_Trans
-        DragDetect -->|"Drop Event"| FileSender
-        ClipSvc -->|"Text Change"| ClipSender
-        ClipSvc -->|"Image Change"| ClipSender
-        HTTP_Trans -->|"Receive Text / Write"| Mac_Clip
-        HTTP_Trans -->|"Stream to Disk / Conflict Rename"| AppCore
-    end
-
-    %% ==========================================
-    %% Part 2: Android Side
-    %% ==========================================
-    subgraph Android_Side ["🤖 Android Side (Piercing the System)"]
-        direction TB
-
-        subgraph App_Layer ["App Layer - Kotlin"]
-            BootRcv["BootReceiver / Auto-Start on Boot"]:::android_node
-            ForegroundSvc["AirSendService / Foreground / dataSync / START-STICKY"]:::android_node
-            ShortcutMgr["ShortcutManager / Dynamic Direct Share Injection"]:::android_node
-            ShareTarget["ShareTargetActivity / Silent Ghost Share Entry"]:::android_node
-            BootRcv --> ForegroundSvc
-            ForegroundSvc --> ShortcutMgr
-        end
-
-        subgraph Magisk_Modules ["Xposed Layer - Runs in system-server Process"]
-            LSPosedHook{"ClipboardHook / Hook: ClipboardService.ClipboardImpl"}:::magic_node
-            AntiLoop["Anti-Loop Lock / isWritingFromSync volatile / 500ms delay"]:::magic_node
-            GodMode["God-Mode IPC Server / LocalServerSocket @airsend-app-ipc"]:::magic_node
-            SystemClip["SystemClipboard / ClipboardManagerService - UID 1000 bypass"]:::magic_node
-            LSPosedHook --> AntiLoop
-            AntiLoop <-->|"Spy / Force-Write"| SystemClip
-            GodMode -->|"Inject via ActivityThread context"| SystemClip
-        end
-
-        subgraph Rust_Daemon ["Rust Daemon - arm64-v8a - Magisk Module"]
-            inotify["inotify / notify crate / EXT4 Close-Write and Rename / 1s cache delay"]:::daemon_node
-            TokioCore["Tokio Async Runtime / Reqwest Client / Port 53319 / Complex-LAN Rebind"]:::daemon_node
-            UDSServer["Unix Domain Sockets / @airsend-ipc and @airsend-app-ipc"]:::daemon_node
-            inotify -->|"Screenshot Detected"| TokioCore
-            UDSServer <-->|"IPC Command Bus"| TokioCore
-        end
-
-        BootRcv -.->|"Verify Daemon Alive"| UDSServer
-        ForegroundSvc <-->|"GET-PEERS / 30s poll"| UDSServer
-        LSPosedHook -->|"SEND-TEXT via @airsend-ipc"| UDSServer
-        UDSServer -->|"push-text-to-app via @airsend-app-ipc"| GodMode
-    end
-
-    %% ==========================================
-    %% Part 3: LAN Cross-Border Flows
-    %% ==========================================
-    UDP_Disc <===>|"UDP Discovery - LocalSend Compatible"| TokioCore:::protocol_line
-    TokioCore ==>|"HTTPS/HTTP - Screenshot Auto-Send - inotify triggered"| HTTP_Trans:::protocol_line
-    ClipSender ==>|"HTTPS/HTTP - clipboard.txt / PNG / campus compatibility"| TokioCore:::protocol_line
-    TokioCore ==>|"HTTPS/HTTP - Android Clipboard to Mac NSPasteboard"| HTTP_Trans:::protocol_line
-    FileSender <==>|"HTTPS Default / HTTP Compatibility / Chunked File Transfer"| TokioCore:::protocol_line
-
-```
+<p align="center"><sub>Editable engineering model: <a href="docs/architecture/airsend-engineering-architecture.drawio">draw.io</a> · SVG generation and tool research: <a href="docs/architecture/README.md">architecture docs</a></sub></p>
 
 <details>
 <summary>📖 How to read this diagram (click to expand)</summary>
 <br>
 
-- **Yellow links**: LocalSend HTTPS is the default transport path; in compatibility mode AirSend can switch the LAN data path to plain HTTP for difficult campus-style networks
-- **Blue area (macOS)**: Pure Swift, default `Network.framework` HTTPS receiver, plus a manually enabled plain-HTTP compatibility receiver for difficult LANs
-- **UDPDiscoveryService**: Beyond normal discovery, it also handles `/24` expansion on large subnets and remembered-host re-probing so the device list does not disappear so easily on campus Wi-Fi
-- **Green area (Android App)**: Kotlin foreground service, polls daemon every 30s for online devices, updates Direct Share shortcuts
-- **Purple area (Xposed)**: Runs in `system_server` process, bypasses Android 10+ background clipboard restrictions via UID 1000, also serves as the Mac→Android direction endpoint of the IPC bus
-- **Orange area (Rust Daemon)**: `arm64-v8a` native process, independent of App lifecycle, communicates via two Unix domain sockets (`@airsend_ipc` and `@airsend_app_ipc`), and handles rebinding on unstable LAN changes
-- **Campus fallback boundary**: the compatibility fallback is intended as a small-payload recovery path on difficult LANs, not as a universal large-file traversal layer
+- **Solid blue links**: standard LocalSend HTTPS data plane; **dashed yellow links**: manually enabled plain-HTTP compatibility data plane
+- **Dashed teal links**: UDP discovery, registration, `/24` expansion, and remembered-host re-probing
+- **Dotted red links**: separate campus UDP fallback using 600-byte chunks and 24-chunk windows, limited to payloads no larger than 1 MiB
+- **Solid purple links**: Android abstract Unix domain socket IPC through `@airsend_ipc` and `@airsend_app_ipc`
+- **Three Android process domains**: Kotlin App for Direct Share, LSPosed code inside `system_server`, and a resident root Rust/Tokio daemon
+- **Port roles**: UDP `53317` handles AirSend discovery and fallback; Mac TCP `53318` and Android TCP `53319` carry the LocalSend-compatible HTTP API data plane
 
 </details>
 

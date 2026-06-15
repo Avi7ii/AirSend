@@ -1,0 +1,303 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2400 1500" width="2400" height="1500"><defs>
+  <filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#000814" flood-opacity=".4"/></filter>
+  <marker id="arrow-31c7d4" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#31c7d4"/></marker><marker id="arrow-4f8cff" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#4f8cff"/></marker><marker id="arrow-f3a629" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#f3a629"/></marker><marker id="arrow-ef5b5b" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#ef5b5b"/></marker><marker id="arrow-a06cff" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#a06cff"/></marker><marker id="arrow-35d07f" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#35d07f"/></marker>
+</defs>
+<text x="74" y="72" font-family="Inter,Arial,sans-serif" font-size="38" font-weight="820" text-anchor="start" fill="#ffffff" opacity="1">AirSend</text>
+<text x="74" y="107" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="700" text-anchor="start" fill="#a8b8d0" opacity="1">LOW-LEVEL ENGINEERING ARCHITECTURE</text>
+<rect x="1830" y="54" width="142" height="29" rx="7" fill="#111a2c" stroke="#4f8cff" stroke-width="1.35"/>
+<text x="1901" y="74" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#4f8cff" opacity="1">Swift 6.2</text>
+<rect x="1984" y="54" width="142" height="29" rx="7" fill="#111a2c" stroke="#35d07f" stroke-width="1.35"/>
+<text x="2055" y="74" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#35d07f" opacity="1">Kotlin/JVM</text>
+<rect x="2138" y="54" width="180" height="29" rx="7" fill="#111a2c" stroke="#f07947" stroke-width="1.35"/>
+<text x="2228" y="74" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#f07947" opacity="1">Rust + Tokio</text>
+<text x="2320" y="112" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="600" text-anchor="end" fill="#91a4c2" opacity="1">repository-derived runtime map</text>
+<g filter="url(#softShadow)"><rect x="64" y="155" width="710" height="1190" rx="36" fill="#0c1729" stroke="#4f8cff" stroke-width="2.2"/><rect x="88" y="190" width="662" height="1090" rx="20" fill="#0a1323" stroke="#274a80" stroke-width="1.3"/></g>
+<text x="106" y="235" font-family="Inter,Arial,sans-serif" font-size="20" font-weight="800" text-anchor="start" fill="#8fb7ff" opacity="1">macOS NATIVE HUB</text>
+<text x="106" y="264" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="550" text-anchor="start" fill="#89a6d2" opacity="1">single Swift/AppKit process · @MainActor orchestration</text>
+<g filter="url(#softShadow)"><rect x="1626" y="145" width="710" height="1210" rx="46" fill="#0b1827" stroke="#35d07f" stroke-width="2.2"/><rect x="1655" y="190" width="652" height="1105" rx="28" fill="#091421" stroke="#1e6549" stroke-width="1.3"/></g>
+<text x="1680" y="235" font-family="Inter,Arial,sans-serif" font-size="20" font-weight="800" text-anchor="start" fill="#75e3ad" opacity="1">ANDROID PRIVILEGED RUNTIME</text>
+<text x="1680" y="264" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="550" text-anchor="start" fill="#8bb7a3" opacity="1">app process + system_server + root native daemon</text>
+<text x="106" y="315" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="800" text-anchor="start" fill="#567fbf" opacity="1">EXPERIENCE + ORCHESTRATION</text>
+<g filter="url(#softShadow)"><rect x="106" y="342" width="194" height="118" rx="8" fill="#101a2d" stroke="#4f8cff" stroke-width="1.35"/>
+<path d="M 118 459 H 288" stroke="#4f8cff" stroke-width="1.5" opacity=".8"/>
+<circle cx="132" cy="369" r="13" fill="#4f8cff" opacity=".16"/><text x="132" y="375" text-anchor="middle" font-size="15">⌘</text>
+<text x="156" y="373" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="750" text-anchor="start" fill="#f5f8ff" opacity="1">AppDelegate</text>
+<text x="124" y="400" font-family="Inter,Arial,sans-serif" font-size="12.5" font-weight="450" text-anchor="start" fill="#9fb2d0"><tspan x="124" dy="0">lifecycle · registry</tspan><tspan x="124" dy="17">selection · restart</tspan></text>
+</g>
+<g filter="url(#softShadow)"><rect x="321" y="342" width="194" height="118" rx="8" fill="#101a2d" stroke="#4f8cff" stroke-width="1.35"/>
+<path d="M 333 459 H 503" stroke="#4f8cff" stroke-width="1.5" opacity=".8"/>
+<circle cx="347" cy="369" r="13" fill="#4f8cff" opacity=".16"/><text x="347" y="375" text-anchor="middle" font-size="15">⇩</text>
+<text x="371" y="373" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="750" text-anchor="start" fill="#f5f8ff" opacity="1">Menu + DropZone</text>
+<text x="339" y="400" font-family="Inter,Arial,sans-serif" font-size="12.5" font-weight="450" text-anchor="start" fill="#9fb2d0"><tspan x="339" dy="0">NSStatusItem</tspan><tspan x="339" dy="17">drag · progress</tspan></text>
+</g>
+<g filter="url(#softShadow)"><rect x="536" y="342" width="194" height="118" rx="8" fill="#101a2d" stroke="#4f8cff" stroke-width="1.35"/>
+<path d="M 548 459 H 718" stroke="#4f8cff" stroke-width="1.5" opacity=".8"/>
+<circle cx="562" cy="369" r="13" fill="#4f8cff" opacity=".16"/><text x="562" y="375" text-anchor="middle" font-size="15">⚙</text>
+<text x="586" y="373" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="750" text-anchor="start" fill="#f5f8ff" opacity="1">SwiftUI Settings</text>
+<text x="554" y="400" font-family="Inter,Arial,sans-serif" font-size="12.5" font-weight="450" text-anchor="start" fill="#9fb2d0"><tspan x="554" dy="0">compatibility mode</tspan><tspan x="554" dy="17">sync · launch</tspan></text>
+</g>
+<text x="106" y="505" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="800" text-anchor="start" fill="#567fbf" opacity="1">CONCURRENT DATA SERVICES</text>
+<g filter="url(#softShadow)"><rect x="106" y="532" width="194" height="130" rx="8" fill="#101a2d" stroke="#6da3ff" stroke-width="1.35"/>
+<path d="M 118 661 H 288" stroke="#6da3ff" stroke-width="1.5" opacity=".8"/>
+<circle cx="132" cy="559" r="13" fill="#6da3ff" opacity=".16"/><text x="132" y="565" text-anchor="middle" font-size="15">▣</text>
+<text x="156" y="563" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="750" text-anchor="start" fill="#f5f8ff" opacity="1">ClipboardService</text>
+<text x="124" y="590" font-family="Inter,Arial,sans-serif" font-size="12.5" font-weight="450" text-anchor="start" fill="#9fb2d0"><tspan x="124" dy="0">NSPasteboard poll</tspan><tspan x="124" dy="17">TIFF → PNG</tspan><tspan x="124" dy="17">anti-echo</tspan></text>
+</g>
+<g filter="url(#softShadow)"><rect x="321" y="532" width="194" height="130" rx="14" fill="#162440" stroke="#6da3ff" stroke-width="2.4"/>
+<path d="M 333 661 H 503" stroke="#6da3ff" stroke-width="3" opacity=".8"/>
+<circle cx="347" cy="559" r="13" fill="#6da3ff" opacity=".16"/><text x="347" y="565" text-anchor="middle" font-size="15">⇧</text>
+<text x="371" y="563" font-family="Inter,Arial,sans-serif" font-size="17" font-weight="750" text-anchor="start" fill="#f5f8ff" opacity="1">FileSender actor</text>
+<text x="339" y="590" font-family="Inter,Arial,sans-serif" font-size="12.5" font-weight="450" text-anchor="start" fill="#9fb2d0"><tspan x="339" dy="0">prepare-upload</tspan><tspan x="339" dy="17">stream · cancel</tspan><tspan x="339" dy="17">directory zip</tspan></text>
+</g>
+<g filter="url(#softShadow)"><rect x="536" y="532" width="194" height="130" rx="8" fill="#101a2d" stroke="#6da3ff" stroke-width="1.35"/>
+<path d="M 548 661 H 718" stroke="#6da3ff" stroke-width="1.5" opacity=".8"/>
+<circle cx="562" cy="559" r="13" fill="#6da3ff" opacity=".16"/><text x="562" y="565" text-anchor="middle" font-size="15">↗</text>
+<text x="586" y="563" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="750" text-anchor="start" fill="#f5f8ff" opacity="1">ClipboardSender</text>
+<text x="554" y="590" font-family="Inter,Arial,sans-serif" font-size="12.5" font-weight="450" text-anchor="start" fill="#9fb2d0"><tspan x="554" dy="0">clipboard.txt / PNG</tspan><tspan x="554" dy="17">scheme preflight</tspan><tspan x="554" dy="17">bounded retry</tspan></text>
+</g>
+<g filter="url(#softShadow)"><rect x="106" y="686" width="260" height="130" rx="14" fill="#162440" stroke="#4f8cff" stroke-width="2.4"/>
+<path d="M 118 815 H 354" stroke="#4f8cff" stroke-width="3" opacity=".8"/>
+<circle cx="132" cy="713" r="13" fill="#4f8cff" opacity=".16"/><text x="132" y="719" text-anchor="middle" font-size="15">⇣</text>
+<text x="156" y="717" font-family="Inter,Arial,sans-serif" font-size="17" font-weight="750" text-anchor="start" fill="#f5f8ff" opacity="1">HTTPTransferServer actor</text>
+<text x="124" y="744" font-family="Inter,Arial,sans-serif" font-size="12.5" font-weight="450" text-anchor="start" fill="#9fb2d0"><tspan x="124" dy="0">register · prepare · upload</tspan><tspan x="124" dy="17">streaming sink · cancel</tspan><tspan x="124" dy="17">conflict-safe rename</tspan></text>
+</g>
+<g filter="url(#softShadow)"><rect x="390" y="686" width="340" height="130" rx="8" fill="#101a2d" stroke="#4f8cff" stroke-width="1.35"/>
+<path d="M 402 815 H 718" stroke="#4f8cff" stroke-width="1.5" opacity=".8"/>
+<circle cx="416" cy="713" r="13" fill="#4f8cff" opacity=".16"/><text x="416" y="719" text-anchor="middle" font-size="15">⌁</text>
+<text x="440" y="717" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="750" text-anchor="start" fill="#f5f8ff" opacity="1">Session / Security</text>
+<text x="408" y="744" font-family="Inter,Arial,sans-serif" font-size="12.5" font-weight="450" text-anchor="start" fill="#9fb2d0"><tspan x="408" dy="0">URLSession + curl transport fallback</tspan><tspan x="408" dy="17">TLS fingerprint challenge</tspan><tspan x="408" dy="17">X.509 P12 identity</tspan></text>
+</g>
+<text x="106" y="860" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="800" text-anchor="start" fill="#567fbf" opacity="1">NETWORK ENGINES</text>
+<g><circle cx="160" cy="925" r="27" fill="#101a2d" stroke="#31c7d4" stroke-width="2"/><circle cx="160" cy="925" r="18" fill="#31c7d4" opacity=".12"/><text x="160" y="932" text-anchor="middle" font-size="18">◉</text>
+<text x="160" y="972" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="720" text-anchor="middle" fill="#edf3ff" opacity="1">Discovery</text>
+<text x="160" y="989" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="middle" fill="#a3b3cc" opacity="1">NWConnectionGroup</text>
+</g>
+<g><circle cx="300" cy="925" r="27" fill="#101a2d" stroke="#31c7d4" stroke-width="2"/><circle cx="300" cy="925" r="18" fill="#31c7d4" opacity=".12"/><text x="300" y="932" text-anchor="middle" font-size="18">⌖</text>
+<text x="300" y="972" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="720" text-anchor="middle" fill="#edf3ff" opacity="1">/24 Probe</text>
+<text x="300" y="989" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="middle" fill="#a3b3cc" opacity="1">known-host reprobe</text>
+</g>
+<g><circle cx="440" cy="925" r="27" fill="#101a2d" stroke="#4f8cff" stroke-width="2"/><circle cx="440" cy="925" r="18" fill="#4f8cff" opacity=".12"/><text x="440" y="932" text-anchor="middle" font-size="18">◆</text>
+<text x="440" y="972" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="720" text-anchor="middle" fill="#edf3ff" opacity="1">TLS Listener</text>
+<text x="440" y="989" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="middle" fill="#a3b3cc" opacity="1">NWListener :53318</text>
+</g>
+<g><circle cx="580" cy="925" r="27" fill="#101a2d" stroke="#f3a629" stroke-width="2"/><circle cx="580" cy="925" r="18" fill="#f3a629" opacity=".12"/><text x="580" y="932" text-anchor="middle" font-size="18">◇</text>
+<text x="580" y="972" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="720" text-anchor="middle" fill="#edf3ff" opacity="1">HTTP Compat</text>
+<text x="580" y="989" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="middle" fill="#a3b3cc" opacity="1">BSD socket :53318</text>
+</g>
+<g><circle cx="690" cy="925" r="27" fill="#101a2d" stroke="#ef5b5b" stroke-width="2"/><circle cx="690" cy="925" r="18" fill="#ef5b5b" opacity=".12"/><text x="690" y="932" text-anchor="middle" font-size="18">⟲</text>
+<text x="690" y="972" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="720" text-anchor="middle" fill="#edf3ff" opacity="1">UDP Fallback</text>
+<text x="690" y="989" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="middle" fill="#a3b3cc" opacity="1">≤1 MiB windows</text>
+</g>
+<text x="106" y="1038" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="800" text-anchor="start" fill="#567fbf" opacity="1">NATIVE FACILITIES</text>
+<rect x="106" y="1060" width="155" height="29" rx="7" fill="#111a2c" stroke="#7c91b3" stroke-width="1.35"/>
+<text x="183.5" y="1080" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#7c91b3" opacity="1">NSPasteboard</text>
+<rect x="274" y="1060" width="155" height="29" rx="7" fill="#111a2c" stroke="#7c91b3" stroke-width="1.35"/>
+<text x="351.5" y="1080" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#7c91b3" opacity="1">FileManager</text>
+<rect x="442" y="1060" width="155" height="29" rx="7" fill="#111a2c" stroke="#7c91b3" stroke-width="1.35"/>
+<text x="519.5" y="1080" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#7c91b3" opacity="1">SMAppService</text>
+<rect x="610" y="1060" width="120" height="29" rx="7" fill="#111a2c" stroke="#7c91b3" stroke-width="1.35"/>
+<text x="670" y="1080" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#7c91b3" opacity="1">OpenSSL</text>
+<text x="106" y="1135" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="450" text-anchor="start" fill="#92a6c5"><tspan x="106" dy="0">Device registry: grouped identities · remembered hosts · last-seen retention</tspan><tspan x="106" dy="24">Transport policy: HTTPS default · explicit HTTP mode · no silent downgrade</tspan><tspan x="106" dy="24">Resilience: streaming writes · cancellation cleanup · rotating logs</tspan></text>
+<path d="M1680 310 H2282" stroke="#35d07f" stroke-width="1.3" opacity=".4"/>
+<rect x="1680" y="292" width="180" height="29" rx="7" fill="#0d2130" stroke="#35d07f" stroke-width="1.35"/>
+<text x="1770" y="312" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#35d07f" opacity="1">APP PROCESS</text>
+<g filter="url(#softShadow)"><rect x="1680" y="342" width="185" height="118" rx="8" fill="#101a2d" stroke="#35d07f" stroke-width="1.35"/>
+<path d="M 1692 459 H 1853" stroke="#35d07f" stroke-width="1.5" opacity=".8"/>
+<circle cx="1706" cy="369" r="13" fill="#35d07f" opacity=".16"/><text x="1706" y="375" text-anchor="middle" font-size="15">☰</text>
+<text x="1730" y="373" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="750" text-anchor="start" fill="#f5f8ff" opacity="1">AirSendService</text>
+<text x="1698" y="400" font-family="Inter,Arial,sans-serif" font-size="12.5" font-weight="450" text-anchor="start" fill="#9fb2d0"><tspan x="1698" dy="0">START_STICKY</tspan><tspan x="1698" dy="17">GET_PEERS / 30s</tspan></text>
+</g>
+<g filter="url(#softShadow)"><rect x="1885" y="342" width="185" height="118" rx="14" fill="#162440" stroke="#35d07f" stroke-width="2.4"/>
+<path d="M 1897 459 H 2058" stroke="#35d07f" stroke-width="3" opacity=".8"/>
+<circle cx="1911" cy="369" r="13" fill="#35d07f" opacity=".16"/><text x="1911" y="375" text-anchor="middle" font-size="15">↗</text>
+<text x="1935" y="373" font-family="Inter,Arial,sans-serif" font-size="17" font-weight="750" text-anchor="start" fill="#f5f8ff" opacity="1">Direct Share</text>
+<text x="1903" y="400" font-family="Inter,Arial,sans-serif" font-size="12.5" font-weight="450" text-anchor="start" fill="#9fb2d0"><tspan x="1903" dy="0">ShortcutManager</tspan><tspan x="1903" dy="17">ShareTargetActivity</tspan></text>
+</g>
+<g filter="url(#softShadow)"><rect x="2090" y="342" width="185" height="118" rx="8" fill="#101a2d" stroke="#35d07f" stroke-width="1.35"/>
+<path d="M 2102 459 H 2263" stroke="#35d07f" stroke-width="1.5" opacity=".8"/>
+<circle cx="2116" cy="369" r="13" fill="#35d07f" opacity=".16"/><text x="2116" y="375" text-anchor="middle" font-size="15">⌘</text>
+<text x="2140" y="373" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="750" text-anchor="start" fill="#f5f8ff" opacity="1">URI + Commands</text>
+<text x="2108" y="400" font-family="Inter,Arial,sans-serif" font-size="12.5" font-weight="450" text-anchor="start" fill="#9fb2d0"><tspan x="2108" dy="0">PathUtils</tspan><tspan x="2108" dy="17">JSON IPC encoder</tspan></text>
+</g>
+<path d="M1680 500 H2282" stroke="#a06cff" stroke-width="1.3" opacity=".4"/>
+<rect x="1680" y="482" width="230" height="29" rx="7" fill="#17142d" stroke="#a06cff" stroke-width="1.35"/>
+<text x="1795" y="502" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#a06cff" opacity="1">system_server · UID 1000</text>
+<g filter="url(#softShadow)"><rect x="1680" y="532" width="185" height="126" rx="14" fill="#162440" stroke="#a06cff" stroke-width="2.4"/>
+<path d="M 1692 657 H 1853" stroke="#a06cff" stroke-width="3" opacity=".8"/>
+<circle cx="1706" cy="559" r="13" fill="#a06cff" opacity=".16"/><text x="1706" y="565" text-anchor="middle" font-size="15">✦</text>
+<text x="1730" y="563" font-family="Inter,Arial,sans-serif" font-size="17" font-weight="750" text-anchor="start" fill="#f5f8ff" opacity="1">ClipboardHook</text>
+<text x="1698" y="590" font-family="Inter,Arial,sans-serif" font-size="12.5" font-weight="450" text-anchor="start" fill="#9fb2d0"><tspan x="1698" dy="0">Xposed API 82</tspan><tspan x="1698" dy="17">setPrimaryClip hook</tspan></text>
+</g>
+<g filter="url(#softShadow)"><rect x="1885" y="532" width="185" height="126" rx="8" fill="#101a2d" stroke="#a06cff" stroke-width="1.35"/>
+<path d="M 1897 657 H 2058" stroke="#a06cff" stroke-width="1.5" opacity=".8"/>
+<circle cx="1911" cy="559" r="13" fill="#a06cff" opacity=".16"/><text x="1911" y="565" text-anchor="middle" font-size="15">∞</text>
+<text x="1935" y="563" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="750" text-anchor="start" fill="#f5f8ff" opacity="1">Loop Guard</text>
+<text x="1903" y="590" font-family="Inter,Arial,sans-serif" font-size="12.5" font-weight="450" text-anchor="start" fill="#9fb2d0"><tspan x="1903" dy="0">volatile write lock</tspan><tspan x="1903" dy="17">500ms release</tspan></text>
+</g>
+<g filter="url(#softShadow)"><rect x="2090" y="532" width="185" height="126" rx="8" fill="#101a2d" stroke="#a06cff" stroke-width="1.35"/>
+<path d="M 2102 657 H 2263" stroke="#a06cff" stroke-width="1.5" opacity=".8"/>
+<circle cx="2116" cy="559" r="13" fill="#a06cff" opacity=".16"/><text x="2116" y="565" text-anchor="middle" font-size="15">⇣</text>
+<text x="2140" y="563" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="750" text-anchor="start" fill="#f5f8ff" opacity="1">Reverse IPC</text>
+<text x="2108" y="590" font-family="Inter,Arial,sans-serif" font-size="12.5" font-weight="450" text-anchor="start" fill="#9fb2d0"><tspan x="2108" dy="0">@airsend_app_ipc</tspan><tspan x="2108" dy="17">force clipboard write</tspan></text>
+</g>
+<path d="M1680 748 H2282" stroke="#f07947" stroke-width="1.3" opacity=".4"/>
+<rect x="1680" y="730" width="255" height="29" rx="7" fill="#25172a" stroke="#f07947" stroke-width="1.35"/>
+<text x="1807.5" y="750" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#f07947" opacity="1">ROOT DAEMON · arm64-v8a</text>
+<g filter="url(#softShadow)"><rect x="1680" y="780" width="185" height="130" rx="8" fill="#101a2d" stroke="#f07947" stroke-width="1.35"/>
+<path d="M 1692 909 H 1853" stroke="#f07947" stroke-width="1.5" opacity=".8"/>
+<circle cx="1706" cy="807" r="13" fill="#f07947" opacity=".16"/><text x="1706" y="813" text-anchor="middle" font-size="15">◎</text>
+<text x="1730" y="811" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="750" text-anchor="start" fill="#f5f8ff" opacity="1">Tokio Supervisor</text>
+<text x="1698" y="838" font-family="Inter,Arial,sans-serif" font-size="12.5" font-weight="450" text-anchor="start" fill="#9fb2d0"><tspan x="1698" dy="0">resilient init</tspan><tspan x="1698" dy="17">network rebind</tspan><tspan x="1698" dy="17">self restart</tspan></text>
+</g>
+<g filter="url(#softShadow)"><rect x="1885" y="780" width="185" height="130" rx="14" fill="#162440" stroke="#f07947" stroke-width="2.4"/>
+<path d="M 1897 909 H 2058" stroke="#f07947" stroke-width="3" opacity=".8"/>
+<circle cx="1911" cy="807" r="13" fill="#f07947" opacity=".16"/><text x="1911" y="813" text-anchor="middle" font-size="15">⇄</text>
+<text x="1935" y="811" font-family="Inter,Arial,sans-serif" font-size="17" font-weight="750" text-anchor="start" fill="#f5f8ff" opacity="1">UDS Broker</text>
+<text x="1903" y="838" font-family="Inter,Arial,sans-serif" font-size="12.5" font-weight="450" text-anchor="start" fill="#9fb2d0"><tspan x="1903" dy="0">@airsend_ipc</tspan><tspan x="1903" dy="17">preferred target</tspan><tspan x="1903" dy="17">JSON commands</tspan></text>
+</g>
+<g filter="url(#softShadow)"><rect x="2090" y="780" width="185" height="130" rx="8" fill="#101a2d" stroke="#f07947" stroke-width="1.35"/>
+<path d="M 2102 909 H 2263" stroke="#f07947" stroke-width="1.5" opacity=".8"/>
+<circle cx="2116" cy="807" r="13" fill="#f07947" opacity=".16"/><text x="2116" y="813" text-anchor="middle" font-size="15">◌</text>
+<text x="2140" y="811" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="750" text-anchor="start" fill="#f5f8ff" opacity="1">inotify Watcher</text>
+<text x="2108" y="838" font-family="Inter,Arial,sans-serif" font-size="12.5" font-weight="450" text-anchor="start" fill="#9fb2d0"><tspan x="2108" dy="0">CLOSE_WRITE</tspan><tspan x="2108" dy="17">rename · 1s settle</tspan><tspan x="2108" dy="17">screenshots</tspan></text>
+</g>
+<text x="1680" y="965" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="800" text-anchor="start" fill="#b86a4c" opacity="1">AIRSEND RUST TRANSFER ENGINE</text>
+<g><circle cx="1735" cy="1030" r="27" fill="#101a2d" stroke="#31c7d4" stroke-width="2"/><circle cx="1735" cy="1030" r="18" fill="#31c7d4" opacity=".12"/><text x="1735" y="1037" text-anchor="middle" font-size="18">◉</text>
+<text x="1735" y="1077" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="720" text-anchor="middle" fill="#edf3ff" opacity="1">Discovery</text>
+<text x="1735" y="1094" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="middle" fill="#a3b3cc" opacity="1">Tokio UdpSocket</text>
+</g>
+<g><circle cx="1870" cy="1030" r="27" fill="#101a2d" stroke="#4f8cff" stroke-width="2"/><circle cx="1870" cy="1030" r="18" fill="#4f8cff" opacity=".12"/><text x="1870" y="1037" text-anchor="middle" font-size="18">⬡</text>
+<text x="1870" y="1077" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="720" text-anchor="middle" fill="#edf3ff" opacity="1">Axum</text>
+<text x="1870" y="1094" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="middle" fill="#a3b3cc" opacity="1">HTTP / rustls</text>
+</g>
+<g><circle cx="2005" cy="1030" r="27" fill="#101a2d" stroke="#4f8cff" stroke-width="2"/><circle cx="2005" cy="1030" r="18" fill="#4f8cff" opacity=".12"/><text x="2005" y="1037" text-anchor="middle" font-size="18">↗</text>
+<text x="2005" y="1077" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="720" text-anchor="middle" fill="#edf3ff" opacity="1">Reqwest</text>
+<text x="2005" y="1094" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="middle" fill="#a3b3cc" opacity="1">prepare / upload</text>
+</g>
+<g><circle cx="2140" cy="1030" r="27" fill="#101a2d" stroke="#f07947" stroke-width="2"/><circle cx="2140" cy="1030" r="18" fill="#f07947" opacity=".12"/><text x="2140" y="1037" text-anchor="middle" font-size="18">⌘</text>
+<text x="2140" y="1077" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="720" text-anchor="middle" fill="#edf3ff" opacity="1">Sessions</text>
+<text x="2140" y="1094" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="middle" fill="#a3b3cc" opacity="1">tokens · routing</text>
+</g>
+<g><circle cx="2250" cy="1030" r="27" fill="#101a2d" stroke="#ef5b5b" stroke-width="2"/><circle cx="2250" cy="1030" r="18" fill="#ef5b5b" opacity=".12"/><text x="2250" y="1037" text-anchor="middle" font-size="18">⟲</text>
+<text x="2250" y="1077" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="720" text-anchor="middle" fill="#edf3ff" opacity="1">Fallback</text>
+<text x="2250" y="1094" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="middle" fill="#a3b3cc" opacity="1">window state</text>
+</g>
+<text x="1680" y="1135" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="450" text-anchor="start" fill="#91b5a3"><tspan x="1680" dy="0">TLS: RSA-2048 · SHA-256 fingerprint · /data/adb/airsend</tspan><tspan x="1680" dy="24">Storage: Downloads / Pictures · auto rename · MediaScanner broadcast</tspan><tspan x="1680" dy="24">Network: interface detection · system route · neighbor pinning</tspan></text>
+<circle cx="1200" cy="710" r="250" fill="#0b172b" stroke="#315f9f" stroke-width="2"/><circle cx="1200" cy="710" r="205" fill="#0d1b31" stroke="#31c7d4" stroke-width="1.5" stroke-dasharray="7 10" opacity=".8"/><circle cx="1200" cy="710" r="158" fill="#101e35" stroke="#4f8cff" stroke-width="2.5"/><circle cx="1200" cy="710" r="108" fill="#142746" stroke="#f3a629" stroke-width="2"/>
+<text x="1200" y="675" font-family="Inter,Arial,sans-serif" font-size="30" font-weight="820" text-anchor="middle" fill="#ffffff" opacity="1">AirSend</text>
+<text x="1200" y="707" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="750" text-anchor="middle" fill="#83a6dc" opacity="1">RUNTIME CORE</text>
+<text x="1200" y="744" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="600" text-anchor="middle" fill="#d1ddf1" opacity="1">register · info · prepare</text>
+<text x="1200" y="765" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="600" text-anchor="middle" fill="#d1ddf1" opacity="1">upload · cancel</text>
+<rect x="1080" y="414" width="240" height="29" rx="7" fill="#0b1929" stroke="#31c7d4" stroke-width="1.35"/>
+<text x="1200" y="434" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#31c7d4" opacity="1">DISCOVERY PLANE · UDP 53317</text>
+<rect x="1025" y="842" width="350" height="29" rx="7" fill="#101a30" stroke="#4f8cff" stroke-width="1.35"/>
+<text x="1200" y="862" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#4f8cff" opacity="1">LOCALSEND-COMPATIBLE HTTP API</text>
+<rect x="1035" y="972" width="330" height="29" rx="7" fill="#1c1425" stroke="#ef5b5b" stroke-width="1.35"/>
+<text x="1200" y="992" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#ef5b5b" opacity="1">RECOVERY PLANE · PREFLIGHT + FALLBACK</text>
+<g><circle cx="1015" cy="570" r="27" fill="#101a2d" stroke="#31c7d4" stroke-width="2"/><circle cx="1015" cy="570" r="18" fill="#31c7d4" opacity=".12"/><text x="1015" y="577" text-anchor="middle" font-size="18">◉</text>
+<text x="1015" y="617" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="720" text-anchor="middle" fill="#edf3ff" opacity="1">Announce</text>
+<text x="1015" y="634" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="middle" fill="#a3b3cc" opacity="1">multicast/broadcast</text>
+</g>
+<g><circle cx="1385" cy="570" r="27" fill="#101a2d" stroke="#31c7d4" stroke-width="2"/><circle cx="1385" cy="570" r="18" fill="#31c7d4" opacity=".12"/><text x="1385" y="577" text-anchor="middle" font-size="18">⌁</text>
+<text x="1385" y="617" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="720" text-anchor="middle" fill="#edf3ff" opacity="1">Register</text>
+<text x="1385" y="634" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="middle" fill="#a3b3cc" opacity="1">identity + fingerprint</text>
+</g>
+<g><circle cx="1015" cy="845" r="27" fill="#101a2d" stroke="#4f8cff" stroke-width="2"/><circle cx="1015" cy="845" r="18" fill="#4f8cff" opacity=".12"/><text x="1015" y="852" text-anchor="middle" font-size="18">◆</text>
+<text x="1015" y="892" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="720" text-anchor="middle" fill="#edf3ff" opacity="1">HTTPS</text>
+<text x="1015" y="909" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="middle" fill="#a3b3cc" opacity="1">default secure path</text>
+</g>
+<g><circle cx="1385" cy="845" r="27" fill="#101a2d" stroke="#f3a629" stroke-width="2"/><circle cx="1385" cy="845" r="18" fill="#f3a629" opacity=".12"/><text x="1385" y="852" text-anchor="middle" font-size="18">◇</text>
+<text x="1385" y="892" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="720" text-anchor="middle" fill="#edf3ff" opacity="1">HTTP</text>
+<text x="1385" y="909" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="middle" fill="#a3b3cc" opacity="1">manual compatibility</text>
+</g>
+<g><circle cx="1200" cy="1055" r="27" fill="#101a2d" stroke="#ef5b5b" stroke-width="2"/><circle cx="1200" cy="1055" r="18" fill="#ef5b5b" opacity=".12"/><text x="1200" y="1062" text-anchor="middle" font-size="18">⟲</text>
+<text x="1200" y="1102" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="720" text-anchor="middle" fill="#edf3ff" opacity="1">UDP Windows</text>
+<text x="1200" y="1119" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="middle" fill="#a3b3cc" opacity="1">600 B × 24 · ≤1 MiB</text>
+</g>
+<path d="M 720 925 H 790 V 570 H 987" fill="none" stroke="#07101f" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+<path d="M 720 925 H 790 V 570 H 987" fill="none" stroke="#31c7d4" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="9 8" opacity="1" marker-end="url(#arrow-31c7d4)"/>
+<path d="M 1413 570 H 1570 V 1030 H 1707" fill="none" stroke="#07101f" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+<path d="M 1413 570 H 1570 V 1030 H 1707" fill="none" stroke="#31c7d4" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="9 8" opacity="1" marker-end="url(#arrow-31c7d4)"/>
+<circle cx="790" cy="925" r="10" fill="#07101f"/><circle cx="790" cy="925" r="6" fill="#0a1222" stroke="#31c7d4" stroke-width="2"/>
+<circle cx="1570" cy="1030" r="10" fill="#07101f"/><circle cx="1570" cy="1030" r="6" fill="#0a1222" stroke="#31c7d4" stroke-width="2"/>
+<path d="M 730 605 H 820 V 845 H 987" fill="none" stroke="#07101f" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+<path d="M 730 605 H 820 V 845 H 987" fill="none" stroke="#4f8cff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"  opacity="1" marker-end="url(#arrow-4f8cff)"/>
+<path d="M 1043 845 H 1090 Q 1120 845 1128 802" fill="none" stroke="#07101f" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+<path d="M 1043 845 H 1090 Q 1120 845 1128 802" fill="none" stroke="#4f8cff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"  opacity="1" marker-end="url(#arrow-4f8cff)"/>
+<path d="M 1272 802 Q 1280 845 1310 845 H 1357" fill="none" stroke="#07101f" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+<path d="M 1272 802 Q 1280 845 1310 845 H 1357" fill="none" stroke="#4f8cff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"  opacity="1" marker-end="url(#arrow-4f8cff)"/>
+<path d="M 1413 845 H 1588 V 1030 H 1842" fill="none" stroke="#07101f" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+<path d="M 1413 845 H 1588 V 1030 H 1842" fill="none" stroke="#4f8cff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"  opacity="1" marker-end="url(#arrow-4f8cff)"/>
+<circle cx="820" cy="605" r="10" fill="#07101f"/><circle cx="820" cy="605" r="6" fill="#0a1222" stroke="#4f8cff" stroke-width="2"/>
+<circle cx="1588" cy="1030" r="10" fill="#07101f"/><circle cx="1588" cy="1030" r="6" fill="#0a1222" stroke="#4f8cff" stroke-width="2"/>
+<path d="M 580 925 H 770 V 875 H 1120" fill="none" stroke="#07101f" stroke-width="7.2" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+<path d="M 580 925 H 770 V 875 H 1120" fill="none" stroke="#f3a629" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="10 8" opacity="1" marker-end="url(#arrow-f3a629)"/>
+<path d="M 1280 760 H 1510 V 845 H 1357" fill="none" stroke="#07101f" stroke-width="7.2" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+<path d="M 1280 760 H 1510 V 845 H 1357" fill="none" stroke="#f3a629" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="10 8" opacity="1" marker-end="url(#arrow-f3a629)"/>
+<path d="M 690 925 H 805 V 1055 H 1172" fill="none" stroke="#07101f" stroke-width="7.2" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+<path d="M 690 925 H 805 V 1055 H 1172" fill="none" stroke="#ef5b5b" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3 8" opacity="1" marker-end="url(#arrow-ef5b5b)"/>
+<path d="M 1228 1055 H 1598 V 1030 H 2222" fill="none" stroke="#07101f" stroke-width="7.2" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+<path d="M 1228 1055 H 1598 V 1030 H 2222" fill="none" stroke="#ef5b5b" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3 8" opacity="1" marker-end="url(#arrow-ef5b5b)"/>
+<circle cx="805" cy="1055" r="10" fill="#07101f"/><circle cx="805" cy="1055" r="6" fill="#0a1222" stroke="#ef5b5b" stroke-width="2"/>
+<circle cx="1598" cy="1055" r="10" fill="#07101f"/><circle cx="1598" cy="1055" r="6" fill="#0a1222" stroke="#ef5b5b" stroke-width="2"/>
+<path d="M 2182 460 V 492 H 2290 V 720 H 1977 V 780" fill="none" stroke="#07101f" stroke-width="6.7" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+<path d="M 2182 460 V 492 H 2290 V 720 H 1977 V 780" fill="none" stroke="#a06cff" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="7 7" opacity="1" marker-end="url(#arrow-a06cff)"/>
+<path d="M 1772 658 H 1644 V 845 H 1885" fill="none" stroke="#07101f" stroke-width="6.7" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+<path d="M 1772 658 H 1644 V 845 H 1885" fill="none" stroke="#a06cff" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="7 7" opacity="1" marker-end="url(#arrow-a06cff)"/>
+<path d="M 1977 910 V 940 H 2140 V 1002" fill="none" stroke="#07101f" stroke-width="6.7" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+<path d="M 1977 910 V 940 H 2140 V 1002" fill="none" stroke="#a06cff" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="7 7" opacity="1" marker-end="url(#arrow-a06cff)"/>
+<text x="2268" y="704" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="650" text-anchor="end" fill="#b999ed" opacity="1">abstract UDS · reverse system write</text>
+<circle cx="800" cy="548" r="15" fill="#0a1222" stroke="#31c7d4" stroke-width="1.7"/>
+<text x="800" y="553" font-family="Inter,Arial,sans-serif" font-size="11" font-weight="800" text-anchor="middle" fill="#31c7d4" opacity="1">01</text>
+<text x="825" y="550" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="700" text-anchor="start" fill="#e8effc" opacity="1">discovery lane</text>
+<text x="825" y="566" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="start" fill="#92a6c5" opacity="1">announce · /24 probe · register</text>
+<circle cx="800" cy="650" r="15" fill="#0a1222" stroke="#4f8cff" stroke-width="1.7"/>
+<text x="800" y="655" font-family="Inter,Arial,sans-serif" font-size="11" font-weight="800" text-anchor="middle" fill="#4f8cff" opacity="1">02</text>
+<text x="825" y="652" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="700" text-anchor="start" fill="#e8effc" opacity="1">data-plane entry</text>
+<text x="825" y="668" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="start" fill="#92a6c5" opacity="1">Swift sender / receiver</text>
+<circle cx="1435" cy="548" r="15" fill="#0a1222" stroke="#31c7d4" stroke-width="1.7"/>
+<text x="1435" y="553" font-family="Inter,Arial,sans-serif" font-size="11" font-weight="800" text-anchor="middle" fill="#31c7d4" opacity="1">03</text>
+<text x="1460" y="550" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="700" text-anchor="start" fill="#e8effc" opacity="1">identity commit</text>
+<text x="1460" y="566" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="start" fill="#92a6c5" opacity="1">fingerprint + reachable address</text>
+<circle cx="1435" cy="790" r="15" fill="#0a1222" stroke="#4f8cff" stroke-width="1.7"/>
+<text x="1435" y="795" font-family="Inter,Arial,sans-serif" font-size="11" font-weight="800" text-anchor="middle" fill="#4f8cff" opacity="1">04</text>
+<text x="1460" y="792" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="700" text-anchor="start" fill="#e8effc" opacity="1">transfer endpoint</text>
+<text x="1460" y="808" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="start" fill="#92a6c5" opacity="1">Rust client / server</text>
+<circle cx="830" cy="1038" r="15" fill="#0a1222" stroke="#ef5b5b" stroke-width="1.7"/>
+<text x="830" y="1043" font-family="Inter,Arial,sans-serif" font-size="11" font-weight="800" text-anchor="middle" fill="#ef5b5b" opacity="1">05</text>
+<text x="855" y="1040" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="700" text-anchor="start" fill="#e8effc" opacity="1">bounded retransmit</text>
+<text x="855" y="1056" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="start" fill="#92a6c5" opacity="1">ACK/NACK · 24-chunk window</text>
+<circle cx="1390" cy="1038" r="15" fill="#0a1222" stroke="#ef5b5b" stroke-width="1.7"/>
+<text x="1390" y="1043" font-family="Inter,Arial,sans-serif" font-size="11" font-weight="800" text-anchor="middle" fill="#ef5b5b" opacity="1">06</text>
+<text x="1415" y="1040" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="700" text-anchor="start" fill="#e8effc" opacity="1">session binding</text>
+<text x="1415" y="1056" font-family="Inter,Arial,sans-serif" font-size="10.5" font-weight="500" text-anchor="start" fill="#92a6c5" opacity="1">nonce + source address</text>
+<path d="M75 1360 H2325" stroke="#243b5f" stroke-width="1.5"/>
+<text x="75" y="1405" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="800" text-anchor="start" fill="#8ca4ca" opacity="1">OPERATING CONSTRAINTS</text>
+<rect x="260" y="1384" width="250" height="29" rx="7" fill="#111a2c" stroke="#4f8cff" stroke-width="1.35"/>
+<text x="385" y="1404" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#4f8cff" opacity="1">HTTPS stays default</text>
+<rect x="530" y="1384" width="290" height="29" rx="7" fill="#111a2c" stroke="#f3a629" stroke-width="1.35"/>
+<text x="675" y="1404" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#f3a629" opacity="1">HTTP requires explicit mode</text>
+<rect x="840" y="1384" width="300" height="29" rx="7" fill="#111a2c" stroke="#ef5b5b" stroke-width="1.35"/>
+<text x="990" y="1404" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#ef5b5b" opacity="1">fallback payload ≤ 1 MiB</text>
+<rect x="1160" y="1384" width="280" height="29" rx="7" fill="#111a2c" stroke="#31c7d4" stroke-width="1.35"/>
+<text x="1300" y="1404" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#31c7d4" opacity="1">AP isolation must be off</text>
+<rect x="1460" y="1384" width="320" height="29" rx="7" fill="#111a2c" stroke="#a06cff" stroke-width="1.35"/>
+<text x="1620" y="1404" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#a06cff" opacity="1">Root + Magisk/KernelSU + LSPosed</text>
+<rect x="1800" y="1384" width="270" height="29" rx="7" fill="#111a2c" stroke="#a06cff" stroke-width="1.35"/>
+<text x="1935" y="1404" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#a06cff" opacity="1">two abstract UDS buses</text>
+<rect x="2090" y="1384" width="230" height="29" rx="7" fill="#111a2c" stroke="#35d07f" stroke-width="1.35"/>
+<text x="2205" y="1404" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#35d07f" opacity="1">streaming file I/O</text>
+<text x="75" y="1470" font-family="Inter,Arial,sans-serif" font-size="12" font-weight="750" text-anchor="start" fill="#8ca4ca" opacity="1">Color key</text>
+<rect x="155" y="1449" width="190" height="29" rx="7" fill="#111a2c" stroke="#31c7d4" stroke-width="1.35"/>
+<text x="250" y="1469" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#31c7d4" opacity="1">Discovery</text>
+<rect x="360" y="1449" width="190" height="29" rx="7" fill="#111a2c" stroke="#4f8cff" stroke-width="1.35"/>
+<text x="455" y="1469" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#4f8cff" opacity="1">HTTPS data</text>
+<rect x="565" y="1449" width="190" height="29" rx="7" fill="#111a2c" stroke="#f3a629" stroke-width="1.35"/>
+<text x="660" y="1469" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#f3a629" opacity="1">HTTP compat</text>
+<rect x="770" y="1449" width="190" height="29" rx="7" fill="#111a2c" stroke="#ef5b5b" stroke-width="1.35"/>
+<text x="865" y="1469" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#ef5b5b" opacity="1">UDP fallback</text>
+<rect x="975" y="1449" width="190" height="29" rx="7" fill="#111a2c" stroke="#a06cff" stroke-width="1.35"/>
+<text x="1070" y="1469" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#a06cff" opacity="1">Android IPC</text>
+<text x="2320" y="1470" font-family="Inter,Arial,sans-serif" font-size="11" font-weight="600" text-anchor="end" fill="#8aa0c2" opacity="1">source of truth: repository code</text>
+</svg>

@@ -129,21 +129,6 @@ AirSend 3.0.0 新增了一个**默认关闭、需手动开启**的 `HTTP 兼容�
   <img src="docs/architecture/airsend-engineering-architecture.svg" alt="AirSend 底层工程架构图">
 </p>
 
-<p align="center"><sub>可编辑工程模型：<a href="docs/architecture/airsend-engineering-architecture.drawio">draw.io</a> · SVG 生成与工具调研：<a href="docs/architecture/README.md">architecture docs</a></sub></p>
-
-<details>
-<summary>📖 读图说明（点击展开）</summary>
-<br>
-
-1. **先看运行时边界**：左侧是单一 Swift/AppKit macOS 进程；右侧依次拆开 Kotlin App、运行于 `system_server` 的 LSPosed Hook，以及 UID 0 Rust/Tokio daemon。
-2. **再看中间的传输契约**：AirSend 自己负责发现、路由决策与受限恢复；LocalSend-compatible HTTP API 仅作为文件与剪贴板的数据面适配层。
-3. **沿跨边界线路追踪调用**：棕色是 UDP 发现与注册，蓝色是默认 HTTPS / 显式 HTTP compatibility 数据面，红色虚线是独立且仅支持小 payload 的 UDP fallback，紫色虚线只表示 Android 内部 abstract UDS IPC。
-4. **最后看底部三条端到端链路**：分别给出文件传输、剪贴板往返与截图自动推送从触发到落盘的完整路径。
-
-关键约束：UDP `53317` 承载发现与 fallback；Mac TCP `53318`、Android TCP `53319` 承载数据面；HTTP compatibility 必须手动开启；fallback 使用 600-byte 分片与 24-chunk 窗口，payload 上限为 1 MiB。
-
-</details>
-
 ---
 
 <h2 align="center">💻 macOS 端说明 </h2>

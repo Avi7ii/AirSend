@@ -129,21 +129,6 @@ The developer-facing diagram below maps AirSend's low-level runtime boundaries, 
   <img src="docs/architecture/airsend-engineering-architecture.svg" alt="AirSend low-level engineering architecture">
 </p>
 
-<p align="center"><sub>Editable engineering model: <a href="docs/architecture/airsend-engineering-architecture.drawio">draw.io</a> · SVG generation and tool research: <a href="docs/architecture/README.md">architecture docs</a></sub></p>
-
-<details>
-<summary>📖 How to read this diagram (click to expand)</summary>
-<br>
-
-1. **Start with runtime boundaries**: the left side is one Swift/AppKit macOS process; the right side separates the Kotlin App, the LSPosed hook inside `system_server`, and the UID 0 Rust/Tokio daemon.
-2. **Then read the transport contract**: AirSend owns discovery, route selection, and bounded recovery. The LocalSend-compatible HTTP API is only the file and clipboard data-plane adapter.
-3. **Follow the cross-boundary paths**: brown carries UDP discovery and registration, blue carries the default HTTPS / explicit HTTP compatibility data plane, dashed red is the separate small-payload UDP fallback, and dashed purple is Android-only abstract UDS IPC.
-4. **Finish with the three end-to-end traces**: they show the complete file-transfer, clipboard round-trip, and automatic screenshot-push paths from trigger to storage.
-
-Key constraints: UDP `53317` carries discovery and fallback; Mac TCP `53318` and Android TCP `53319` carry the data plane; HTTP compatibility requires explicit user enablement; fallback uses 600-byte chunks with a 24-chunk window and a 1 MiB payload ceiling.
-
-</details>
-
 ---
 
 <h2 align="center"> 💻 macOS Side </h2>

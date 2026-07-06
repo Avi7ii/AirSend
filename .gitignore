@@ -48,11 +48,13 @@ Android/airsend_daemon/target/
 
 # Release Assets & Temp
 *.zip
+release-assets/
 *.icns
 !AirSend-macOS/AppIcon.icns
 # Local Misc
 *.pdf
 AirSend_Magisk_v*.zip
+magisk_module/system/app/
 localsend-upstream/
 handoff_report_throttling_final.md
 AirSend_Design.md

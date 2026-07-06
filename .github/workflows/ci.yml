@@ -37,6 +37,8 @@ jobs:
           bash -n build_magisk_payload.sh
           bash -n generate_android_adaptive.sh
           bash -n generate_icons.sh
+          bash -n tools/prepare_release_assets.sh
+          bash -n tools/test_prepare_release_assets.sh
 
       - name: Check required project files
         run: |
@@ -49,6 +51,11 @@ jobs:
           test -f Android/patches/localsend/Cargo.toml
           test -x Android/gradlew
           test -x AirSend-macOS/build.sh
+          test -x tools/prepare_release_assets.sh
+          test -x tools/test_prepare_release_assets.sh
+
+      - name: Test release asset completeness guard
+        run: tools/test_prepare_release_assets.sh
 
   macos-swift:
     name: macOS Swift build and app bundle

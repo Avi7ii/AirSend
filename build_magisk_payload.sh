@@ -169,9 +169,10 @@ build_apk() {
 package_magisk_module() {
   log "Packaging Magisk module zip..."
   rm -f "$ZIP_OUTPUT"
+  find "$MAGISK_DIR" \( -name '.DS_Store' -o -name '._*' \) -delete
   (
     cd "$MAGISK_DIR"
-    zip -qry "$ZIP_OUTPUT" .
+    COPYFILE_DISABLE=1 zip -qry "$ZIP_OUTPUT" . -x '*.DS_Store' '*/.DS_Store' '._*' '*/._*'
   )
   log "Magisk zip created: $ZIP_OUTPUT"
 }

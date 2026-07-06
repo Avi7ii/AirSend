@@ -1,19 +1,4 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes"?>
-<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
-    <channel>
-        <title>AirSend Updates</title>
-        <link>https://github.com/Avi7ii/AirSend/releases</link>
-        <description>AirSend macOS app updates.</description>
-        <language>en</language>
-        <item>
-            <title>3.5.1</title>
-            <pubDate>Mon, 06 Jul 2026 13:59:13 +0800</pubDate>
-            <link>https://github.com/Avi7ii/AirSend</link>
-            <sparkle:version>351</sparkle:version>
-            <sparkle:shortVersionString>3.5.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## 中文
+## 中文
 
 `v3.5.1` 是一次稳定性与发布质量更新，重点补齐自动更新、传输进度、大文件内存安全和发布资产完整性。
 
@@ -68,8 +53,3 @@ This release ties together several foundations AirSend needs as a long-lived app
 
 - Mac users should update for automatic updates and more reliable large-file progress.
 - Full Android mode users should refresh the Magisk module as well; it includes daemon streaming and Android compatibility fixes.
-]]></description>
-            <enclosure url="https://github.com/Avi7ii/AirSend/releases/download/v3.5.1/AirSend-v3.5.1-macOS.zip" length="2813125" type="application/octet-stream" sparkle:edSignature="Sf63+neIHByzZ3gWJmLGSO/o2QtvlXJ35ErQorXWXa9iUoQCEr0r+EF1aZyGbCQVs0EpQ1HCQBij6CGLSx+yDA=="/>
-        </item>
-    </channel>
-</rss>

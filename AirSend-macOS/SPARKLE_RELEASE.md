@@ -20,13 +20,15 @@ The app reads:
 https://raw.githubusercontent.com/Avi7ii/AirSend/main/appcast.xml
 ```
 
-To generate a signed appcast after creating a release zip:
+From the repository root, generate a signed appcast after creating release assets:
 
 ```bash
 mkdir -p release-assets
-cp AirSend-macOS.zip release-assets/
+cp AirSend-v3.6.0-macOS.zip release-assets/
+tools/prepare_release_assets.sh release-assets
 AIRSEND_DOWNLOAD_URL_PREFIX="https://github.com/Avi7ii/AirSend/releases/download/v3.6.0" \
-  ./script/make_appcast.sh release-assets
+  AirSend-macOS/script/make_appcast.sh release-assets
+gh release upload v3.6.0 release-assets/* --clobber
 ```
 
 Commit the updated root `appcast.xml` after publishing the matching GitHub release asset.
@@ -36,7 +38,8 @@ Commit the updated root `appcast.xml` after publishing the matching GitHub relea
 - Build the `.app` with Sparkle embedded under `Contents/Frameworks`.
 - Sign Sparkle's `Autoupdate`, `Updater.app`, `Downloader.xpc`, and `Installer.xpc` before signing the app bundle.
 - Zip the signed app with `ditto`, not `zip`, to avoid AppleDouble files.
-- Publish the zip on GitHub Releases.
+- Run `tools/prepare_release_assets.sh release-assets` before publishing assets.
+- Publish both the macOS zip and `AirSend_Magisk*.zip` on every GitHub Release. If the Android side did not change, re-publish the previous latest Magisk module instead of leaving the release with only the macOS asset.
 - Run `script/make_appcast.sh` with the release asset URL prefix.
 - Verify the appcast enclosure URL returns HTTP 200.
 - Keep one previous signed build installed and test Sparkle updating into the new build.

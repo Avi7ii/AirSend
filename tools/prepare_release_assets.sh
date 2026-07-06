@@ -34,7 +34,14 @@ fail() {
 }
 
 mtime() {
-  stat -f '%m' "$1" 2>/dev/null || stat -c '%Y' "$1"
+  case "$(uname -s)" in
+    Darwin|FreeBSD)
+      stat -f '%m' "$1"
+      ;;
+    *)
+      stat -c '%Y' "$1"
+      ;;
+  esac
 }
 
 collect_matches() {

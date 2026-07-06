@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?xml version="1.0" standalone="yes"?>
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
         <title>AirSend Updates</title>
@@ -6,150 +6,44 @@
         <description>AirSend macOS app updates.</description>
         <language>en</language>
         <item>
-            <title>3.5.3</title>
-            <pubDate>Mon, 06 Jul 2026 16:38:25 +0800</pubDate>
+            <title>3.5.4</title>
+            <pubDate>Mon, 06 Jul 2026 20:09:42 +0800</pubDate>
             <link>https://github.com/Avi7ii/AirSend</link>
-            <sparkle:version>353</sparkle:version>
-            <sparkle:shortVersionString>3.5.3</sparkle:shortVersionString>
+            <sparkle:version>354</sparkle:version>
+            <sparkle:shortVersionString>3.5.4</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <description sparkle:format="markdown"><![CDATA[## 中文
 
-`v3.5.3` 是一次 macOS 拖拽体验修复更新。
+`v3.5.4` 是一次 macOS DropZone 触发修复更新。
 
 ### 主要改动
 
-- 修复首次拖拽文件时必须紧贴状态栏图标才能触发 DropZone 的问题。
-- 拖拽靠近状态栏区域时会先显示候选 DropZone，再由系统拖放回调校验真实文件。
-- 新增拖拽触发自测，并接入 CI。
+- 修复拖动普通应用窗口时也会误弹 DropZone 的问题。
+- 修复文件拖拽又必须贴近状态栏图标才触发的问题，恢复更自然的靠近触发体验。
+- 增加拖拽触发策略自测，覆盖窗口拖动与文件拖拽候选触发两个场景。
 
 ### 发布资产
 
-- `AirSend-v3.5.3-macOS.zip`
+- `AirSend-v3.5.4-macOS.zip`
 - `AirSend_Magisk_v3.5.1.zip`（Android/Magisk 资产沿用上一版最新版）
 
 ## English
 
-`v3.5.3` is a macOS drag-and-drop usability fix.
+`v3.5.4` is a macOS DropZone activation fix.
 
 ### Highlights
 
-- Fixed the first-drag case where DropZone only appeared when the pointer touched the status-bar icon.
-- Shows a candidate DropZone near the status-bar area first, then lets the system drop callback validate real files.
-- Added drag handoff self-tests and wired them into CI.
+- Fixed a false DropZone trigger when dragging normal app windows.
+- Fixed the regression where file drags had to touch the status-bar icon before DropZone appeared.
+- Added drag activation self-tests covering both window movement and file drag candidate activation.
 
 ### Release Assets
 
-- `AirSend-v3.5.3-macOS.zip`
+- `AirSend-v3.5.4-macOS.zip`
 - `AirSend_Magisk_v3.5.1.zip` (latest unchanged Android/Magisk asset)
 ]]></description>
-            <enclosure url="https://github.com/Avi7ii/AirSend/releases/download/v3.5.3/AirSend-v3.5.3-macOS.zip" length="2820165" type="application/octet-stream" sparkle:edSignature="jAxHNlTf+JnJVoC6ESPGmg36piUi7jAbKOGLoOJ8foZxak4xw2TfD1MkiXLZyfOOn91kE0VNG2A63N7oZodPCA=="/>
-        </item>
-        <item>
-            <title>3.5.2</title>
-            <pubDate>Mon, 06 Jul 2026 15:07:56 +0800</pubDate>
-            <link>https://github.com/Avi7ii/AirSend</link>
-            <sparkle:version>352</sparkle:version>
-            <sparkle:shortVersionString>3.5.2</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## 中文
-
-`v3.5.2` 是一次小型 macOS 稳定性更新，主要修复最近反馈的两个问题。
-
-### 主要改动
-
-- 修复状态栏菜单偶发打开后立即消失的问题。
-- 优化 macOS 冷启动网络栈初始化，降低启动几秒后退出的风险。
-- 加固证书生成时的网卡 IP 枚举，避免异常网卡地址影响启动。
-
-### 发布资产
-
-- `AirSend-v3.5.2-macOS.zip`
-- `AirSend_Magisk_v3.5.1.zip`（Android/Magisk 资产沿用上一版最新版）
-
-## English
-
-`v3.5.2` is a small macOS stability update for two recently reported issues.
-
-### Highlights
-
-- Fixed a status-bar menu issue where the menu could open and immediately disappear.
-- Simplified macOS cold-start networking initialization to reduce early-exit risk.
-- Hardened certificate IP enumeration so unusual network interfaces do not affect startup.
-
-### Release Assets
-
-- `AirSend-v3.5.2-macOS.zip`
-- `AirSend_Magisk_v3.5.1.zip` (latest unchanged Android/Magisk asset)
-]]></description>
-            <enclosure url="https://github.com/Avi7ii/AirSend/releases/download/v3.5.2/AirSend-v3.5.2-macOS.zip" length="2814969" type="application/octet-stream" sparkle:edSignature="cTfWs4nqDz2Dyvf5EO/PmndS0tyGWkGbVPxCuKDHkQybeEsJHZMfaopzF+rlrGsBD7vxn2NsttIQkvIUfSqoCw=="/>
-        </item>
-        <item>
-            <title>3.5.1</title>
-            <pubDate>Mon, 06 Jul 2026 13:59:13 +0800</pubDate>
-            <link>https://github.com/Avi7ii/AirSend</link>
-            <sparkle:version>351</sparkle:version>
-            <sparkle:shortVersionString>3.5.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## 中文
-
-`v3.5.1` 是一次稳定性与发布质量更新，重点补齐自动更新、传输进度、大文件内存安全和发布资产完整性。
-
-这版不是单点功能堆叠，而是把 AirSend 作为长期可更新应用所需要的几条关键链路打通：Mac 端可以从状态栏发现新版本并通过 Sparkle 自动下载/安装；Mac 向 Android 发送大文件时会实时显示进度；Android 侧的守护进程和 App 同步线程也更稳。
-
-### 主要改动
-
-- macOS 接入 Sparkle 自动更新，保留状态栏里的 “Check for Update” 样式入口，新版本可点击下载并安装。
-- Mac → Android 文件上传改回可控的 `URLSession` 路径，传输过程中会实时刷新进度，不再只在完成后更新。
-- 修复 `SessionDelegate` 里重复触发进度回调的问题。
-- Android Service 的 peers 同步任务现在只会保留一个轮询线程，避免重复启动服务后叠加后台线程。
-- Android daemon 的直连文件发送与接收改为流式处理，降低大文件传输时的内存风险。
-- 修复 Android `MagicWatcher` 在 minSdk 26 上触发的 `FileObserver` API 兼容问题。
-- 新增 CI 门禁：macOS Swift build/app bundle、Rust daemon/patched LocalSend、Android lint/test/assemble。
-- 新增发布资产完整性保护：每个 GitHub Release 都必须同时包含 macOS 应用和 `AirSend_Magisk*.zip`，即使只更新 Mac 端，也会重新附上 Android/Magisk 模块资产。
-- macOS、Android APK、Magisk 模块版本号统一提升到 `3.5.1` / `351`。
-
-### 发布资产
-
-- `AirSend-v3.5.1-macOS.zip`
-- `AirSend_Magisk_v3.5.1.zip`
-
-### 更新建议
-
-- 推荐所有 Mac 用户更新，以获得自动更新能力和更可靠的大文件发送进度。
-- 使用完整 Android 模式的用户建议同时刷新 Magisk 模块；这次模块包含 daemon 流式传输与 Android 兼容性修复。
-
-## English
-
-`v3.5.1` is a stability and release-quality update focused on automatic updates, transfer progress, large-file memory safety, and complete release assets.
-
-This release ties together several foundations AirSend needs as a long-lived app: the Mac app can now surface updates from the menu bar and install them through Sparkle, Mac → Android large-file uploads report live progress, and the Android service/daemon paths are more resilient.
-
-### Highlights
-
-- Added Sparkle automatic updates on macOS while preserving the status-bar “Check for Update” entry; new versions can be downloaded and installed in-app.
-- Switched Mac → Android uploads back to a controllable `URLSession` path so transfer progress updates live instead of only after completion.
-- Removed a duplicate progress callback in `SessionDelegate`.
-- Guarded the Android Service peer sync loop so repeated service starts do not stack polling threads.
-- Changed Android daemon direct file send/receive paths to stream file bodies, reducing large-file memory risk.
-- Fixed the Android `MagicWatcher` `FileObserver` API compatibility issue for minSdk 26.
-- Added CI gates for macOS Swift/app bundle, Rust daemon/patched LocalSend, and Android lint/test/assemble.
-- Added a release asset completeness guard: every GitHub Release must include both the macOS app and `AirSend_Magisk*.zip`; even Mac-only updates re-attach the Android/Magisk module asset.
-- Aligned macOS, Android APK, and Magisk module versions to `3.5.1` / `351`.
-
-### Release Assets
-
-- `AirSend-v3.5.1-macOS.zip`
-- `AirSend_Magisk_v3.5.1.zip`
-
-### Update Recommendation
-
-- Mac users should update for automatic updates and more reliable large-file progress.
-- Full Android mode users should refresh the Magisk module as well; it includes daemon streaming and Android compatibility fixes.
-]]></description>
-            <enclosure url="https://github.com/Avi7ii/AirSend/releases/download/v3.5.1/AirSend-v3.5.1-macOS.zip" length="2814457" type="application/octet-stream" sparkle:edSignature="0aEjxEt2sHKqT5ccafJplVB4En87zDcrG2yZXNEQUvIcys3/WmHd9ECCa9u7BxqE7Q6NpwivQgLVEKcBmNL+Cg=="/>
+            <enclosure url="https://github.com/Avi7ii/AirSend/releases/download/v3.5.4/AirSend-v3.5.4-macOS.zip" length="2820919" type="application/octet-stream" sparkle:edSignature="pMcTab7zholuV74pt/wSpfSwssSKd4w4boB5q4DQ5hzXgB2V4bIOPgRrUK8oWygKNakAUkA2ep56Syf2mca4CA=="/>
         </item>
     </channel>
 </rss>

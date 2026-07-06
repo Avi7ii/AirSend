@@ -19,6 +19,7 @@ func testFirstRecognizedDragInsideActivationBandActivatesImmediately() throws {
         changeCount: 42,
         location: CGPoint(x: 420, y: 860),
         hasRecognizedPayload: true,
+        hasDragPasteboardEvidence: true,
         isWithinActivationBand: true
     )
 
@@ -33,19 +34,21 @@ func testRecognizedDragOutsideActivationBandDoesNotActivate() throws {
         changeCount: 42,
         location: CGPoint(x: 420, y: 500),
         hasRecognizedPayload: true,
+        hasDragPasteboardEvidence: true,
         isWithinActivationBand: false
     )
 
     try expect(!decision.shouldActivate, "recognized drag outside activation band should not activate")
 }
 
-func testUnrecognizedPointerDragInsideActivationBandShowsCandidateDropZoneAfterMovement() throws {
+func testPlainPointerDragInsideActivationBandDoesNotShowCandidateDropZone() throws {
     var policy = DragActivationPolicy(minimumTravel: 18)
 
     let first = policy.decision(
         changeCount: 1,
         location: CGPoint(x: 420, y: 700),
         hasRecognizedPayload: false,
+        hasDragPasteboardEvidence: false,
         isWithinActivationBand: false
     )
     try expect(!first.shouldActivate, "plain pointer movement outside activation band should not activate")
@@ -54,6 +57,31 @@ func testUnrecognizedPointerDragInsideActivationBandShowsCandidateDropZoneAfterM
         changeCount: 1,
         location: CGPoint(x: 420, y: 860),
         hasRecognizedPayload: false,
+        hasDragPasteboardEvidence: false,
+        isWithinActivationBand: true
+    )
+
+    try expect(!second.shouldActivate, "plain pointer movement inside activation band should not activate")
+    try expect(!second.allowsFallbackRecovery, "plain pointer movement should not use fallback file sending")
+}
+
+func testUnrecognizedDragPasteboardInsideActivationBandShowsCandidateDropZoneAfterMovement() throws {
+    var policy = DragActivationPolicy(minimumTravel: 18)
+
+    let first = policy.decision(
+        changeCount: 1,
+        location: CGPoint(x: 420, y: 700),
+        hasRecognizedPayload: false,
+        hasDragPasteboardEvidence: true,
+        isWithinActivationBand: false
+    )
+    try expect(!first.shouldActivate, "drag pasteboard movement outside activation band should not activate")
+
+    let second = policy.decision(
+        changeCount: 1,
+        location: CGPoint(x: 420, y: 860),
+        hasRecognizedPayload: false,
+        hasDragPasteboardEvidence: true,
         isWithinActivationBand: true
     )
 
@@ -61,10 +89,30 @@ func testUnrecognizedPointerDragInsideActivationBandShowsCandidateDropZoneAfterM
     try expect(!second.allowsFallbackRecovery, "candidate preview without file URLs should not use fallback file sending")
 }
 
+func testFreshDragPasteboardChangeCountsAsEvidenceBeforePayloadIsReadable() throws {
+    try expect(
+        DragPasteboardEvidence.hasPotentialDragSession(
+            hasFreshChangeCount: true,
+            hasReadablePayloadMetadata: false
+        ),
+        "fresh drag pasteboard change should count as candidate evidence even before file metadata is readable"
+    )
+
+    try expect(
+        !DragPasteboardEvidence.hasPotentialDragSession(
+            hasFreshChangeCount: false,
+            hasReadablePayloadMetadata: false
+        ),
+        "plain window movement without a fresh drag pasteboard change should not count as candidate evidence"
+    )
+}
+
 let tests: [(String, () throws -> Void)] = [
     ("firstRecognizedDragInsideActivationBandActivatesImmediately", testFirstRecognizedDragInsideActivationBandActivatesImmediately),
     ("recognizedDragOutsideActivationBandDoesNotActivate", testRecognizedDragOutsideActivationBandDoesNotActivate),
-    ("unrecognizedPointerDragInsideActivationBandShowsCandidateDropZoneAfterMovement", testUnrecognizedPointerDragInsideActivationBandShowsCandidateDropZoneAfterMovement),
+    ("plainPointerDragInsideActivationBandDoesNotShowCandidateDropZone", testPlainPointerDragInsideActivationBandDoesNotShowCandidateDropZone),
+    ("unrecognizedDragPasteboardInsideActivationBandShowsCandidateDropZoneAfterMovement", testUnrecognizedDragPasteboardInsideActivationBandShowsCandidateDropZoneAfterMovement),
+    ("freshDragPasteboardChangeCountsAsEvidenceBeforePayloadIsReadable", testFreshDragPasteboardChangeCountsAsEvidenceBeforePayloadIsReadable),
 ]
 
 do {

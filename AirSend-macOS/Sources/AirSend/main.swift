@@ -772,6 +772,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
     private func startDragProximityMonitoring() {
         guard dragProximityMonitorTimer == nil else { return }
+        lastIdleDragPasteboardChangeCount = NSPasteboard(name: .drag).changeCount
         let timer = Timer(timeInterval: dragProximityPollInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.checkForNearbyFileDragTrigger()
@@ -847,6 +848,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         let hasFreshDragPasteboardPayload = lastIdleDragPasteboardChangeCount.map {
             dragPasteboard.changeCount != $0
         } ?? true
+        let hasReadableDragPayloadMetadata = !inspection.typeNames.isEmpty
+            || dragPasteboard.pasteboardItems?.isEmpty == false
+        let hasDragPasteboardEvidence = DragPasteboardEvidence.hasPotentialDragSession(
+            hasFreshChangeCount: hasFreshDragPasteboardPayload,
+            hasReadablePayloadMetadata: hasReadableDragPayloadMetadata
+        )
         let urls = (inspection.looksLikeStrictLocalFileDrag && hasFreshDragPasteboardPayload) ? inspection.urls : []
         let isRecognizedLocalFileDrag = !urls.isEmpty
         let isWithinActivationBand = triggerFrame.contains(mouseLocation)
@@ -854,6 +861,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             changeCount: dragPasteboard.changeCount,
             location: CGPoint(x: mouseLocation.x, y: mouseLocation.y),
             hasRecognizedPayload: isRecognizedLocalFileDrag,
+            hasDragPasteboardEvidence: hasDragPasteboardEvidence,
             isWithinActivationBand: isWithinActivationBand
         )
         let isWithinDropZoneKeepalive = dropZoneWindow.dragReleaseFallbackFrame(inset: dragActivationPreviewKeepaliveInset).contains(mouseLocation)

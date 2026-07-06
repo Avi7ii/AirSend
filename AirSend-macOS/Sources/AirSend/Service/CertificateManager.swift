@@ -232,8 +232,9 @@ actor CertificateManager {
             while ptr != nil {
                 defer { ptr = ptr?.pointee.ifa_next }
                 let interface = ptr?.pointee
-                let addrFamily = interface?.ifa_addr.pointee.sa_family
-                
+                guard let addressPointer = interface?.ifa_addr else { continue }
+                let addrFamily = addressPointer.pointee.sa_family
+
                 if addrFamily == UInt8(AF_INET) {
                     if let cString = interface?.ifa_name {
                         let name = String(cString: cString)
@@ -242,9 +243,15 @@ actor CertificateManager {
                         // But wait, we want 127.0.0.1 too? No, usually handled separately.
                         
                         var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-                        getnameinfo(interface?.ifa_addr, socklen_t((interface?.ifa_addr.pointee.sa_len)!), &hostname, socklen_t(hostname.count), nil, socklen_t(0), NI_NUMERICHOST)
+                        let addressLength = socklen_t(addressPointer.pointee.sa_len)
+                        let result = getnameinfo(addressPointer, addressLength, &hostname, socklen_t(hostname.count), nil, socklen_t(0), NI_NUMERICHOST)
+                        guard result == 0 else {
+                            logTransfer("⚠️ Certificate IP scan skipped interface \(name): getnameinfo failed (\(result))")
+                            continue
+                        }
+
                         let address = String(cString: hostname)
-                        
+
                         if address != "127.0.0.1" {
                             addresses.append(address)
                         }

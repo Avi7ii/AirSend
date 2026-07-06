@@ -36,6 +36,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     // 🔋 功耗优化：广播与清理定时器（连接设备后停止）
     private var broadcastTimer: Timer?
     private var cleanupTimer: Timer?
+    private var hasStartedNetworkingStack = false
     private var isRestartingDiscovery = false
     private var lastDiscoveryRestartAt: Date = .distantPast
     private let discoveryRestartCooldown: TimeInterval = 2.0
@@ -1102,14 +1103,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 
                 logTransfer("🔐 Security Initialized. Fingerprint: \(realFingerprint)")
                 
-                // 2. Re-init all services with real fingerprint
-                // Stop old ones if they were lazily initialized
-                await self.transferServer.stop()
-                self.discoveryService.stop()
-                
-                // Give OS more time to release ports (especially 53317 and Multicast)
-                try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
-                
                 self.fingerprint = realFingerprint
                 await self.restartNetworkingStack()
             } catch {
@@ -1659,9 +1652,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
 
     private func restartNetworkingStack(clearTransientDevices: Bool = false) async {
-        await transferServer.stop()
-        discoveryService.stop()
-        clipboardService.stop()
+        if hasStartedNetworkingStack {
+            await transferServer.stop()
+            discoveryService.stop()
+            clipboardService.stop()
+        }
 
         if clearTransientDevices {
             let keptDevices = devices.filter {
@@ -1691,6 +1686,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
         await startTransferServer()
         startClipboardService()
+        hasStartedNetworkingStack = true
         updateMenu()
     }
     

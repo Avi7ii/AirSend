@@ -69,7 +69,7 @@ This release ties together several foundations AirSend needs as a long-lived app
 - Mac users should update for automatic updates and more reliable large-file progress.
 - Full Android mode users should refresh the Magisk module as well; it includes daemon streaming and Android compatibility fixes.
 ]]></description>
-            <enclosure url="https://github.com/Avi7ii/AirSend/releases/download/v3.5.1/AirSend-v3.5.1-macOS.zip" length="2813125" type="application/octet-stream" sparkle:edSignature="Sf63+neIHByzZ3gWJmLGSO/o2QtvlXJ35ErQorXWXa9iUoQCEr0r+EF1aZyGbCQVs0EpQ1HCQBij6CGLSx+yDA=="/>
+            <enclosure url="https://github.com/Avi7ii/AirSend/releases/download/v3.5.1/AirSend-v3.5.1-macOS.zip" length="2814457" type="application/octet-stream" sparkle:edSignature="0aEjxEt2sHKqT5ccafJplVB4En87zDcrG2yZXNEQUvIcys3/WmHd9ECCa9u7BxqE7Q6NpwivQgLVEKcBmNL+Cg=="/>
         </item>
     </channel>
 </rss>

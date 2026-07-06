@@ -62,38 +62,63 @@ class AirSendService : Service() {
         return START_STICKY
     }
 
+    private val peersSyncLock = Any()
+    private var peersSyncThread: Thread? = null
     private var lastPeersHash: Int = 0 // 🔋 shortcut 去重
 
     private fun startPeersSyncTask() {
-        thread {
-            while (true) {
+        synchronized(peersSyncLock) {
+            if (peersSyncThread?.isAlive == true) {
+                Log.d(TAG, "Peers sync task already running")
+                return
+            }
+
+            peersSyncThread = thread(name = "AirSendPeersSync") {
+                runPeersSyncLoop()
+            }
+        }
+    }
+
+    private fun runPeersSyncLoop() {
+        try {
+            while (!Thread.currentThread().isInterrupted) {
                 try {
-                    val socket = LocalSocket()
-                    socket.connect(LocalSocketAddress("airsend_ipc", LocalSocketAddress.Namespace.ABSTRACT))
-                    socket.soTimeout = 2000
-                    
-                    val writer = java.io.OutputStreamWriter(socket.outputStream)
-                    writer.write("GET_PEERS\n")
-                    writer.flush()
-                    
-                    val reader = java.io.InputStreamReader(socket.inputStream)
-                    val buffer = CharArray(4096)
-                    val charsRead = reader.read(buffer)
-                    
-                    if (charsRead > 0) {
-                        val jsonString = String(buffer, 0, charsRead).trim()
-                        // 🔋 仅在 peers 数据变化时才更新 shortcut（避免无意义 binder IPC）
-                        val hash = jsonString.hashCode()
-                        if (hash != lastPeersHash) {
-                            lastPeersHash = hash
-                            updateDirectShareShortcuts(jsonString)
+                    LocalSocket().use { socket ->
+                        socket.connect(LocalSocketAddress("airsend_ipc", LocalSocketAddress.Namespace.ABSTRACT))
+                        socket.soTimeout = 2000
+
+                        val writer = java.io.OutputStreamWriter(socket.outputStream)
+                        writer.write("GET_PEERS\n")
+                        writer.flush()
+
+                        val reader = java.io.InputStreamReader(socket.inputStream)
+                        val buffer = CharArray(4096)
+                        val charsRead = reader.read(buffer)
+
+                        if (charsRead > 0) {
+                            val jsonString = String(buffer, 0, charsRead).trim()
+                            // 🔋 仅在 peers 数据变化时才更新 shortcut（避免无意义 binder IPC）
+                            val hash = jsonString.hashCode()
+                            if (hash != lastPeersHash) {
+                                lastPeersHash = hash
+                                updateDirectShareShortcuts(jsonString)
+                            }
                         }
                     }
-                    socket.close()
                 } catch (e: Exception) {
                     Log.d(TAG, "Daemon IPC Sync failed: ${e.message}")
                 }
-                Thread.sleep(30_000) // 🔋 30s 轮询（原 5s）
+                try {
+                    Thread.sleep(30_000) // 🔋 30s 轮询（原 5s）
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+            }
+        } finally {
+            synchronized(peersSyncLock) {
+                if (peersSyncThread === Thread.currentThread()) {
+                    peersSyncThread = null
+                }
             }
         }
     }
@@ -141,6 +166,10 @@ class AirSendService : Service() {
 
     override fun onDestroy() {
         Log.d(TAG, "AirSend Service Destroyed")
+        synchronized(peersSyncLock) {
+            peersSyncThread?.interrupt()
+            peersSyncThread = null
+        }
         super.onDestroy()
     }
 }

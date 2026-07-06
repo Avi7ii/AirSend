@@ -4,11 +4,10 @@ import android.net.LocalSocket
 import android.net.LocalSocketAddress
 import android.os.FileObserver
 import android.util.Log
-import java.io.File
 import java.io.OutputStreamWriter
 import kotlin.concurrent.thread
 
-class MagicWatcher(private val path: String) : FileObserver(File(path), CLOSE_WRITE) {
+class MagicWatcher(private val path: String) : FileObserver(path, CLOSE_WRITE) {
 
     companion object {
         private const val TAG = "MagicWatcher"

@@ -490,7 +490,7 @@ pub fn spawn_physical_watcher(state: Arc<AppState>) {
                     if is_target_event {
                         if let Some(path_buf) = event.paths.first() {
                             let path_str = path_buf.to_string_lossy().to_string();
-                            
+
                             // 强力过滤系统 IO 碎片文件
                             if path_str.ends_with(".tmp") || path_str.ends_with(".pending") || path_buf.file_name().unwrap_or_default().to_string_lossy().starts_with(".") {
                                 continue;
@@ -756,9 +756,9 @@ async fn send_text_protocol(client: &Client, peer_id: &str, text: &str) -> Resul
     // 🚨 关键修复 4：把正确的设备指纹 (peer_id) 传给底层 API
     let response = client.prepare_upload(peer_id.to_string(), files).await?;
     tracing::info!("✅ 握手通过，拿到 Session ID: {}", response.session_id);
-    
+
     if let Some(token) = response.files.get(&file_id) {
-        client.upload(response.session_id, file_id, token.clone(), Bytes::copy_from_slice(text_bytes)).await?;
+        client.upload(response.session_id, file_id, token.clone(), Bytes::copy_from_slice(text_bytes).into()).await?;
     }
     Ok(())
 }
@@ -773,7 +773,7 @@ pub async fn push_text_to_app(text: &str) -> anyhow::Result<()> {
         
     stream.write_all(text.as_bytes()).await?;
     stream.shutdown().await?; // 显式关闭发送端，触发 App 侧的 readText() 结束
-    
+
     tracing::info!("✅ 成功将文本推送到 Android App");
     Ok(())
 }

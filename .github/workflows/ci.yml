@@ -1,0 +1,193 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  workflow-check:
+    name: Workflow and script checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse workflow YAML
+        run: |
+          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/ci.yml'); puts 'workflow yaml parsed'"
+
+      - name: Check shell scripts parse
+        run: |
+          bash -n AirSend-macOS/build.sh
+          bash -n AirSend-macOS/script/make_appcast.sh
+          bash -n build_magisk_payload.sh
+          bash -n generate_android_adaptive.sh
+          bash -n generate_icons.sh
+
+      - name: Check required project files
+        run: |
+          test -f AirSend-macOS/Package.swift
+          test -f AirSend-macOS/Info.plist
+          test -f Android/settings.gradle.kts
+          test -f Android/build.gradle.kts
+          test -f Android/app/build.gradle.kts
+          test -f Android/airsend_daemon/Cargo.toml
+          test -f Android/patches/localsend/Cargo.toml
+          test -x Android/gradlew
+          test -x AirSend-macOS/build.sh
+
+  macos-swift:
+    name: macOS Swift build and app bundle
+    runs-on: macos-15
+    timeout-minutes: 30
+    needs: workflow-check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            AirSend-macOS/.build
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm
+          key: ${{ runner.os }}-swiftpm-${{ hashFiles('AirSend-macOS/Package.swift', 'AirSend-macOS/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-swiftpm-
+
+      - name: Show toolchain versions
+        working-directory: AirSend-macOS
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Resolve Swift dependencies
+        working-directory: AirSend-macOS
+        run: swift package resolve
+
+      - name: Run updater self-tests
+        working-directory: AirSend-macOS
+        run: swift run AirSendUpdaterSelfTests
+
+      - name: Build Swift package
+        working-directory: AirSend-macOS
+        run: swift build
+
+      - name: Package and verify AirSend.app
+        working-directory: AirSend-macOS
+        env:
+          CI: "true"
+          AIRSEND_ARTIFACT_ZIP: AirSend-macOS-debug.zip
+        run: |
+          ./build.sh
+          test -f AirSend-macOS-debug.zip
+          rm -rf /tmp/airsend-ci-verify
+          mkdir -p /tmp/airsend-ci-verify
+          /usr/bin/ditto -x -k AirSend-macOS-debug.zip /tmp/airsend-ci-verify
+          test -d /tmp/airsend-ci-verify/AirSend.app/Contents/Frameworks/Sparkle.framework
+          codesign --verify --deep --strict --verbose=2 /tmp/airsend-ci-verify/AirSend.app
+
+      - name: Upload macOS app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirSend-macOS-debug
+          path: AirSend-macOS/AirSend-macOS-debug.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  rust-daemon:
+    name: Rust daemon and patched LocalSend
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: workflow-check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Rust version
+        run: rustc --version && cargo --version
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            Android/airsend_daemon/target
+            Android/patches/localsend/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Android/airsend_daemon/Cargo.lock', 'Android/patches/localsend/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check patched LocalSend
+        working-directory: Android/patches/localsend
+        run: cargo check --locked
+
+      - name: Clippy patched LocalSend
+        working-directory: Android/patches/localsend
+        run: cargo clippy --locked --all-targets
+
+      - name: Test daemon
+        working-directory: Android/airsend_daemon
+        run: cargo test --locked
+
+      - name: Clippy daemon
+        working-directory: Android/airsend_daemon
+        run: cargo clippy --locked --all-targets
+
+  android:
+    name: Android lint, tests, and assembleDebug
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: workflow-check
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Show Gradle and Android tool versions
+        working-directory: Android
+        run: ./gradlew --version
+
+      - name: Run Android lint
+        working-directory: Android
+        run: ./gradlew :app:lintDebug --no-daemon --stacktrace
+
+      - name: Run Android unit tests
+        working-directory: Android
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Assemble debug APK
+        working-directory: Android
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirSend-Android-debug-apk
+          path: Android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14

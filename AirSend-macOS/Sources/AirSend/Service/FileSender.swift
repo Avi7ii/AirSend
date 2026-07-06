@@ -316,6 +316,17 @@ actor FileSender {
         let body: Data
     }
 
+    private struct Header {
+        let name: String
+        let value: String
+
+        init(_ line: String) {
+            let parts = line.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            self.name = String(parts.first ?? "")
+            self.value = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : ""
+        }
+    }
+
     private func writeTemporaryData(_ data: Data, suffix: String) throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("airsend-\(UUID().uuidString).\(suffix)")
         try data.write(to: url)
@@ -386,6 +397,40 @@ actor FileSender {
 
         let statusCode = Int(String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? -1
         return CurlHTTPResult(statusCode: statusCode, body: body)
+    }
+
+    private func performURLSessionUpload(url: URL,
+                                         headers: [String],
+                                         bodyFile: URL,
+                                         fileId: String,
+                                         fileSize: Int64,
+                                         device: Device,
+                                         timeout: TimeInterval) async throws -> CurlHTTPResult {
+        let delegate = SessionDelegate()
+        delegate.expectedFingerprints[device.ip] = device.id
+        delegate.onProgress = { [weak self] _, totalBytesSent, _ in
+            Task {
+                await self?.updateSentBytes(fileId: fileId, sent: min(totalBytesSent, fileSize))
+            }
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = timeout
+        for header in headers.map(Header.init) where !header.name.isEmpty {
+            request.setValue(header.value, forHTTPHeaderField: header.name)
+        }
+
+        let session = makeSession(requestTimeout: timeout, resourceTimeout: timeout, delegate: delegate)
+        registerSession(session)
+        defer {
+            unregisterSession(session)
+            session.finishTasksAndInvalidate()
+        }
+
+        let (data, response) = try await session.upload(for: request, fromFile: bodyFile)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+        return CurlHTTPResult(statusCode: statusCode, body: data)
     }
     
     private func prepareContext(urls: [URL]) async throws -> SendContext {
@@ -595,15 +640,21 @@ actor FileSender {
             throw NSError(domain: "FileSender", code: -999, userInfo: [NSLocalizedDescriptionKey: "Transfer cancelled"])
         }
 
-        let response = try await performCurlRequest(
-            url: urlString,
-            method: "POST",
+        guard let uploadURL = URL(string: urlString) else {
+            throw NSError(domain: "FileSender", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid upload URL"])
+        }
+
+        let response = try await performURLSessionUpload(
+            url: uploadURL,
             headers: [
                 "Content-Type: application/octet-stream",
                 "User-Agent: LocalSend/3.5.0",
                 "Connection: close"
             ],
             bodyFile: url,
+            fileId: fileId,
+            fileSize: fileSize,
+            device: device,
             timeout: 180.0
         )
 

@@ -4,11 +4,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::body::Bytes;
+use axum::body::{to_bytes, Body as AxumBody};
 use axum::extract::{ConnectInfo, Query, State};
 use axum::http::StatusCode;
 use axum::Extension;
 use axum::{response::IntoResponse, Json};
+use futures_util::StreamExt;
+use reqwest::Body as ReqwestBody;
 
 use crate::error::{LocalSendError, Result};
 use crate::transfer::session::{Session, SessionStatus};
@@ -16,10 +18,12 @@ use crate::{
     models::{device::DeviceInfo, file::FileMetadata},
     remember_peer_entry, Client,
 };
-use native_dialog::MessageDialog;
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use uuid::Uuid;
+
+const MAX_CLIPBOARD_TEXT_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -91,26 +95,37 @@ impl Client {
         session_id: String,
         file_id: String,
         token: String,
-        body: Bytes,
+        body: ReqwestBody,
     ) -> Result<()> {
-        let sessions = self.sessions.lock().await;
-        let session = sessions.get(&session_id).unwrap();
+        let (receiver_protocol, addr, file_size) = {
+            let sessions = self.sessions.lock().await;
+            let session = sessions.get(&session_id).unwrap();
 
-        if session.status != SessionStatus::Active {
-            return Err(LocalSendError::SessionInactive);
-        }
+            if session.status != SessionStatus::Active {
+                return Err(LocalSendError::SessionInactive);
+            }
 
-        if session.file_tokens.get(&file_id) != Some(&token) {
-            return Err(LocalSendError::InvalidToken);
-        }
+            if session.file_tokens.get(&file_id) != Some(&token) {
+                return Err(LocalSendError::InvalidToken);
+            }
+
+            let file_size = session
+                .files
+                .get(&file_id)
+                .ok_or(LocalSendError::InvalidToken)?
+                .size;
+
+            (session.receiver.protocol.clone(), session.addr, file_size)
+        };
 
         let request = self
             .http_client
             .post(&format!(
                 "{}://{}/api/localsend/v2/upload?sessionId={}&fileId={}&token={}",
-                session.receiver.protocol, session.addr, session_id, file_id, token
+                receiver_protocol, addr, session_id, file_id, token
             ))
             .header("Connection", "close")
+            .header("Content-Length", file_size)
             .timeout(Duration::from_secs(180))
             //.post(&format!("https://webhook.site/2f23a529-b687-4375-ad5f-54906ab26ac7?session_id={}&file_id={}&token={}", session_id, file_id, token))
             .body(body);
@@ -143,16 +158,16 @@ impl Client {
             .get(&file_metadata.id)
             .ok_or(LocalSendError::InvalidToken)?;
 
-        // Read file contents
-        let file_contents = tokio::fs::read(&file_path).await?;
-        let bytes = Bytes::from(file_contents);
+        // Stream file contents instead of loading the whole file into memory.
+        let file = tokio::fs::File::open(&file_path).await?;
+        let body = ReqwestBody::from(file);
 
         // Upload file
         self.upload(
             prepare_response.session_id,
             file_metadata.id,
             token.clone(),
-            bytes,
+            body,
         )
         .await?;
 
@@ -239,7 +254,7 @@ pub async fn register_upload(
     Query(params): Query<UploadParams>,
     Extension(sessions): Extension<Arc<Mutex<HashMap<String, Session>>>>,
     Extension(download_dir): Extension<String>,
-    body: Bytes,
+    body: AxumBody,
 ) -> impl IntoResponse {
     // Extract query parameters
     let session_id = &params.session_id;
@@ -247,44 +262,54 @@ pub async fn register_upload(
     let token = &params.token;
 
     println!(
-        "📥 [register_upload] Received body: {} bytes, fileId: {}, sessionId: {}",
-        body.len(),
-        file_id,
-        session_id
+        "📥 [register_upload] Receiving body stream, fileId: {}, sessionId: {}",
+        file_id, session_id
     );
 
-    // Get session and validate
-    let mut sessions_lock = sessions.lock().await;
-    let session = match sessions_lock.get_mut(session_id) {
-        Some(session) => session,
-        None => return StatusCode::BAD_REQUEST.into_response(),
-    };
+    // Validate the session while holding the lock, then stream outside it.
+    let file_metadata = {
+        let sessions_lock = sessions.lock().await;
+        let session = match sessions_lock.get(session_id) {
+            Some(session) => session,
+            None => return StatusCode::BAD_REQUEST.into_response(),
+        };
 
-    if session.status != SessionStatus::Active {
-        return StatusCode::BAD_REQUEST.into_response();
-    }
+        if session.status != SessionStatus::Active {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
 
-    // Validate token
-    if session.file_tokens.get(file_id) != Some(&token.to_string()) {
-        return StatusCode::FORBIDDEN.into_response();
-    }
+        if session.file_tokens.get(file_id) != Some(token) {
+            return StatusCode::FORBIDDEN.into_response();
+        }
 
-    // Get file metadata
-    let file_metadata = match session.files.get(file_id) {
-        Some(metadata) => metadata,
-        None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "File not found".to_string(),
-            )
-                .into_response()
+        match session.files.get(file_id) {
+            Some(metadata) => metadata.clone(),
+            None => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "File not found".to_string(),
+                )
+                    .into_response()
+            }
         }
     };
 
     // ==========================================
     // 🚀 核心拦截逻辑：发现是纯文本，直接截胡并推给 App
     // ==========================================
-    if file_metadata.file_type == "text/plain" {
+    if file_metadata.file_type == "text/plain"
+        && file_metadata.size <= MAX_CLIPBOARD_TEXT_BYTES as u64
+    {
+        let body = match to_bytes(body, MAX_CLIPBOARD_TEXT_BYTES).await {
+            Ok(body) => body,
+            Err(e) => {
+                return (
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    format!("Failed to read text payload: {}", e),
+                )
+                    .into_response()
+            }
+        };
         let text_content = String::from_utf8_lossy(&body).to_string();
         println!("📥 拦截到纯文本/剪贴板数据，长度: {}", text_content.len());
 
@@ -361,14 +386,52 @@ pub async fn register_upload(
     }
     // ==========================================
 
-    // Write file (此时的 file_path 一定是安全的、未被占用的绝对路径)
-    if let Err(e) = tokio::fs::write(&file_path, body.clone()).await {
+    // Stream file to disk without buffering the full body in memory.
+    let mut output_file = match tokio::fs::File::create(&file_path).await {
+        Ok(file) => file,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create file: {}", e),
+            )
+                .into_response()
+        }
+    };
+
+    let mut body_stream = body.into_data_stream();
+    let mut written_bytes: u64 = 0;
+    while let Some(chunk_result) = body_stream.next().await {
+        let chunk = match chunk_result {
+            Ok(chunk) => chunk,
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&file_path).await;
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to read upload body: {}", e),
+                )
+                    .into_response();
+            }
+        };
+        written_bytes += chunk.len() as u64;
+        if let Err(e) = output_file.write_all(&chunk).await {
+            let _ = tokio::fs::remove_file(&file_path).await;
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to write file: {}", e),
+            )
+                .into_response();
+        }
+    }
+
+    if let Err(e) = output_file.flush().await {
+        let _ = tokio::fs::remove_file(&file_path).await;
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to write file: {}", e),
         )
             .into_response();
     }
+    println!("✅ Streamed {} bytes to {}", written_bytes, file_path);
 
     // ==========================================
     // 📷 触发 Android 媒体扫描器

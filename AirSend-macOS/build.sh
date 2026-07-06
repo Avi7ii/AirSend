@@ -1,13 +1,14 @@
 #!/bin/bash
-set -e
+set -euo pipefail
+export COPYFILE_DISABLE=1
 
 APP_NAME="AirSend"
-BUILD_DIR=".build/arm64-apple-macosx/debug"
 EXECUTABLE_NAME="AirSend"
 ICON_PATH="AppIcon.icns"
 DIST_DIR="dist"
 SPARKLE_FRAMEWORK_NAME="Sparkle.framework"
 CODESIGN_ARGS=()
+ARTIFACT_ZIP="${AIRSEND_ARTIFACT_ZIP:-}"
 
 clean_bundle_xattrs() {
     local bundle_path="$1"
@@ -98,6 +99,7 @@ sign_sparkle_framework() {
 
 echo "🚀 Building $APP_NAME (Debug Mode)..."
 swift build -c debug
+BUILD_DIR="${BUILD_DIR:-$(swift build -c debug --show-bin-path)}"
 
 TMP_ROOT=$(mktemp -d /tmp/airsend-build.XXXXXX)
 APP_BUNDLE="$TMP_ROOT/$APP_NAME.app"
@@ -143,19 +145,31 @@ codesign "${CODESIGN_ARGS[@]}" --deep "$APP_BUNDLE"
 clean_bundle_xattrs "$APP_BUNDLE"
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 
+if [ -n "$ARTIFACT_ZIP" ]; then
+    rm -f "$ARTIFACT_ZIP"
+    /usr/bin/ditto -c -k --keepParent --norsrc "$APP_BUNDLE" "$ARTIFACT_ZIP"
+fi
+
 mkdir -p "$DIST_DIR"
-/usr/bin/ditto "$APP_BUNDLE" "$DIST_BUNDLE"
+/usr/bin/ditto --norsrc "$APP_BUNDLE" "$DIST_BUNDLE"
 clean_bundle_xattrs "$DIST_BUNDLE"
 
 # Keep a repo-local copy for convenience.
-/usr/bin/ditto "$APP_BUNDLE" "$APP_NAME.app"
+/usr/bin/ditto --norsrc "$APP_BUNDLE" "$APP_NAME.app"
 clean_bundle_xattrs "$APP_NAME.app"
 
 echo "✅ Build Complete!"
 echo "📂 Location: $(pwd)/$DIST_BUNDLE"
+if [ -n "$ARTIFACT_ZIP" ]; then
+    echo "📦 Artifact: $(pwd)/$ARTIFACT_ZIP"
+fi
 
-# 🚀 Kill existing process and restart (as per user instruction)
-echo "🔄 Restarting $APP_NAME..."
-pkill -x "$APP_NAME" || true
-open "$DIST_BUNDLE"
-echo "✨ $APP_NAME restarted successfully."
+if [ "${CI:-}" = "true" ] || [ "${SKIP_LAUNCH:-}" = "1" ]; then
+    echo "🤖 CI mode detected, skipping app restart."
+else
+    # 🚀 Kill existing process and restart (as per user instruction)
+    echo "🔄 Restarting $APP_NAME..."
+    pkill -x "$APP_NAME" || true
+    open "$DIST_BUNDLE"
+    echo "✨ $APP_NAME restarted successfully."
+fi

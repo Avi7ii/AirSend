@@ -14,7 +14,6 @@ final class SessionDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendab
     
     func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
         onProgress?(task, totalBytesSent, totalBytesExpectedToSend)
-        onProgress?(task, totalBytesSent, totalBytesExpectedToSend)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {

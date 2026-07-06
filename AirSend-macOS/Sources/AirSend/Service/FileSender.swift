@@ -408,9 +408,11 @@ actor FileSender {
                                          timeout: TimeInterval) async throws -> CurlHTTPResult {
         let delegate = SessionDelegate()
         delegate.expectedFingerprints[device.ip] = device.id
-        delegate.onProgress = { [weak self] _, totalBytesSent, _ in
+        let sender = self
+        delegate.onProgress = { _, totalBytesSent, _ in
+            let sent = min(totalBytesSent, fileSize)
             Task {
-                await self?.updateSentBytes(fileId: fileId, sent: min(totalBytesSent, fileSize))
+                await sender.updateSentBytes(fileId: fileId, sent: sent)
             }
         }
 

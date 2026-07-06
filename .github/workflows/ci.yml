@@ -35,8 +35,6 @@ jobs:
           bash -n AirSend-macOS/build.sh
           bash -n AirSend-macOS/script/make_appcast.sh
           bash -n build_magisk_payload.sh
-          bash -n generate_android_adaptive.sh
-          bash -n generate_icons.sh
           bash -n tools/prepare_release_assets.sh
           bash -n tools/test_prepare_release_assets.sh
 

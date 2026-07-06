@@ -15,7 +15,9 @@ class ClipboardService {
     func start() {
         // 🔋 3.0s 轮询（changeCount 单调递增，延长间隔只影响延迟不影响完整性）
         let t = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
-            self?.checkPasteboard()
+            Task { @MainActor [weak self] in
+                self?.checkPasteboard()
+            }
         }
         t.tolerance = 1.5 // 🔋 允许 macOS 合并唤醒
         timer = t

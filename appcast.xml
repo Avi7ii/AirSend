@@ -6,6 +6,46 @@
         <description>AirSend macOS app updates.</description>
         <language>en</language>
         <item>
+            <title>3.5.3</title>
+            <pubDate>Mon, 06 Jul 2026 16:38:25 +0800</pubDate>
+            <link>https://github.com/Avi7ii/AirSend</link>
+            <sparkle:version>353</sparkle:version>
+            <sparkle:shortVersionString>3.5.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## 中文
+
+`v3.5.3` 是一次 macOS 拖拽体验修复更新。
+
+### 主要改动
+
+- 修复首次拖拽文件时必须紧贴状态栏图标才能触发 DropZone 的问题。
+- 拖拽靠近状态栏区域时会先显示候选 DropZone，再由系统拖放回调校验真实文件。
+- 新增拖拽触发自测，并接入 CI。
+
+### 发布资产
+
+- `AirSend-v3.5.3-macOS.zip`
+- `AirSend_Magisk_v3.5.1.zip`（Android/Magisk 资产沿用上一版最新版）
+
+## English
+
+`v3.5.3` is a macOS drag-and-drop usability fix.
+
+### Highlights
+
+- Fixed the first-drag case where DropZone only appeared when the pointer touched the status-bar icon.
+- Shows a candidate DropZone near the status-bar area first, then lets the system drop callback validate real files.
+- Added drag handoff self-tests and wired them into CI.
+
+### Release Assets
+
+- `AirSend-v3.5.3-macOS.zip`
+- `AirSend_Magisk_v3.5.1.zip` (latest unchanged Android/Magisk asset)
+]]></description>
+            <enclosure url="https://github.com/Avi7ii/AirSend/releases/download/v3.5.3/AirSend-v3.5.3-macOS.zip" length="2820165" type="application/octet-stream" sparkle:edSignature="jAxHNlTf+JnJVoC6ESPGmg36piUi7jAbKOGLoOJ8foZxak4xw2TfD1MkiXLZyfOOn91kE0VNG2A63N7oZodPCA=="/>
+        </item>
+        <item>
             <title>3.5.2</title>
             <pubDate>Mon, 06 Jul 2026 15:07:56 +0800</pubDate>
             <link>https://github.com/Avi7ii/AirSend</link>

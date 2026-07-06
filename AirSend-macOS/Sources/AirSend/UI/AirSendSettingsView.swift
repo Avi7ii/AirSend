@@ -248,7 +248,7 @@ struct AirSendSettingsView: View {
 
                     SettingsToggleRow(
                         title: "Auto-check for updates",
-                        detail: "Check for a new AirSend build in the background.",
+                        detail: "Check in the background and download new builds automatically.",
                         isOn: Binding(
                             get: { snapshot.autoUpdateEnabled },
                             set: { store.actions.setAutoUpdateEnabled($0) }

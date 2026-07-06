@@ -1,111 +1,260 @@
-import Foundation
+import AirSendUpdater
 import Cocoa
+import Foundation
+import Security
+
+#if canImport(Sparkle) && ENABLE_SPARKLE
+import Sparkle
+#endif
 
 @MainActor
-class UpdateService {
+final class UpdateService {
     static let shared = UpdateService()
-    
-    var currentVersion = "3.5.0"
-    
-    private let owner = "Avi7ii"
-    private let repo = "AirSend"
-    private let releaseURL = "https://github.com/Avi7ii/AirSend/releases/latest"
-    private let apiURL = "https://api.github.com/repos/Avi7ii/AirSend/releases/latest"
+
+    private let updater: any UpdaterProviding
+    var onStatusChange: (() -> Void)?
+
+    var currentVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "3.5.0"
+    }
+
+    var isUpdateReady: Bool {
+        updater.updateStatus.isUpdateReady
+    }
+
+    var isAvailable: Bool {
+        updater.isAvailable
+    }
+
+    var unavailableReason: String? {
+        updater.unavailableReason
+    }
+
+    private init(updater: (any UpdaterProviding)? = nil) {
+        self.updater = updater ?? makeUpdaterController(savedAutoUpdate: Self.savedAutoUpdatePreference)
+        self.updater.updateStatus.onChange = { [weak self] in
+            self?.onStatusChange?()
+        }
+    }
+
+    static var savedAutoUpdatePreference: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: Self.autoUpdateDefaultsKey) == nil {
+            return true
+        }
+        return defaults.bool(forKey: Self.autoUpdateDefaultsKey)
+    }
+
+    static let autoUpdateDefaultsKey = "auto_update_enabled"
+
+    func configureAutoUpdate(enabled: Bool) {
+        updater.automaticallyChecksForUpdates = enabled
+        updater.automaticallyDownloadsUpdates = enabled
+    }
 
     func checkUpdate(explicit: Bool) {
-        if explicit {
-            print("🚀 UpdateService: Explicitly checking for updates...")
-        } else {
-            print("🚀 UpdateService: Auto-checking for updates (Background)...")
+        guard explicit else {
+            return
         }
-        
-        Task {
-            do {
-                guard let latestVersion = try await fetchLatestVersion() else {
-                    if explicit {
-                        await showNoUpdateAlert()
-                    }
-                    return
-                }
-                
-                print("🚀 UpdateService: Current version: \(currentVersion), Latest version: \(latestVersion)")
-                
-                if isNewerVersion(latestVersion, than: currentVersion) {
-                    await showUpdateAlert(newVersion: latestVersion)
-                } else if explicit {
-                    await showNoUpdateAlert()
-                }
-            } catch {
-                print("❌ UpdateService: Failed to check updates: \(error)")
-                if explicit {
-                    await showErrorAlert(error: error)
-                }
-            }
+
+        guard updater.isAvailable else {
+            showUnavailableAlert()
+            return
         }
+
+        updater.checkForUpdates(NSApp)
     }
 
-    private func fetchLatestVersion() async throws -> String? {
-        var request = URLRequest(url: URL(string: apiURL)!)
-        request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
-        request.setValue("AirSend-Update-Service", forHTTPHeaderField: "User-Agent")
-        
-        let (data, response) = try await URLSession.shared.data(for: request)
-        
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            return nil
+    func installUpdate() {
+        guard updater.isAvailable else {
+            showUnavailableAlert()
+            return
         }
-        
-        if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let tagName = json["tag_name"] as? String {
-            // Remove 'v' prefix if exists
-            return tagName.lowercased().hasPrefix("v") ? String(tagName.dropFirst()) : tagName
-        }
-        
-        return nil
+
+        updater.installUpdate()
     }
 
-    private func isNewerVersion(_ latest: String, than current: String) -> Bool {
-        let latestComponents = latest.split(separator: ".").compactMap { Int($0) }
-        let currentComponents = current.split(separator: ".").compactMap { Int($0) }
-        
-        let count = max(latestComponents.count, currentComponents.count)
-        for i in 0..<count {
-            let l = i < latestComponents.count ? latestComponents[i] : 0
-            let r = i < currentComponents.count ? currentComponents[i] : 0
-            if l > r { return true }
-            if l < r { return false }
-        }
-        return false
-    }
-
-    private func showUpdateAlert(newVersion: String) async {
+    private func showUnavailableAlert() {
         let alert = NSAlert()
-        alert.messageText = "New Version Available"
-        alert.informativeText = "A new version (\(newVersion)) is available. Would you like to download it now?"
-        alert.addButton(withTitle: "Download Now")
-        alert.addButton(withTitle: "Later")
-        
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            if let url = URL(string: releaseURL) {
-                NSWorkspace.shared.open(url)
-            }
-        }
-    }
-
-    private func showNoUpdateAlert() async {
-        let alert = NSAlert()
-        alert.messageText = "Check for Updates"
-        alert.informativeText = "You are currently using the latest version (\(currentVersion))."
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
-    }
-
-    private func showErrorAlert(error: Error) async {
-        let alert = NSAlert()
-        alert.messageText = "Update Check Failed"
-        alert.informativeText = "An error occurred while checking for updates: \(error.localizedDescription)"
+        alert.messageText = "Updates Unavailable"
+        alert.informativeText = updater.unavailableReason ?? "This build cannot use automatic updates."
         alert.addButton(withTitle: "OK")
         alert.runModal()
     }
 }
+
+#if canImport(Sparkle) && ENABLE_SPARKLE
+@MainActor
+private final class SparkleUpdaterController: NSObject, UpdaterProviding, SPUUpdaterDelegate {
+    private final class ImmediateInstallHandler: @unchecked Sendable {
+        private let handler: () -> Void
+
+        init(_ handler: @escaping () -> Void) {
+            self.handler = handler
+        }
+
+        func install() {
+            handler()
+        }
+    }
+
+    private lazy var controller = SPUStandardUpdaterController(
+        startingUpdater: false,
+        updaterDelegate: self,
+        userDriverDelegate: nil
+    )
+
+    private let pendingInstaller = PendingUpdateInstaller()
+    let unavailableReason: String? = nil
+
+    var updateStatus: UpdateStatus {
+        pendingInstaller.status
+    }
+
+    init(savedAutoUpdate: Bool) {
+        super.init()
+        let updater = controller.updater
+        updater.automaticallyChecksForUpdates = savedAutoUpdate
+        updater.automaticallyDownloadsUpdates = savedAutoUpdate
+        controller.startUpdater()
+    }
+
+    var automaticallyChecksForUpdates: Bool {
+        get { controller.updater.automaticallyChecksForUpdates }
+        set { controller.updater.automaticallyChecksForUpdates = newValue }
+    }
+
+    var automaticallyDownloadsUpdates: Bool {
+        get { controller.updater.automaticallyDownloadsUpdates }
+        set { controller.updater.automaticallyDownloadsUpdates = newValue }
+    }
+
+    var isAvailable: Bool {
+        true
+    }
+
+    func checkForUpdates(_ sender: Any?) {
+        controller.checkForUpdates(sender)
+    }
+
+    func installUpdate() {
+        guard pendingInstaller.installIfReady() else {
+            controller.checkForUpdates(nil)
+            return
+        }
+    }
+
+    nonisolated func updater(_ updater: SPUUpdater, failedToDownloadUpdate item: SUAppcastItem, error: Error) {
+        _ = updater
+        _ = item
+        _ = error
+        Task { @MainActor in
+            self.pendingInstaller.clear()
+        }
+    }
+
+    nonisolated func userDidCancelDownload(_ updater: SPUUpdater) {
+        _ = updater
+        Task { @MainActor in
+            self.pendingInstaller.clear()
+        }
+    }
+
+    nonisolated func updater(
+        _ updater: SPUUpdater,
+        willInstallUpdateOnQuit item: SUAppcastItem,
+        immediateInstallationBlock immediateInstallHandler: @escaping () -> Void
+    ) -> Bool {
+        _ = updater
+        _ = item
+        let installHandler = ImmediateInstallHandler(immediateInstallHandler)
+        Task { @MainActor in
+            self.pendingInstaller.markReady {
+                installHandler.install()
+            }
+        }
+        return true
+    }
+
+    nonisolated func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        _ = updater
+        _ = error
+        Task { @MainActor in
+            self.pendingInstaller.clear()
+        }
+    }
+
+    nonisolated func updater(
+        _ updater: SPUUpdater,
+        userDidMake choice: SPUUserUpdateChoice,
+        forUpdate updateItem: SUAppcastItem,
+        state: SPUUserUpdateState
+    ) {
+        _ = updater
+        _ = updateItem
+        let downloaded = state.stage == .downloaded
+        Task { @MainActor in
+            switch choice {
+            case .install, .skip:
+                self.pendingInstaller.clear()
+            case .dismiss:
+                if !downloaded {
+                    self.pendingInstaller.clear()
+                }
+            @unknown default:
+                self.pendingInstaller.clear()
+            }
+        }
+    }
+}
+
+private enum InstallOrigin {
+    static func isHomebrewCask(appBundleURL: URL) -> Bool {
+        let resolved = appBundleURL.resolvingSymlinksInPath()
+        let path = resolved.path
+        return path.contains("/Caskroom/") || path.contains("/Homebrew/Caskroom/")
+    }
+}
+
+private func isDeveloperIDSigned(bundleURL: URL) -> Bool {
+    var staticCode: SecStaticCode?
+    guard SecStaticCodeCreateWithPath(bundleURL as CFURL, SecCSFlags(), &staticCode) == errSecSuccess,
+          let code = staticCode else { return false }
+
+    var infoCF: CFDictionary?
+    guard SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &infoCF) == errSecSuccess,
+          let info = infoCF as? [String: Any],
+          let certs = info[kSecCodeInfoCertificates as String] as? [SecCertificate],
+          let leaf = certs.first else { return false }
+
+    if let summary = SecCertificateCopySubjectSummary(leaf) as String? {
+        return summary.hasPrefix("Developer ID Application:")
+    }
+    return false
+}
+
+@MainActor
+private func makeUpdaterController(savedAutoUpdate: Bool) -> any UpdaterProviding {
+    let bundleURL = Bundle.main.bundleURL
+    let isBundledApp = bundleURL.pathExtension == "app"
+    guard isBundledApp else {
+        return DisabledUpdaterController(unavailableReason: "Updates unavailable in this build.")
+    }
+
+    if InstallOrigin.isHomebrewCask(appBundleURL: bundleURL) {
+        return DisabledUpdaterController(unavailableReason: "Updates are managed by Homebrew for this installation.")
+    }
+
+    guard isDeveloperIDSigned(bundleURL: bundleURL) else {
+        return DisabledUpdaterController(unavailableReason: "Updates unavailable in this build.")
+    }
+
+    return SparkleUpdaterController(savedAutoUpdate: savedAutoUpdate)
+}
+#else
+@MainActor
+private func makeUpdaterController(savedAutoUpdate: Bool) -> any UpdaterProviding {
+    _ = savedAutoUpdate
+    return DisabledUpdaterController(unavailableReason: "Sparkle is not available in this build.")
+}
+#endif

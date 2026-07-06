@@ -53,9 +53,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     
     // Auto Update Preference
     private var isAutoUpdateEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: "auto_update_enabled") }
+        get { UpdateService.savedAutoUpdatePreference }
         set {
-            UserDefaults.standard.set(newValue, forKey: "auto_update_enabled")
+            UserDefaults.standard.set(newValue, forKey: UpdateService.autoUpdateDefaultsKey)
+            UpdateService.shared.configureAutoUpdate(enabled: newValue)
             updateMenu()
         }
     }
@@ -1081,6 +1082,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
         dropZoneWindow.parkHidden(under: statusItem)
         startDragProximityMonitoring()
+        UpdateService.shared.onStatusChange = { [weak self] in
+            self?.updateMenu()
+        }
+        UpdateService.shared.configureAutoUpdate(enabled: isAutoUpdateEnabled)
         
         loadDevices()
         migrateSelectionAndHistoryToV2IfNeeded()
@@ -2006,6 +2011,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         menu.addItem(settingsItem)
 
         menu.addItem(NSMenuItem.separator())
+
+        if UpdateService.shared.isUpdateReady {
+            let installUpdateItem = NSMenuItem(title: "Update ready, restart now?", action: #selector(installUpdate), keyEquivalent: "")
+            menu.addItem(installUpdateItem)
+        }
         
         // 7. VERSION & UPDATE
         let updateItem = NSMenuItem()
@@ -2301,11 +2311,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         // Perform an initial scan immediately
         discoveryService.triggerScan()
         
-        // Auto Update Check (if enabled)
-        if isAutoUpdateEnabled {
-            UpdateService.shared.checkUpdate(explicit: false)
-        }
-        
         // Start a 1-second timer for continuous scanning while menu is open
         menuScanTimer?.invalidate()
         menuScanTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -2470,6 +2475,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     @objc func manualCheckUpdate() {
         print("🚨 App: Manual update check triggered.")
         UpdateService.shared.checkUpdate(explicit: true)
+    }
+
+    @objc func installUpdate() {
+        UpdateService.shared.installUpdate()
     }
     
     @objc func toggleAutoUpdate(_ sender: NSMenuItem) {

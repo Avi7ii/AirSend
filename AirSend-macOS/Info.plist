@@ -14,6 +14,8 @@
     <string>350</string>
     <key>LSUIElement</key>
     <true/>
+    <key>LSMinimumSystemVersion</key>
+    <string>15.0</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>CFBundleExecutable</key>
@@ -34,5 +36,11 @@
     </dict>
     <key>CFBundleIconFile</key>
     <string>AppIcon.icns</string>
+    <key>SUFeedURL</key>
+    <string>https://raw.githubusercontent.com/Avi7ii/AirSend/main/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>cnTnkg1FvLIcHP5cM54ev8EncohRIA1hisQyACF8dOc=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
 </dict>
 </plist>

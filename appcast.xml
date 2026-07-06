@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+    <channel>
+        <title>AirSend Updates</title>
+        <link>https://github.com/Avi7ii/AirSend/releases</link>
+        <description>AirSend macOS app updates.</description>
+        <language>en</language>
+    </channel>
+</rss>

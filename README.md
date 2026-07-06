@@ -111,7 +111,7 @@ AirSend 3.0.0 新增了一个**默认关闭、需手动开启**的 `HTTP 兼容�
 
 | 平台                    | 要求                                                |
 | ----------------------- | --------------------------------------------------- |
-| macOS                   | macOS 13 Ventura 及以上                             |
+| macOS                   | macOS 15 Sequoia 及以上                             |
 | Android（基础文件传输） | Android 8.0+，安装官方 LocalSend 即可               |
 | Android（完整功能）     | Root 权限 + Magisk 或 KernelSU + LSPosed            |
 | 网络                    | 两端设备处于同一 Wi-Fi 局域网，路由器未开启 AP 隔离 |
@@ -135,7 +135,11 @@ AirSend 3.0.0 新增了一个**默认关闭、需手动开启**的 `HTTP 兼容�
 
 ### 📌 运行方式
 
-AirSend 完全运行在菜单栏，没有 Dock 图标，没有主窗口。启动后默认开机自启（通过 `SMAppService` 实现，macOS 13+）。
+AirSend 完全运行在菜单栏，没有 Dock 图标，没有主窗口。启动后默认开机自启（通过 `SMAppService` 实现，macOS 15+）。
+
+### 🔄 自动更新
+
+Mac 端使用 Sparkle 自动检查并下载新版本。更新下载完成后，菜单栏里会出现 **Update ready, restart now?** 提示；点击提示或底部更新卡片即可重启并安装，无需再手动从 GitHub 下载替换。
 
 ### 📂 拖拽发送文件
 
@@ -207,9 +211,9 @@ Android 端分两种模式：
 
 ### 💻 Step 1：部署 Mac 端
 
-1. 前往 [Releases 页面](https://github.com/Avi7ii/AirSend/releases/latest) 下载最新的 `AirSend.app`
+1. 首次安装时，前往 [Releases 页面](https://github.com/Avi7ii/AirSend/releases/latest) 下载最新的 `AirSend.app`
 2. 拖入 `/Applications` 文件夹并打开
-3. 右键菜单栏的纸飞机图标 → **「开机时启动」** → 开启
+3. 后续更新会在菜单栏自动提示，点击即可重启安装已下载的新版本
 
 ### 🤖 Step 2：部署 Android 端
 

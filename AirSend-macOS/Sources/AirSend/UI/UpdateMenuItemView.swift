@@ -4,11 +4,14 @@ class UpdateMenuItemView: NSView {
     private let containerView = NSView()
     private let iconContainer = NSView()
     private let titleLabel = NSTextField(labelWithString: "Check for Update")
-    private let versionLabel = NSTextField(labelWithString: "v\(UpdateService.shared.currentVersion)")
+    private let versionLabel = NSTextField(labelWithString: "")
+    private let updateService: UpdateService
     
-    init() {
+    init(updateService: UpdateService = .shared) {
+        self.updateService = updateService
         super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 56))
         setupUI()
+        refreshText()
     }
     
     required init?(coder: NSCoder) {
@@ -36,6 +39,8 @@ class UpdateMenuItemView: NSView {
         titleLabel.isSelectable = false
         titleLabel.isBezeled = false
         titleLabel.drawsBackground = false
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
         containerView.addSubview(titleLabel)
         
         // Version
@@ -60,11 +65,24 @@ class UpdateMenuItemView: NSView {
             iconContainer.heightAnchor.constraint(equalToConstant: 38),
             
             titleLabel.leadingAnchor.constraint(equalTo: iconContainer.trailingAnchor, constant: 12),
+            titleLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -12),
             titleLabel.centerYAnchor.constraint(equalTo: containerView.centerYAnchor, constant: -6),
             
             versionLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            versionLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
             versionLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2)
         ])
+    }
+
+    private func refreshText() {
+        if updateService.isUpdateReady {
+            titleLabel.stringValue = "Update ready, restart now?"
+            versionLabel.stringValue = "v\(updateService.currentVersion) downloaded"
+            return
+        }
+
+        titleLabel.stringValue = "Check for Update"
+        versionLabel.stringValue = "v\(updateService.currentVersion)"
     }
     
     override func viewDidMoveToWindow() {
@@ -102,8 +120,11 @@ class UpdateMenuItemView: NSView {
     }
     
     override func mouseUp(with event: NSEvent) {
-        // Direct click on the card triggers update
-        UpdateService.shared.checkUpdate(explicit: true)
+        if updateService.isUpdateReady {
+            updateService.installUpdate()
+        } else {
+            updateService.checkUpdate(explicit: true)
+        }
         
         // Close menu
         if let menu = self.enclosingMenuItem?.menu {

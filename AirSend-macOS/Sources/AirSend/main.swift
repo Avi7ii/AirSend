@@ -30,7 +30,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private var transferProgressMenuItem: NSMenuItem?
     private var menuScanTimer: Timer?
     private var isStatusMenuOpen = false
-    private var pendingDiscoveryMenuReopen = false
+    private var pendingStatusMenuRefresh = false
     private var settingsWindowController: AirSendSettingsWindowController?
     
     // 🔋 功耗优化：广播与清理定时器（连接设备后停止）
@@ -2070,24 +2070,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
     
     func updateMenu() {
+        guard !isStatusMenuOpen else {
+            pendingStatusMenuRefresh = true
+            updateWindowStatus()
+            refreshSettingsWindowIfNeeded()
+            return
+        }
+
         setupMenu()
         updateWindowStatus()
         refreshSettingsWindowIfNeeded()
     }
 
     private func refreshOpenMenuAfterDiscoveryIfNeeded(reason: String) {
-        guard isStatusMenuOpen, !pendingDiscoveryMenuReopen else { return }
-        guard let menu = statusItem.menu else { return }
-
-        pendingDiscoveryMenuReopen = true
-        logTransfer("🧭 Discovery UI refresh requested while menu is open (\(reason))")
-        menu.cancelTracking()
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
-            guard let self = self else { return }
-            self.pendingDiscoveryMenuReopen = false
-            self.statusItem.button?.performClick(nil)
-        }
+        guard isStatusMenuOpen else { return }
+        pendingStatusMenuRefresh = true
+        logTransfer("🧭 Discovery UI refresh deferred while menu is open (\(reason))")
     }
     
     @objc func sendClipboard() {
@@ -2339,6 +2337,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         print("📡 Menu: Closed. Stopping high-frequency scan.")
         menuScanTimer?.invalidate()
         menuScanTimer = nil
+        if pendingStatusMenuRefresh {
+            pendingStatusMenuRefresh = false
+            DispatchQueue.main.async { [weak self] in
+                self?.updateMenu()
+            }
+        }
     }
     
     @objc func deviceSelected(_ sender: NSMenuItem) {

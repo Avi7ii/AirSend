@@ -20,6 +20,22 @@ final class DropTargetView: NSView {
         registerForDraggedTypes(LocalFileDrag.acceptedTypes)
     }
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if let control = superview as? NSControl {
+            control.mouseDown(with: event)
+        } else {
+            super.mouseDown(with: event)
+        }
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        mouseDown(with: event)
+    }
+
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         let urls = LocalFileDrag.stageValidLocalFileURLs(from: sender.draggingPasteboard)
         guard !urls.isEmpty else {

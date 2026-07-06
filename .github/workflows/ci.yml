@@ -89,6 +89,10 @@ jobs:
         working-directory: AirSend-macOS
         run: swift run AirSendUpdaterSelfTests
 
+      - name: Run drag handoff self-tests
+        working-directory: AirSend-macOS
+        run: swift run AirSendDragHandoffSelfTests
+
       - name: Build Swift package
         working-directory: AirSend-macOS
         run: swift build

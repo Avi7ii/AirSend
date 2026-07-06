@@ -18,11 +18,15 @@ let package = Package(
         .target(
             name: "AirSendUpdater"
         ),
+        .target(
+            name: "AirSendDragHandoff"
+        ),
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
         .executableTarget(
             name: "AirSend",
             dependencies: [
+                "AirSendDragHandoff",
                 "AirSendUpdater",
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
@@ -44,6 +48,13 @@ let package = Package(
                 "AirSendUpdater",
             ],
             path: "Tests/AirSendUpdaterSelfTests"
+        ),
+        .executableTarget(
+            name: "AirSendDragHandoffSelfTests",
+            dependencies: [
+                "AirSendDragHandoff",
+            ],
+            path: "Tests/AirSendDragHandoffSelfTests"
         ),
     ]
 )

@@ -33,6 +33,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private var isStatusMenuOpen = false
     private var pendingStatusMenuRefresh = false
     private var settingsWindowController: AirSendSettingsWindowController?
+    private var recentConsoleActivities: [AirSendActivitySummary] = []
+    private let maxRecentConsoleActivities = 5
+    private let connectivityConsoleActivityTitles: Set<String> = [
+        "Device reachable",
+        "Device registered",
+        "Device discovered",
+        "Device updated",
+    ]
+    private var lastConsoleWarningAt: Date?
     
     // 🔋 功耗优化：广播与清理定时器（连接设备后停止）
     private var broadcastTimer: Timer?
@@ -391,6 +400,52 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
     }
 
+    private func recordConsoleActivity(
+        title: String,
+        detail: String,
+        symbolName: String,
+        tone: AirSendConsoleHealthTone = .neutral
+    ) {
+        let item = AirSendActivitySummary(
+            id: UUID().uuidString,
+            title: title,
+            detail: detail,
+            timeLabel: "just now",
+            symbolName: symbolName,
+            tone: tone
+        )
+        if connectivityConsoleActivityTitles.contains(title),
+           let existingIndex = recentConsoleActivities.firstIndex(where: {
+               connectivityConsoleActivityTitles.contains($0.title) && $0.detail == detail
+           }) {
+            recentConsoleActivities.remove(at: existingIndex)
+        }
+        recentConsoleActivities.insert(item, at: 0)
+        if recentConsoleActivities.count > maxRecentConsoleActivities {
+            recentConsoleActivities.removeLast(recentConsoleActivities.count - maxRecentConsoleActivities)
+        }
+        if tone == .warning {
+            lastConsoleWarningAt = Date()
+        }
+        refreshSettingsWindowIfNeeded()
+    }
+
+    private func consoleHealth(for visibleCount: Int) -> (title: String, detail: String, tone: AirSendConsoleHealthTone) {
+        if let lastConsoleWarningAt, Date().timeIntervalSince(lastConsoleWarningAt) < 300 {
+            return ("Needs attention", "Recent transfer or discovery issue", .warning)
+        }
+        if visibleCount > 0 {
+            return ("Ready", "\(visibleCount) device visible", .good)
+        }
+        return ("Searching", "No visible LAN devices", .neutral)
+    }
+
+    private var consolePreflightSummary: String {
+        preferredLocalProtocol == .http
+            ? "Last check: HTTP compatibility ready"
+            : "Last check: HTTPS preflight OK"
+    }
+
     private func makeSettingsSnapshot() -> AirSendSettingsSnapshot {
         let groups = buildDeviceGroups()
         let selectedGroup = groups.first(where: { $0.key == selectedDeviceGroupKey })
@@ -407,6 +462,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             selectedTitle = "Target Offline"
             selectedSubtitle = "Choose another device or rescan"
         }
+        let health = consoleHealth(for: groups.count)
 
         return AirSendSettingsSnapshot(
             autoClipboardSyncEnabled: isAutoClipboardSyncEnabled,
@@ -422,7 +478,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             protocolLabel: preferredLocalProtocol == .http ? "HTTP Compatibility" : "HTTPS Default",
             fingerprintSuffix: shortFingerprint(fingerprint),
             currentVersion: UpdateService.shared.currentVersion,
-            nearbyDevices: makeSettingsDeviceSummaries(from: groups)
+            nearbyDevices: makeSettingsDeviceSummaries(from: groups),
+            healthTitle: health.title,
+            healthDetail: health.detail,
+            healthTone: health.tone,
+            preflightSummary: consolePreflightSummary,
+            recentActivities: recentConsoleActivities
         )
     }
 
@@ -476,6 +537,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 },
                 openAndroidRepository: { [weak self] in
                     self?.openAndroidRepository()
+                },
+                runDiagnostics: { [weak self] in
+                    self?.runDiagnosticsFromConsole()
                 }
             )
         )
@@ -1171,6 +1235,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             do {
                 try await clipboardSender.sendText(text, to: candidate)
                 rememberSuccessfulDevice(candidate)
+                recordConsoleActivity(
+                    title: "Clipboard text sent",
+                    detail: displayTitle(for: group),
+                    symbolName: "doc.on.clipboard",
+                    tone: .good
+                )
                 return
             } catch {
                 lastError = error
@@ -1179,8 +1249,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
         
         if let error = lastError {
+            recordConsoleActivity(
+                title: "Clipboard send failed",
+                detail: displayTitle(for: group),
+                symbolName: "exclamationmark.triangle.fill",
+                tone: .warning
+            )
             throw error
         }
+        recordConsoleActivity(
+            title: "Clipboard send failed",
+            detail: "No candidates available",
+            symbolName: "exclamationmark.triangle.fill",
+            tone: .warning
+        )
         throw NSError(domain: "AirSend", code: -1, userInfo: [NSLocalizedDescriptionKey: "No candidates available"])
     }
     
@@ -1190,6 +1272,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             do {
                 try await clipboardSender.sendImage(imageData, to: candidate)
                 rememberSuccessfulDevice(candidate)
+                recordConsoleActivity(
+                    title: "Clipboard image sent",
+                    detail: displayTitle(for: group),
+                    symbolName: "photo",
+                    tone: .good
+                )
                 return
             } catch {
                 lastError = error
@@ -1198,8 +1286,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
         
         if let error = lastError {
+            recordConsoleActivity(
+                title: "Image send failed",
+                detail: displayTitle(for: group),
+                symbolName: "exclamationmark.triangle.fill",
+                tone: .warning
+            )
             throw error
         }
+        recordConsoleActivity(
+            title: "Image send failed",
+            detail: "No candidates available",
+            symbolName: "exclamationmark.triangle.fill",
+            tone: .warning
+        )
         throw NSError(domain: "AirSend", code: -1, userInfo: [NSLocalizedDescriptionKey: "No candidates available"])
     }
     
@@ -1210,6 +1310,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 logTransfer("App: Initiating send to \(candidate.alias) [\(candidate.ip)]")
                 try await fileSender.sendFiles(urls, to: candidate)
                 rememberSuccessfulDevice(candidate)
+                recordConsoleActivity(
+                    title: "Files sent",
+                    detail: "\(urls.count) item(s) · \(displayTitle(for: group))",
+                    symbolName: "paperplane.fill",
+                    tone: .good
+                )
                 return
             } catch {
                 lastError = error
@@ -1218,8 +1324,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
         
         if let error = lastError {
+            recordConsoleActivity(
+                title: "File send failed",
+                detail: displayTitle(for: group),
+                symbolName: "exclamationmark.triangle.fill",
+                tone: .warning
+            )
             throw error
         }
+        recordConsoleActivity(
+            title: "File send failed",
+            detail: "No candidates available",
+            symbolName: "exclamationmark.triangle.fill",
+            tone: .warning
+        )
         throw NSError(domain: "AirSend", code: -1, userInfo: [NSLocalizedDescriptionKey: "No candidates available"])
     }
     
@@ -1507,8 +1625,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         // Setup Reverse Discovery Callback
         await transferServer.setOnDeviceRegistered { [weak self] device in
             DispatchQueue.main.async {
-                self?.devices[device.id] = device
-                self?.updateMenu()
+                guard let self = self else { return }
+                self.devices[device.id] = device
+                self.recordConsoleActivity(
+                    title: "Device reachable",
+                    detail: "\(device.alias) · \(device.ip)",
+                    symbolName: "dot.radiowaves.left.and.right",
+                    tone: .good
+                )
+                self.updateMenu()
             }
         }
 
@@ -1583,6 +1708,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 logTransfer("🏁 [App] Incoming transfer complete. Success: \(success), Error: \(errorMsg ?? "nil")")
                 
                 if success {
+                    self.recordConsoleActivity(
+                        title: "Transfer received",
+                        detail: "Saved to Downloads",
+                        symbolName: "tray.and.arrow.down.fill",
+                        tone: .good
+                    )
                     self.dropZoneWindow.setStatusText("Saved!")
                     self.dropZoneWindow.showSuccess()
                     self.dropZoneWindow.show(under: self.statusItem)
@@ -1597,6 +1728,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     } else {
                         msg = "Failed"
                     }
+                    self.recordConsoleActivity(
+                        title: "Transfer failed",
+                        detail: errorMsg ?? "Incoming transfer failed",
+                        symbolName: "exclamationmark.triangle.fill",
+                        tone: .warning
+                    )
                     self.dropZoneWindow.showError(message: msg)
                     self.dropZoneWindow.show(under: self.statusItem)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
@@ -1620,6 +1757,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 logTransfer("🏁 [App] Campus fallback transfer complete. Success: \(success), Error: \(errorMsg ?? "nil")")
 
                 if success {
+                    self.recordConsoleActivity(
+                        title: "Transfer received",
+                        detail: "Saved to Downloads",
+                        symbolName: "tray.and.arrow.down.fill",
+                        tone: .good
+                    )
                     self.dropZoneWindow.setStatusText("Saved!")
                     self.dropZoneWindow.showSuccess()
                     self.dropZoneWindow.show(under: self.statusItem)
@@ -1634,6 +1777,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     } else {
                         msg = "Failed"
                     }
+                    self.recordConsoleActivity(
+                        title: "Transfer failed",
+                        detail: errorMsg ?? "Incoming transfer failed",
+                        symbolName: "exclamationmark.triangle.fill",
+                        tone: .warning
+                    )
                     self.dropZoneWindow.showError(message: msg)
                     self.dropZoneWindow.show(under: self.statusItem)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
@@ -1750,10 +1899,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 // Only rebuild UI when the device is new or its reachable endpoint changed.
                 if isNewDevice {
                     logTransfer("✅ Discovery: Found device [\(device.alias)] at \(device.ip):\(device.port)")
+                    self.recordConsoleActivity(
+                        title: "Device reachable",
+                        detail: "\(device.alias) · \(device.ip)",
+                        symbolName: "dot.radiowaves.left.and.right",
+                        tone: .good
+                    )
                     self.updateMenu()
                     self.refreshOpenMenuAfterDiscoveryIfNeeded(reason: "new-device")
                 } else if endpointChanged || metadataChanged {
                     logTransfer("🔁 Discovery: Updated device [\(device.alias)] -> \(device.ip):\(device.port)")
+                    self.recordConsoleActivity(
+                        title: "Device updated",
+                        detail: "\(device.alias) · \(device.ip)",
+                        symbolName: "arrow.triangle.2.circlepath",
+                        tone: .neutral
+                    )
                     self.updateMenu()
                     self.refreshOpenMenuAfterDiscoveryIfNeeded(reason: "endpoint-update")
                 }
@@ -2013,7 +2174,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         let launchItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin(_:)), keyEquivalent: "")
         launchItem.state = isLaunchAtLoginEnabled ? .on : .off
         menu.addItem(launchItem)
-        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettingsWindow(_:)), keyEquivalent: ",")
+        let settingsItem = NSMenuItem(title: "Open AirSend…", action: #selector(openSettingsWindow(_:)), keyEquivalent: ",")
         settingsItem.keyEquivalentModifierMask = [.command]
         menu.addItem(settingsItem)
 
@@ -2118,8 +2279,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
     }
 
-    private func performManualRescan(reopenMenu: Bool) {
+    private func performManualRescan(reopenMenu: Bool, recordActivity: Bool = true) {
         print("Manual scan triggered - preserving current discovery state")
+        if recordActivity {
+            recordConsoleActivity(
+                title: "Discovery refreshed",
+                detail: "Manual scan requested",
+                symbolName: "arrow.triangle.2.circlepath"
+            )
+        }
 
         discoveryService.probePreferredHosts(reason: "manual-refresh-preferred")
         discoveryService.triggerScan()
@@ -2128,6 +2296,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         DispatchQueue.main.async {
             self.statusItem.button?.performClick(nil)
         }
+    }
+
+    private func runDiagnosticsFromConsole() {
+        recordConsoleActivity(
+            title: "Diagnostics started",
+            detail: "Discovery scan requested",
+            symbolName: "wave.3.right",
+            tone: .neutral
+        )
+        performManualRescan(reopenMenu: false, recordActivity: false)
     }
 
     @objc func scanForDevices(_ sender: NSMenuItem) {
@@ -2293,6 +2471,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             enabled
                 ? "🌐 Compatibility mode toggled on. Future inbound LAN transfers will prefer plain HTTP."
                 : "🔐 Compatibility mode toggled off. Future inbound LAN transfers will prefer HTTPS."
+        )
+        recordConsoleActivity(
+            title: enabled ? "Compatibility mode enabled" : "HTTPS mode enabled",
+            detail: enabled ? "Local receiver prefers HTTP compatibility" : "Local receiver prefers HTTPS",
+            symbolName: "network",
+            tone: .neutral
         )
 
         Task { @MainActor in

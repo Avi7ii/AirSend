@@ -16,6 +16,21 @@ struct AirSendSettingsDeviceSummary: Identifiable, Hashable {
     let isSelected: Bool
 }
 
+enum AirSendConsoleHealthTone: String, Hashable {
+    case good
+    case warning
+    case neutral
+}
+
+struct AirSendActivitySummary: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let detail: String
+    let timeLabel: String
+    let symbolName: String
+    let tone: AirSendConsoleHealthTone
+}
+
 struct AirSendSettingsSnapshot {
     var autoClipboardSyncEnabled: Bool
     var autoScreenshotSyncEnabled: Bool
@@ -31,6 +46,11 @@ struct AirSendSettingsSnapshot {
     var fingerprintSuffix: String
     var currentVersion: String
     var nearbyDevices: [AirSendSettingsDeviceSummary]
+    var healthTitle: String
+    var healthDetail: String
+    var healthTone: AirSendConsoleHealthTone
+    var preflightSummary: String
+    var recentActivities: [AirSendActivitySummary]
 }
 
 @MainActor
@@ -50,6 +70,7 @@ final class AirSendSettingsStore: ObservableObject {
         let selectBroadcastTarget: () -> Void
         let selectDeviceTarget: (String) -> Void
         let openAndroidRepository: () -> Void
+        let runDiagnostics: () -> Void
     }
 
     @Published private(set) var snapshot: AirSendSettingsSnapshot
@@ -100,7 +121,7 @@ final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegat
             hostingView.bottomAnchor.constraint(equalTo: glassContainerView.bottomAnchor),
         ])
         window.contentView = glassContainerView
-        window.title = "AirSend Settings"
+        window.title = "AirSend"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .none
@@ -136,7 +157,7 @@ final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegat
 private final class AirSendSettingsGlassContainerView: NSVisualEffectView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        material = .sidebar
+        material = .titlebar
         blendingMode = .behindWindow
         state = .active
         isEmphasized = false

@@ -2,8 +2,10 @@ import SwiftUI
 
 private enum AirSendSettingsCategory: String, CaseIterable, Identifiable {
     case devices
-    case sync
-    case advanced
+    case transfers
+    case clipboard
+    case diagnostics
+    case settings
 
     var id: String { rawValue }
 
@@ -11,21 +13,29 @@ private enum AirSendSettingsCategory: String, CaseIterable, Identifiable {
         switch self {
         case .devices:
             return "Devices"
-        case .sync:
-            return "Sync"
-        case .advanced:
-            return "Advanced"
+        case .transfers:
+            return "Transfers"
+        case .clipboard:
+            return "Clipboard"
+        case .diagnostics:
+            return "Diagnostics"
+        case .settings:
+            return "Settings"
         }
     }
 
     var subtitle: String {
         switch self {
         case .devices:
-            return "Targets, discovery, and quick device actions."
-        case .sync:
-            return "Clipboard and screenshot behavior."
-        case .advanced:
-            return "Network, launch behavior, and receiver identity."
+            return "Targets, discovery, health, and recent AirSend activity."
+        case .transfers:
+            return "Recent file transfer state and progress."
+        case .clipboard:
+            return "Clipboard text, images, and manual sync actions."
+        case .diagnostics:
+            return "Network health, receiver status, and troubleshooting."
+        case .settings:
+            return "Network, launch behavior, updates, and identity."
         }
     }
 
@@ -33,9 +43,13 @@ private enum AirSendSettingsCategory: String, CaseIterable, Identifiable {
         switch self {
         case .devices:
             return "macbook.and.iphone"
-        case .sync:
+        case .transfers:
+            return "arrow.left.arrow.right"
+        case .clipboard:
             return "arrow.triangle.2.circlepath"
-        case .advanced:
+        case .diagnostics:
+            return "stethoscope"
+        case .settings:
             return "slider.horizontal.3"
         }
     }
@@ -61,9 +75,10 @@ struct AirSendSettingsView: View {
         HStack(spacing: 0) {
             sidebar
                 .frame(width: 210)
+                .background(Color.black.opacity(0.01))
 
             Divider()
-                .overlay(.separator.opacity(0.45))
+                .overlay(.separator.opacity(0.55))
 
             detail
         }
@@ -82,7 +97,7 @@ struct AirSendSettingsView: View {
                         Text("AirSend")
                             .font(.title3)
                             .fontWeight(.semibold)
-                        Text("Settings")
+                        Text("Console")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -148,8 +163,11 @@ struct AirSendSettingsView: View {
         switch category {
         case .devices:
             VStack(alignment: .leading, spacing: 14) {
-                SettingsCard(title: "Current Target") {
-                    SettingsCurrentTargetRow(snapshot: snapshot)
+                SettingsCard(title: "Connection") {
+                    SettingsConnectionOverviewRow(
+                        snapshot: snapshot,
+                        action: { store.actions.runDiagnostics() }
+                    )
                 }
 
                 SettingsCard(title: "LAN Devices") {
@@ -173,19 +191,46 @@ struct AirSendSettingsView: View {
                     }
                 }
 
-                SettingsCard(title: "Actions") {
-                    SettingsButtonRow(
-                        primaryTitle: "Rescan",
-                        primaryAction: { store.actions.rescan() },
-                        secondaryTitle: "Add by IP",
-                        secondaryAction: { store.actions.addDeviceByIP() },
-                        tertiaryTitle: "Broadcast",
-                        tertiaryAction: { store.actions.selectBroadcastTarget() }
-                    )
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 14) {
+                        quickActionsCard
+                        recentActivityCard
+                    }
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        quickActionsCard
+                        recentActivityCard
+                    }
                 }
             }
 
-        case .sync:
+        case .transfers:
+            VStack(alignment: .leading, spacing: 14) {
+                SettingsCard(title: "Recent Status") {
+                    if snapshot.recentActivities.isEmpty {
+                        SettingsEmptyStateRow(
+                            title: "No recent transfers",
+                            message: "Sent and received activity will appear here."
+                        )
+                    } else {
+                        SettingsActivityList(
+                            activities: snapshot.recentActivities,
+                            maximumVisibleRows: 4
+                        )
+                    }
+                }
+
+                SettingsCard(title: "Target") {
+                    SettingsValueRow(
+                        title: "Current target",
+                        value: snapshot.selectedTargetTitle,
+                        detail: snapshot.selectedTargetSubtitle
+                    )
+                    SettingsValueRow(title: "Transport", value: snapshot.protocolLabel)
+                }
+            }
+
+        case .clipboard:
             VStack(alignment: .leading, spacing: 14) {
                 SettingsCard(title: "Automatic Sync") {
                     SettingsToggleRow(
@@ -221,7 +266,35 @@ struct AirSendSettingsView: View {
                 }
             }
 
-        case .advanced:
+        case .diagnostics:
+            VStack(alignment: .leading, spacing: 14) {
+                SettingsCard(title: "Network Health") {
+                    SettingsHealthStatusRow(
+                        snapshot: snapshot,
+                        action: { store.actions.runDiagnostics() }
+                    )
+                }
+
+                SettingsCard(title: "Preflight") {
+                    SettingsValueRow(title: "Network check", value: snapshot.preflightSummary)
+                    SettingsValueRow(title: "Visible devices", value: "\(snapshot.nearbyDevices.count)")
+                    SettingsValueRow(title: "Remembered devices", value: "\(snapshot.rememberedDeviceCount)")
+                    SettingsValueRow(title: "Receiver fingerprint", value: snapshot.fingerprintSuffix)
+                }
+
+                SettingsCard(title: "Troubleshooting") {
+                    SettingsButtonRow(
+                        primaryTitle: "Run Diagnostics",
+                        primaryAction: { store.actions.runDiagnostics() },
+                        secondaryTitle: "Rescan LAN",
+                        secondaryAction: { store.actions.rescan() },
+                        tertiaryTitle: "Clear Devices",
+                        tertiaryAction: { store.actions.clearDiscoveredDevices() }
+                    )
+                }
+            }
+
+        case .settings:
             VStack(alignment: .leading, spacing: 14) {
                 SettingsCard(title: "Network") {
                     SettingsToggleRow(
@@ -273,6 +346,37 @@ struct AirSendSettingsView: View {
             }
         }
     }
+
+    private var quickActionsCard: some View {
+        SettingsCard(title: "Quick Actions") {
+            SettingsButtonRow(
+                primaryTitle: "Rescan",
+                primaryAction: { store.actions.rescan() },
+                secondaryTitle: "Add by IP",
+                secondaryAction: { store.actions.addDeviceByIP() },
+                tertiaryTitle: "Broadcast",
+                tertiaryAction: { store.actions.selectBroadcastTarget() }
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var recentActivityCard: some View {
+        SettingsCard(title: "Recent Activity") {
+            if snapshot.recentActivities.isEmpty {
+                SettingsEmptyStateRow(
+                    title: "No recent activity",
+                    message: "Discovery, transfers, and diagnostics will appear here."
+                )
+            } else {
+                SettingsActivityList(
+                    activities: snapshot.recentActivities,
+                    maximumVisibleRows: 3
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
 }
 
 private struct WindowDragSurface: View {
@@ -317,10 +421,10 @@ private struct SettingsSidebarButtonStyle: ButtonStyle {
 
     private func background(for isPressed: Bool) -> some ShapeStyle {
         if isPressed {
-            return AnyShapeStyle(.white.opacity(0.11))
+            return AnyShapeStyle(.white.opacity(0.055))
         }
         if isSelected {
-            return AnyShapeStyle(.white.opacity(0.075))
+            return AnyShapeStyle(.white.opacity(0.065))
         }
         return AnyShapeStyle(.clear)
     }
@@ -341,13 +445,225 @@ private struct SettingsCard<Content: View>: View {
             }
             .background(
                 RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .fill(.white.opacity(0.035))
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                .white.opacity(0.030),
+                                .black.opacity(0.035),
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .strokeBorder(.white.opacity(0.06), lineWidth: 1)
+                    .strokeBorder(.white.opacity(0.09), lineWidth: 1)
             }
         }
+    }
+}
+
+private struct SettingsHealthStatusRow: View {
+    let snapshot: AirSendSettingsSnapshot
+    let action: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(snapshot.healthTone.tintColor.opacity(0.14))
+                    .frame(width: 42, height: 42)
+
+                Image(systemName: snapshot.healthTone.statusSymbolName)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(snapshot.healthTone.tintColor)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(snapshot.healthTitle)
+                        .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(1)
+
+                    SettingsBadge(title: snapshot.protocolLabel, tone: .neutral)
+                }
+
+                Text(snapshot.healthDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(snapshot.preflightSummary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 12)
+
+            Button("Run Diagnostics", action: action)
+                .buttonStyle(.bordered)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+}
+
+private struct SettingsConnectionOverviewRow: View {
+    let snapshot: AirSendSettingsSnapshot
+    let action: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 18) {
+                statusBlock
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
+
+                targetBlock
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
+
+                Button("Run Diagnostics", action: action)
+                    .buttonStyle(.bordered)
+                    .fixedSize()
+            }
+
+            HStack(spacing: 8) {
+                SettingsMetricChip(title: "Visible", value: "\(snapshot.nearbyDevices.count)")
+                SettingsMetricChip(title: "Remembered", value: "\(snapshot.rememberedDeviceCount)")
+                SettingsMetricChip(title: "Transport", value: snapshot.protocolLabel)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    private var statusBlock: some View {
+        HStack(spacing: 12) {
+            SettingsGlowIcon(
+                symbolName: snapshot.healthTone.connectionSymbolName,
+                tint: snapshot.healthTone.tintColor,
+                size: 40,
+                cornerRadius: 13
+            )
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(snapshot.healthTitle)
+                        .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(1)
+
+                    SettingsBadge(title: snapshot.protocolLabel, tone: .neutral)
+                }
+
+                Text(snapshot.healthDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Text(snapshot.preflightSummary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var targetBlock: some View {
+        HStack(spacing: 12) {
+            SettingsGlowIcon(
+                symbolName: snapshot.selectedTargetIsBroadcast ? "square.grid.2x2.fill" : "dot.radiowaves.left.and.right",
+                tint: Color(nsColor: .systemBlue),
+                size: 40,
+                cornerRadius: 13
+            )
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(snapshot.selectedTargetTitle)
+                        .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(1)
+
+                    if snapshot.selectedTargetIsBroadcast {
+                        SettingsBadge(title: "Broadcast", tone: .neutral)
+                    }
+                }
+
+                Text(snapshot.selectedTargetSubtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
+            }
+        }
+    }
+}
+
+private struct SettingsGlowIcon: View {
+    let symbolName: String
+    let tint: Color
+    let size: CGFloat
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(.black.opacity(0.14))
+
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(tint.opacity(0.018))
+
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            tint.opacity(0.20),
+                            tint.opacity(0.08),
+                            .clear,
+                        ],
+                        center: .center,
+                        startRadius: 1,
+                        endRadius: size * 0.38
+                    )
+                )
+                .frame(width: size * 0.78, height: size * 0.78)
+                .blur(radius: 2.5)
+
+            Image(systemName: symbolName)
+                .font(.system(size: size * 0.42, weight: .medium))
+                .foregroundStyle(tint.opacity(0.42))
+                .symbolRenderingMode(.monochrome)
+                .blur(radius: 1.2)
+
+            Image(systemName: symbolName)
+                .font(.system(size: size * 0.42, weight: .medium))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [
+                            tint.opacity(0.98),
+                            tint.opacity(0.72),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .symbolRenderingMode(.monochrome)
+
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            .white.opacity(0.035),
+                            .white.opacity(0.012),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 0.6
+                )
+        }
+        .frame(width: size, height: size)
+        .clipped()
     }
 }
 
@@ -546,6 +862,107 @@ private struct SettingsDeviceRow: View {
 
     private var peerProtocolTitle: String {
         isCompatibilityModeEnabled ? "Compatibility Mode" : "HTTPS Mode"
+    }
+}
+
+private struct SettingsActivityRow: View {
+    let activity: AirSendActivitySummary
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(activity.tone.tintColor.opacity(0.12))
+                    .frame(width: 28, height: 28)
+
+                Image(systemName: activity.symbolName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(activity.tone.tintColor)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(activity.title)
+                    .font(.system(size: 12, weight: .semibold))
+
+                Text(activity.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 8)
+
+            Text(activity.timeLabel)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(.separator.opacity(0.24))
+                .frame(height: 1)
+        }
+    }
+}
+
+private struct SettingsActivityList: View {
+    let activities: [AirSendActivitySummary]
+    let maximumVisibleRows: Int
+
+    var body: some View {
+        if activities.count > maximumVisibleRows {
+            ScrollView(.vertical, showsIndicators: true) {
+                activityRows
+            }
+            .frame(height: CGFloat(maximumVisibleRows) * 64)
+        } else {
+            activityRows
+        }
+    }
+
+    private var activityRows: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(activities) { activity in
+                SettingsActivityRow(activity: activity)
+            }
+        }
+    }
+}
+
+private extension AirSendConsoleHealthTone {
+    var tintColor: Color {
+        switch self {
+        case .good:
+            return Color(nsColor: .systemGreen)
+        case .warning:
+            return Color(nsColor: .systemOrange)
+        case .neutral:
+            return Color(nsColor: .systemBlue)
+        }
+    }
+
+    var statusSymbolName: String {
+        switch self {
+        case .good:
+            return "checkmark.seal.fill"
+        case .warning:
+            return "exclamationmark.triangle.fill"
+        case .neutral:
+            return "wave.3.right"
+        }
+    }
+
+    var connectionSymbolName: String {
+        switch self {
+        case .good:
+            return "checkmark.seal"
+        case .warning:
+            return "exclamationmark.triangle"
+        case .neutral:
+            return "wave.3.right"
+        }
     }
 }
 

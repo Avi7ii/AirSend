@@ -1,0 +1,151 @@
+# Google Maven
+# https://maven.google.com/web/index.html?hl=zh-cn
+
+# Gradle Plugins
+# https://plugins.gradle.org/
+
+# Maven
+# https://mvnrepository.com/
+
+[versions]
+agp = "9.2.1"
+apksig = "9.2.1"
+biometric = "1.4.0-alpha07"
+focusApi = "1.4"
+kotlin = "2.4.0"
+ksp = "2.3.9"
+composeBom = "2026.06.01"
+compose = "1.11.4"
+splashScreen = "1.2.0"
+material3 = "1.5.0-alpha23"
+room = "3.0.0"
+ktx-serialization = "1.11.0"
+rikka-shizuku = "13.1.5"
+koin-bom = "4.2.2"
+datastore = "1.2.1"
+aboutLibraries = "15.0.3"
+appiconloader = "1.5.0"
+androidx-annotation = "1.10.0"
+timber = "5.0.1"
+miuix = "0.9.2-811f4ded-SNAPSHOT"
+okhttp = "5.4.0"
+monetcompat = "0.4.1"
+materialKolor = "5.0.0-alpha07"
+navigation3 = "1.1.4"
+navigationevent = "1.1.2"
+lifecycle = "2.11.0"
+junit = "1.3.0"
+espressoCore = "3.7.0"
+uiautomator = "2.4.0"
+benchmarkMacroJunit4 = "1.4.1"
+baselineprofile = "1.5.0-alpha07"
+profileinstaller = "1.4.1"
+appcompat = "1.6.1"
+
+[plugins]
+installerx-application = { id = "installerx.android.application" }
+installerx-library = { id = "installerx.android.library" }
+installerx-test = { id = "installerx.android.test" }
+
+agp-lib = { id = "com.android.library", version.ref = "agp" }
+agp-app = { id = "com.android.application", version.ref = "agp" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+room = { id = "androidx.room3", version.ref = "room" }
+compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+aboutLibraries = { id = "com.mikepenz.aboutlibraries.plugin", version.ref = "aboutLibraries" }
+android-test = { id = "com.android.test", version.ref = "agp" }
+baselineprofile = { id = "androidx.baselineprofile", version.ref = "baselineprofile" }
+
+[libraries]
+android-gradle-plugin = { module = "com.android.tools.build:gradle", version.ref = "agp" }
+android-tools-apksig = { module = "com.android.tools.build:apksig", version.ref = "apksig" }
+kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "biometric" }
+androidx-annotation = { group = "androidx.annotation", name = "annotation", version.ref = "androidx-annotation" }
+androidx-core = { group = "androidx.core", name = "core-ktx", version = "1.19.0" }
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version = "1.13.0" }
+androidx-lifecycle = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
+androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
+androidx-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "splashScreen" }
+
+focus-api = { module = "com.xzakota.hyper.notification:focus-api", version.ref = "focusApi" }
+compose-ui = { group = "androidx.compose.ui", name = "ui", version.ref = "compose" }
+compose-ui-graphics = { module = "androidx.compose.ui:ui-graphics", version.ref = "compose" }
+compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling", version.ref = "compose" }
+compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview", version.ref = "compose" }
+compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest", version.ref = "compose" }
+compose-material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3" }
+androidx-lifecycle-viewmodel-navigation3 = { module = "androidx.lifecycle:lifecycle-viewmodel-navigation3", version.ref = "lifecycle" }
+androidx-navigation3-runtime = { module = "androidx.navigation3:navigation3-runtime", version.ref = "navigation3" }
+androidx-navigationevent = { module = "androidx.navigationevent:navigationevent", version.ref = "navigationevent" }
+
+compose-materialIcons = { group = "androidx.compose.material", name = "material-icons-extended", version = "1.7.8" }
+
+room-runtime = { group = "androidx.room3", name = "room3-runtime", version.ref = "room" }
+room-compiler = { group = "androidx.room3", name = "room3-compiler", version.ref = "room" }
+
+# Kotlin Serialization
+# https://github.com/Kotlin/kotlinx.serialization/blob/master/README.md#setup
+# https://github.com/Kotlin/kotlinx.serialization/blob/master/formats/README.md
+ktx-serializationJson = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "ktx-serialization" }
+# AndroidHiddenApiBypass
+# https://github.com/LSPosed/AndroidHiddenApiBypass
+hiddenapibypass = { group = "org.lsposed.hiddenapibypass", name = "hiddenapibypass", version = "6.1" }
+commons-cli = { group = "commons-cli", name = "commons-cli", version = "1.11.0" }
+
+# Koin Inject
+# https://insert-koin.io/docs/setup/koin
+koin-bom = { module = "io.insert-koin:koin-bom", version.ref = "koin-bom" }
+koin-core = { module = "io.insert-koin:koin-core" }
+koin-android = { group = "io.insert-koin", name = "koin-android" }
+koin-compose = { group = "io.insert-koin", name = "koin-androidx-compose" }
+koin-compose-viewmodel = { group = "io.insert-koin", name = "koin-compose-viewmodel" }
+
+# Rikka Shizuku
+# https://github.com/RikkaApps/Shizuku-API
+rikka-shizuku-api = { group = "dev.rikka.shizuku", name = "api", version.ref = "rikka-shizuku" }
+rikka-shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref = "rikka-shizuku" }
+
+# AppIconLoader
+appiconloader = { module = "me.zhanghai.android.appiconloader:appiconloader", version.ref = "appiconloader" }
+
+# Dhizuku-API
+# https://github.com/iamr0s/Dhizuku-API
+iamr0s-dhizuku-api = { group = "io.github.iamr0s", name = "Dhizuku-API", version = "2.6.0" }
+
+# Core module (required for accessing library data)
+aboutlibraries-core = { module = "com.mikepenz:aboutlibraries-core", version.ref = "aboutLibraries" }
+# Compose UI modules (choose one or both)
+aboutlibraries-compose-m3 = { module = "com.mikepenz:aboutlibraries-compose-m3", version.ref = "aboutLibraries" } # Material 3 UI
+
+# log
+timber = { group = "com.jakewharton.timber", name = "timber", version.ref = "timber" }
+
+# miuix
+miuix-core = { group = "top.yukonga.miuix.kmp", name = "miuix-core-android", version.ref = "miuix" }
+miuix-ui = { group = "top.yukonga.miuix.kmp", name = "miuix-ui-android", version.ref = "miuix" }
+miuix-shader = { group = "top.yukonga.miuix.kmp", name = "miuix-shader-android", version.ref = "miuix" }
+miuix-blur = { group = "top.yukonga.miuix.kmp", name = "miuix-blur-android", version.ref = "miuix" }
+miuix-preference = { group = "top.yukonga.miuix.kmp", name = "miuix-preference-android", version.ref = "miuix" }
+miuix-icons = { group = "top.yukonga.miuix.kmp", name = "miuix-icons-android", version.ref = "miuix" }
+miuix-navigation = { group = "top.yukonga.miuix.kmp", name = "miuix-navigation3-ui-android", version.ref = "miuix" }
+
+# okhttp
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp" }
+okhttp-bom = { module = "com.squareup.okhttp3:okhttp-bom", version.ref = "okhttp" }
+
+# MonetCompat
+# https://github.com/KieronQuinn/MonetCompat
+monetcompat = { module = "com.github.KieronQuinn:MonetCompat", version.ref = "monetcompat" }
+androidx-palette = { group = "androidx.palette", name = "palette", version = "1.0.0" }
+
+materialKolor = { module = "com.materialkolor:material-kolor", version.ref = "materialKolor" }
+
+androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junit" }
+androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
+androidx-uiautomator = { group = "androidx.test.uiautomator", name = "uiautomator", version.ref = "uiautomator" }
+androidx-benchmark-macro-junit4 = { group = "androidx.benchmark", name = "benchmark-macro-junit4", version.ref = "benchmarkMacroJunit4" }
+androidx-profileinstaller = { group = "androidx.profileinstaller", name = "profileinstaller", version.ref = "profileinstaller" }

@@ -1,0 +1,100 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2025-2026 InstallerX Revived contributors
+package com.rosan.installer.di
+
+import com.rosan.installer.framework.privileged.provider.AppOpsProviderImpl
+import com.rosan.installer.framework.privileged.provider.ComponentOpsProviderImpl
+import com.rosan.installer.framework.privileged.provider.PermissionProviderImpl
+import com.rosan.installer.framework.privileged.provider.PostInstallTaskProviderImpl
+import com.rosan.installer.framework.privileged.provider.SessionDetailsProviderImpl
+import com.rosan.installer.framework.privileged.provider.ShellExecutionProviderImpl
+import com.rosan.installer.framework.privileged.provider.SystemInfoProviderImpl
+import com.rosan.installer.framework.privileged.core.infrastructure.lifecycle.RecyclerManager
+import com.rosan.installer.framework.privileged.core.infrastructure.recycler.AppProcessRecycler
+import com.rosan.installer.framework.privileged.core.infrastructure.recycler.ProcessHookRecycler
+import com.rosan.installer.framework.privileged.core.infrastructure.recycler.ProcessUserServiceRecycler
+import com.rosan.installer.framework.privileged.core.infrastructure.recycler.ShizukuHookRecycler
+import com.rosan.installer.framework.privileged.core.infrastructure.recycler.ShizukuUserServiceRecycler
+import com.rosan.installer.framework.privileged.core.infrastructure.process.AppProcessTerminal
+import com.rosan.installer.framework.service.AutoLockService
+import com.rosan.installer.domain.privileged.provider.AppOpsProvider
+import com.rosan.installer.domain.privileged.provider.ComponentOpsProvider
+import com.rosan.installer.domain.engine.provider.SessionDetailsProvider
+import com.rosan.installer.domain.privileged.provider.PermissionProvider
+import com.rosan.installer.domain.privileged.provider.PostInstallTaskProvider
+import com.rosan.installer.domain.privileged.provider.ShellExecutionProvider
+import com.rosan.installer.domain.privileged.provider.SystemInfoProvider
+import com.rosan.installer.domain.privileged.usecase.GetAvailableUsersUseCase
+import com.rosan.installer.domain.privileged.usecase.OpenAppUseCase
+import com.rosan.installer.domain.privileged.usecase.OpenLSPosedUseCase
+import org.koin.core.module.dsl.bind
+import org.koin.core.module.dsl.factoryOf
+import org.koin.core.module.dsl.singleOf
+import org.koin.core.qualifier.named
+import org.koin.dsl.module
+
+object RecyclerNames {
+    val APP_PROCESS = named("AppProcessManager")
+    val USER_SERVICE = named("ProcessUserServiceManager")
+}
+
+val privilegedModule = module {
+    // Providers
+    singleOf(::AppOpsProviderImpl) { bind<AppOpsProvider>() }
+    singleOf(::ComponentOpsProviderImpl) { bind<ComponentOpsProvider>() }
+    singleOf(::PermissionProviderImpl) { bind<PermissionProvider>() }
+    singleOf(::ShellExecutionProviderImpl) { bind<ShellExecutionProvider>() }
+    singleOf(::PostInstallTaskProviderImpl) { bind<PostInstallTaskProvider>() }
+    singleOf(::SystemInfoProviderImpl) { bind<SystemInfoProvider>() }
+    singleOf(::SessionDetailsProviderImpl) { bind<SessionDetailsProvider>() }
+
+    // Services
+    singleOf(::AutoLockService)
+
+    // UseCases
+    factoryOf(::OpenAppUseCase)
+    factoryOf(::OpenLSPosedUseCase)
+    factoryOf(::GetAvailableUsersUseCase)
+
+    // Recycler Infrastructure
+
+    // 1. Recycler Managers (Singletons)
+    // Add named qualifier to distinguish this manager
+    single(RecyclerNames.APP_PROCESS) {
+        RecyclerManager<AppProcessTerminal, AppProcessRecycler> { terminal ->
+            AppProcessRecycler(terminal)
+        }
+    }
+
+    // Add named qualifier to distinguish this manager
+    single(RecyclerNames.USER_SERVICE) {
+        RecyclerManager<AppProcessTerminal, ProcessUserServiceRecycler> { terminal ->
+            ProcessUserServiceRecycler(
+                terminal = terminal,
+                context = get(),
+                appProcessRecyclerManager = get(RecyclerNames.APP_PROCESS)
+            )
+        }
+    }
+
+    // 2. Stateless / Permission-based Recyclers (Singletons)
+    // Replaces the old 'object' declarations. Koin now manages their lifecycle.
+    single {
+        ShizukuUserServiceRecycler(
+            context = get(),
+            serviceClass = ShizukuUserServiceRecycler.ShizukuUserService::class.java,
+            processNameSuffix = "shizuku_privileged"
+        )
+    }
+    singleOf(::ShizukuHookRecycler)
+
+    // 3. Shell-dependent Recyclers (Factories)
+    // Created dynamically on demand based on the requested shell.
+    factory { (terminal: AppProcessTerminal) ->
+        ProcessHookRecycler(
+            terminal = terminal,
+            context = get(),
+            appProcessRecyclerManager = get(RecyclerNames.APP_PROCESS)
+        )
+    }
+}

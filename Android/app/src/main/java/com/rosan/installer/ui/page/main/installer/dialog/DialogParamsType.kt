@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2023-2026 iamr0s, InstallerX Revived contributors
+package com.rosan.installer.ui.page.main.installer.dialog
+
+sealed class DialogParamsType(val id: String) {
+    data object IconWorking : DialogParamsType("icon_working")
+    data object IconError : DialogParamsType("icon_pausing")
+    data object IconMenu : DialogParamsType("icon_menu")
+
+    data object ButtonsCancel : DialogParamsType("buttons_cancel")
+
+    data object InstallerResolving : DialogParamsType("installer_resolving")
+    data object InstallerResolveFailed : DialogParamsType("installer_resolve_failed")
+    data object InstallerPreparing : DialogParamsType("installer_preparing")
+    data object InstallerAnalysing : DialogParamsType("installer_analysing")
+    data object InstallerAnalyseFailed : DialogParamsType("installer_analyse_failed")
+    data object InstallChoice : DialogParamsType("installer_choice")
+    data object InstallExtendedMenu : DialogParamsType("installer_extended_menu")
+    data object InstallExtendedSubMenu : DialogParamsType("install_extended_sub_menu")
+    data object InstallerPrepare : DialogParamsType("installer_prepare")
+    data object InstallerPrepareEmpty : DialogParamsType("installer_prepare_empty")
+    data object InstallerPrepareTooMany : DialogParamsType("installer_prepare_too_many")
+    data object InstallerInfo : DialogParamsType("installer_info")
+    data object InstallerPrepareInstall : DialogParamsType("installer_prepare")
+    data object InstallerInstalling : DialogParamsType("installer_installing")
+    data object InstallerUnknownSource : DialogParamsType("installer_unknown_source")
+    data object InstallerInstallSuccess : DialogParamsType("install_success")
+    data object InstallerInstallFailed : DialogParamsType("install_failed")
+    data object InstallerInstallCompleted : DialogParamsType("install_completed")
+    data object InstallerConfirm : DialogParamsType("installer_confirm")
+    data object InstallerUninstallInfo : DialogParamsType("uninstaller_info")
+    data object InstallerUninstallReady : DialogParamsType("uninstaller_ready")
+    data object InstallerUninstallSuccess : DialogParamsType("uninstaller_uninstall_success")
+    data object InstallerUninstallFailed : DialogParamsType("uninstaller_uninstall_failed")
+    data object InstallerUnarchiveReady : DialogParamsType("unarchive_ready")
+    data object InstallerUnarchiveError : DialogParamsType("unarchive_error")
+    data object InstallerUnarchiving : DialogParamsType("unarchiving")
+}

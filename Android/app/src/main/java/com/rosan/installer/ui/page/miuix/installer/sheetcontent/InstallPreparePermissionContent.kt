@@ -1,0 +1,102 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2025-2026 InstallerX Revived contributors
+package com.rosan.installer.ui.page.miuix.installer.sheetcontent
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.toMutableStateList
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.rosan.installer.R
+import com.rosan.installer.domain.engine.model.packageinfo.AppEntity
+import com.rosan.installer.domain.engine.model.packageinfo.sortedBest
+import com.rosan.installer.ui.page.main.installer.InstallerViewModel
+import com.rosan.installer.ui.theme.miuixSheetCardColors
+import com.rosan.installer.ui.util.isGestureNavigation
+import com.rosan.installer.util.pm.getBestPermissionLabel
+import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.TextButton
+
+@Composable
+fun InstallPreparePermissionContent(
+    viewModel: InstallerViewModel,
+    onBack: () -> Unit
+) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val currentPackageName = uiState.currentPackageName
+    val currentPackage = uiState.analysisResults.find { it.packageName == currentPackageName }
+
+    val entity = currentPackage?.appEntities
+        ?.filter { it.selected }
+        ?.map { it.app }
+        ?.sortedBest()
+        ?.firstOrNull()
+    val permissionList = remember(entity) {
+        (entity as? AppEntity.BaseEntity)?.permissions?.sorted()?.toMutableStateList()
+            ?: mutableStateListOf()
+    }
+
+    BackHandler {
+        onBack()
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f, fill = false)
+                .padding(vertical = 6.dp),
+            colors = miuixSheetCardColors()
+        ) {
+            LazyColumn {
+                items(permissionList) { permission ->
+                    val context = LocalContext.current
+                    val permissionLabel = remember(permission) {
+                        context.getBestPermissionLabel(permission)
+                    }
+
+                    BasicComponent(
+                        title = permissionLabel,
+                        summary = permission
+                    )
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(top = 24.dp, bottom = if (isGestureNavigation()) 24.dp else 0.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(
+                onClick = onBack,
+                text = stringResource(R.string.back),
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}

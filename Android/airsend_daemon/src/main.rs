@@ -44,8 +44,10 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tracing_subscriber::fmt::format::FmtSpan;
 
+mod config;
 mod protocol;
 
+use config::ConfigStore;
 use protocol::{LegacyCommand, ParsedLine};
 
 const UDS_PATH: &str = "\0airsend_ipc";
@@ -55,6 +57,7 @@ const LOG_FILE: &str = "airsend_daemon.log";
 const TLS_DIR: &str = "/data/adb/airsend";
 const TLS_CERT_PATH: &str = "/data/adb/airsend/server-cert.pem";
 const TLS_KEY_PATH: &str = "/data/adb/airsend/server-key.pem";
+const CONFIG_PATH: &str = "/data/adb/airsend/config.json";
 #[derive(Clone)]
 struct PreparedTlsIdentity {
     cert_pem: Vec<u8>,
@@ -232,6 +235,18 @@ async fn main() -> Result<()> {
     let _log_guard = init_logging()?;
     info!("AirSend Daemon 启动 (LocalSend v0.2.2 兼容模式)");
 
+    let config_store = ConfigStore::new(CONFIG_PATH);
+    let config_outcome = config_store
+        .load_with_recovery()
+        .context("Failed to load AirSend configuration")?;
+    if let Some(warning) = config_outcome.warning.as_deref() {
+        warn!("{warning}");
+    }
+    config_store
+        .save(&config_outcome.config)
+        .context("Failed to persist normalized AirSend configuration")?;
+    let runtime_config = config_outcome.config;
+
     // 1. 强制前置：优先向内核注册 UDS，建立 IPC 物理接收端点
     let listener = UnixListener::bind(UDS_PATH)
         .context(format!("Failed to bind abstract UDS: {:?}", UDS_PATH))?;
@@ -248,7 +263,7 @@ async fn main() -> Result<()> {
             device_info.clone(),
             TRANSFER_PORT,
             DISCOVERY_PORT,
-            "/sdcard/Download/AirSend".to_string(),
+            runtime_config.download_destination.clone(),
         )
         .await
         {
@@ -293,7 +308,7 @@ async fn main() -> Result<()> {
 
     let state = Arc::new(AppState {
         client,
-        preferred_target: Mutex::new(None),
+        preferred_target: Mutex::new(runtime_config.preferred_target),
     });
 
     // 🚀 点火：启动底层物理监控协程

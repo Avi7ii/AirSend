@@ -1,6 +1,6 @@
 [package]
 name = "airsend_daemon"
-version = "0.1.0"
+version = "3.5.1"
 edition = "2021"
 
 [dependencies]
@@ -19,6 +19,7 @@ uuid = { version = "1", features = ["v4"] }
 openssl = { version = "0.10", features = ["vendored"] }
 reqwest = { version = "0.12", features = ["json"] }
 notify = "6.1.1"
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [dev-dependencies]
 tempfile = "3"

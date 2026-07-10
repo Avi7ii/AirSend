@@ -45,9 +45,12 @@ use tokio::sync::Mutex;
 use tracing_subscriber::fmt::format::FmtSpan;
 
 mod config;
+mod domain;
+mod history;
 mod protocol;
 
 use config::ConfigStore;
+use history::HistoryStore;
 use protocol::{LegacyCommand, ParsedLine};
 
 const UDS_PATH: &str = "\0airsend_ipc";
@@ -58,6 +61,8 @@ const TLS_DIR: &str = "/data/adb/airsend";
 const TLS_CERT_PATH: &str = "/data/adb/airsend/server-cert.pem";
 const TLS_KEY_PATH: &str = "/data/adb/airsend/server-key.pem";
 const CONFIG_PATH: &str = "/data/adb/airsend/config.json";
+const HISTORY_PATH: &str = "/data/adb/airsend/history.db";
+const HISTORY_RETENTION: usize = 500;
 #[derive(Clone)]
 struct PreparedTlsIdentity {
     cert_pem: Vec<u8>,
@@ -246,6 +251,10 @@ async fn main() -> Result<()> {
         .save(&config_outcome.config)
         .context("Failed to persist normalized AirSend configuration")?;
     let runtime_config = config_outcome.config;
+    let history_store = Arc::new(
+        HistoryStore::open(HISTORY_PATH, HISTORY_RETENTION)
+            .context("Failed to open AirSend transfer history")?,
+    );
 
     // 1. 强制前置：优先向内核注册 UDS，建立 IPC 物理接收端点
     let listener = UnixListener::bind(UDS_PATH)
@@ -309,6 +318,7 @@ async fn main() -> Result<()> {
     let state = Arc::new(AppState {
         client,
         preferred_target: Mutex::new(runtime_config.preferred_target),
+        history: history_store,
     });
 
     // 🚀 点火：启动底层物理监控协程
@@ -347,6 +357,7 @@ async fn main() -> Result<()> {
 struct AppState {
     client: Client,
     preferred_target: Mutex<Option<String>>,
+    history: Arc<HistoryStore>,
 }
 
 fn spawn_network_rebind_watcher(initial_binding: (Option<String>, Ipv4Addr)) {

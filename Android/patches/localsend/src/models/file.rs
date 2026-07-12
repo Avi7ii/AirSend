@@ -47,8 +47,8 @@ impl FileMetadata {
         let sha256 = Some(sha256::try_digest(path)?);
 
         let metadata = Some(FileMetadataExt {
-            modified: metadata.modified().ok().map(|t| format_datetime(t)),
-            accessed: metadata.accessed().ok().map(|t| format_datetime(t)),
+            modified: metadata.modified().ok().map(format_datetime),
+            accessed: metadata.accessed().ok().map(format_datetime),
         });
 
         Ok(FileMetadata {

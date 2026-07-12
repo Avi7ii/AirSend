@@ -15,7 +15,7 @@ use crate::Client;
 const CAMPUS_MARKER: u8 = 1;
 const CHUNK_SIZE: usize = 600;
 const WINDOW_SIZE: usize = 24;
-pub const MAX_FALLBACK_BYTES: usize = 1 * 1024 * 1024;
+pub const MAX_FALLBACK_BYTES: usize = 1024 * 1024;
 const STALE_TRANSFER_TIMEOUT: Duration = Duration::from_secs(90);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -655,13 +655,10 @@ impl Client {
 
         match (multicast_result, broadcast_result) {
             (Ok(_), _) | (_, Ok(_)) => Ok(()),
-            (Err(multicast_err), Err(broadcast_err)) => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!(
-                    "Campus multicast send failed: {}; broadcast send failed: {}",
-                    multicast_err, broadcast_err
-                ),
-            )
+            (Err(multicast_err), Err(broadcast_err)) => Err(std::io::Error::other(format!(
+                "Campus multicast send failed: {}; broadcast send failed: {}",
+                multicast_err, broadcast_err
+            ))
             .into()),
         }
     }
@@ -746,9 +743,9 @@ impl Client {
                 let campus = self.campus_fallback.lock().await;
                 if let Some(state) = campus.outgoing.get(transfer_id) {
                     if let Some(result) = &state.completion {
-                        return result.clone().map_err(|message| {
-                            std::io::Error::new(std::io::ErrorKind::Other, message).into()
-                        });
+                        return result
+                            .clone()
+                            .map_err(|message| std::io::Error::other(message).into());
                     }
                 }
             }

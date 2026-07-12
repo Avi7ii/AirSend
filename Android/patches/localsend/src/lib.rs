@@ -19,6 +19,8 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use transfer::session::Session;
 
+pub type PeerMap = Arc<Mutex<HashMap<String, (SocketAddr, DeviceInfo)>>>;
+
 #[derive(Clone)]
 pub struct TlsIdentity {
     pub cert_pem: Vec<u8>,
@@ -32,7 +34,7 @@ pub struct Client {
     pub multicast_addr: SocketAddrV4,
     pub port: u16,
     pub discovery_port: u16,
-    pub peers: Arc<Mutex<HashMap<String, (SocketAddr, DeviceInfo)>>>,
+    pub peers: PeerMap,
     pub sessions: Arc<Mutex<HashMap<String, Session>>>, // Session ID to Session
     pub http_client: reqwest::Client,
     pub download_dir: String,
@@ -188,12 +190,11 @@ pub(crate) fn remember_peer_entry(
             return true;
         }
 
-        match (&existing_info.mac_address, &device.mac_address) {
-            (Some(existing_mac), Some(new_mac)) if !existing_mac.eq_ignore_ascii_case(new_mac) => {
-                true
-            }
-            _ => false,
-        }
+        matches!(
+            (&existing_info.mac_address, &device.mac_address),
+            (Some(existing_mac), Some(new_mac))
+                if !existing_mac.eq_ignore_ascii_case(new_mac)
+        )
     });
 
     peers.insert(fingerprint, (addr, device));

@@ -16,7 +16,7 @@ use crate::error::{LocalSendError, Result};
 use crate::transfer::session::{Session, SessionStatus};
 use crate::{
     models::{device::DeviceInfo, file::FileMetadata},
-    remember_peer_entry, Client,
+    remember_peer_entry, Client, PeerMap,
 };
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
@@ -54,7 +54,7 @@ impl Client {
 
         let response = self
             .http_client
-            .post(&format!(
+            .post(format!(
                 "{}://{}/api/localsend/v2/prepare-upload",
                 peer.1.protocol,
                 peer.0.clone()
@@ -120,7 +120,7 @@ impl Client {
 
         let request = self
             .http_client
-            .post(&format!(
+            .post(format!(
                 "{}://{}/api/localsend/v2/upload?sessionId={}&fileId={}&token={}",
                 receiver_protocol, addr, session_id, file_id, token
             ))
@@ -180,7 +180,7 @@ impl Client {
 
         let request = self
             .http_client
-            .post(&format!(
+            .post(format!(
                 "{}://{}/api/localsend/v2/cancel?sessionId={}",
                 session.receiver.protocol, session.addr, session_id
             ))
@@ -198,7 +198,7 @@ impl Client {
 }
 
 pub async fn register_prepare_upload(
-    State(peers): State<Arc<Mutex<HashMap<String, (SocketAddr, DeviceInfo)>>>>,
+    State(peers): State<PeerMap>,
     Extension(client): Extension<DeviceInfo>,
     Extension(sessions): Extension<Arc<Mutex<HashMap<String, Session>>>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -221,8 +221,8 @@ pub async fn register_prepare_upload(
 
         let file_tokens: HashMap<String, String> = req
             .files
-            .iter()
-            .map(|(id, _)| (id.clone(), Uuid::new_v4().to_string())) // Replace with actual token logic
+            .keys()
+            .map(|id| (id.clone(), Uuid::new_v4().to_string())) // Replace with actual token logic
             .collect();
 
         let session = Session {
@@ -237,16 +237,16 @@ pub async fn register_prepare_upload(
 
         sessions.lock().await.insert(session_id.clone(), session);
 
-        return (
+        (
             StatusCode::OK,
             Json(PrepareUploadResponse {
                 session_id,
                 files: file_tokens,
             }),
         )
-            .into_response();
+            .into_response()
     } else {
-        return StatusCode::FORBIDDEN.into_response();
+        StatusCode::FORBIDDEN.into_response()
     }
 }
 
@@ -441,7 +441,7 @@ pub async fn register_upload(
         || file_metadata.file_type.starts_with("video/")
     {
         let _ = std::process::Command::new("am")
-            .args(&[
+            .args([
                 "broadcast",
                 "-a",
                 "android.intent.action.MEDIA_SCANNER_SCAN_FILE",

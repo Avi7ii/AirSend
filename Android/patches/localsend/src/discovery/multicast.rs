@@ -3,7 +3,7 @@ use crate::Client;
 impl Client {
     pub async fn announce_multicast(&self) -> crate::error::Result<()> {
         let msg = self.device.to_json()?;
-        let addr = self.multicast_addr.clone();
+        let addr = self.multicast_addr;
         self.socket.send_to(msg.as_bytes(), addr).await?;
         Ok(())
     }

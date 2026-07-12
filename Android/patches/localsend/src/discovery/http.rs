@@ -1,13 +1,14 @@
+use std::net::SocketAddr;
 use std::time::Duration;
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
-use tokio::sync::Mutex;
 
 use axum::{
     extract::{ConnectInfo, State},
     Extension, Json,
 };
 
-use crate::{models::device::DeviceInfo, ports::TRANSFER_PORT, remember_peer_entry, Client};
+use crate::{
+    models::device::DeviceInfo, ports::TRANSFER_PORT, remember_peer_entry, Client, PeerMap,
+};
 
 impl Client {
     pub async fn announce_http(
@@ -56,7 +57,7 @@ impl Client {
 }
 
 pub async fn register_device(
-    State(peers): State<Arc<Mutex<HashMap<String, (SocketAddr, DeviceInfo)>>>>,
+    State(peers): State<PeerMap>,
     Extension(client): Extension<DeviceInfo>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(device): Json<DeviceInfo>,

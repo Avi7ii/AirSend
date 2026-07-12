@@ -175,14 +175,19 @@ impl Client {
     }
 
     pub async fn cancel_upload(&self, session_id: String) -> Result<()> {
-        let sessions = self.sessions.lock().await;
-        let session = sessions.get(&session_id).unwrap();
+        let (protocol, addr) = {
+            let sessions = self.sessions.lock().await;
+            let session = sessions
+                .get(&session_id)
+                .ok_or(LocalSendError::SessionInactive)?;
+            (session.receiver.protocol.clone(), session.addr)
+        };
 
         let request = self
             .http_client
             .post(format!(
                 "{}://{}/api/localsend/v2/cancel?sessionId={}",
-                session.receiver.protocol, session.addr, session_id
+                protocol, addr, session_id
             ))
             .header("Connection", "close")
             .timeout(Duration::from_secs(10))

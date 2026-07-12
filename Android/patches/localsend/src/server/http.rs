@@ -23,7 +23,7 @@ use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::{
     discovery::http::register_device,
-    transfer::upload::{register_prepare_upload, register_upload},
+    transfer::upload::{register_cancel, register_prepare_upload, register_upload},
     Client,
 };
 
@@ -149,6 +149,7 @@ impl Client {
                 post(register_prepare_upload),
             )
             .route("/api/localsend/v2/upload", post(register_upload))
+            .route("/api/localsend/v2/cancel", post(register_cancel))
             .layer(DefaultBodyLimit::disable())
             .layer(RequestBodyLimitLayer::new(1024 * 1024 * 1024))
             .layer(Extension(self.device.clone()))

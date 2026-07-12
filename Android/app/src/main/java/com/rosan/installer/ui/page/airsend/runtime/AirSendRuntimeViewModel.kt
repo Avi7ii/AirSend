@@ -71,7 +71,7 @@ class AirSendRuntimeViewModel(
                 runCatching {
                     repository.sendClipboardText(action.targetId)
                 }.onSuccess {
-                    _events.emit(AirSendRuntimeEvent.ShowMessage(R.string.airsend_clipboard_sent))
+                    _events.emit(AirSendRuntimeEvent.ShowMessage(R.string.airsend_transfer_queued))
                     repository.refresh()
                 }.onFailure {
                     _events.emit(AirSendRuntimeEvent.ShowRawMessage(it.message ?: "AirSend send failed"))
@@ -82,10 +82,40 @@ class AirSendRuntimeViewModel(
                 runCatching {
                     repository.sendFiles(action.uris, action.targetId)
                 }.onSuccess {
-                    _events.emit(AirSendRuntimeEvent.ShowMessage(R.string.airsend_files_sent))
+                    _events.emit(AirSendRuntimeEvent.ShowMessage(R.string.airsend_transfer_queued))
                     repository.refresh()
                 }.onFailure {
                     _events.emit(AirSendRuntimeEvent.ShowRawMessage(it.message ?: "AirSend send failed"))
+                    repository.refresh()
+                }
+            }
+            is AirSendRuntimeAction.CancelTransfer -> viewModelScope.launch {
+                runCatching {
+                    repository.cancelTransfer(action.transferId)
+                }.onSuccess {
+                    _events.emit(AirSendRuntimeEvent.ShowMessage(R.string.airsend_cancel_requested))
+                    repository.refresh()
+                }.onFailure {
+                    _events.emit(
+                        AirSendRuntimeEvent.ShowRawMessage(
+                            it.message ?: "AirSend cancellation failed"
+                        )
+                    )
+                    repository.refresh()
+                }
+            }
+            is AirSendRuntimeAction.RetryTransfer -> viewModelScope.launch {
+                runCatching {
+                    repository.retryTransfer(action.transferId)
+                }.onSuccess {
+                    _events.emit(AirSendRuntimeEvent.ShowMessage(R.string.airsend_transfer_queued))
+                    repository.refresh()
+                }.onFailure {
+                    _events.emit(
+                        AirSendRuntimeEvent.ShowRawMessage(
+                            it.message ?: "AirSend retry failed"
+                        )
+                    )
                     repository.refresh()
                 }
             }

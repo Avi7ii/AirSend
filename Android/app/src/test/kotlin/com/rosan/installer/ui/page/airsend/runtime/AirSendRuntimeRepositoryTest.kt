@@ -101,9 +101,63 @@ class AirSendRuntimeRepositoryTest {
         scope.cancel()
     }
 
+    @Test
+    fun refreshMergesLiveTransfersWithDurableHistoryWithoutDuplicates() = runBlocking {
+        val client = FakeAirSendIpcClient().apply {
+            respond(
+                "hello",
+                """{"protocolVersion":1,"daemonVersion":"3.5.1","configVersion":1,"historySchemaVersion":1,"capabilities":["get_transfers","get_history"],"transportProtocol":"https"}"""
+            )
+            respond(
+                "get_state",
+                """{"protocolVersion":1,"daemonVersion":"3.5.1","configVersion":1,"historySchemaVersion":1,"startedAtMs":10,"peerCount":0,"historyCount":2,"activeTransferCount":1,"healthWarnings":[],"tlsFingerprint":"aa:bb","transportProtocol":"https"}"""
+            )
+            respond("get_peers", "[]")
+            respond("get_config", configJson())
+            respond("get_transfers", "[${transferJson("live", "transferring", 20, true)}]")
+            respond(
+                "get_history",
+                "[${transferJson("live", "failed", 10, true)},${transferJson("old", "failed", 5, true)}]"
+            )
+        }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val repository = AirSendRuntimeRepositoryImpl(client, FakeAndroidRuntimeReader(), scope)
+
+        repository.refresh()
+
+        val transfers = repository.state.value.transfers
+        assertEquals(listOf("live", "old"), transfers.map { it.id })
+        assertEquals("transferring", transfers.first().status)
+        assertTrue(transfers.first().retryable)
+        assertFalse(transfers.last().retryable)
+        scope.cancel()
+    }
+
+    @Test
+    fun transferActionsUseStableSessionId() = runBlocking {
+        val client = FakeAirSendIpcClient()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val repository = AirSendRuntimeRepositoryImpl(client, FakeAndroidRuntimeReader(), scope)
+
+        repository.cancelTransfer("transfer-1")
+        repository.retryTransfer("transfer-1")
+
+        assertEquals("transfer-1", client.payloads.getValue("cancel_transfer")["id"].toString().trim('"'))
+        assertEquals("transfer-1", client.payloads.getValue("retry_transfer")["id"].toString().trim('"'))
+        scope.cancel()
+    }
+
     companion object {
         private fun configJson(): String =
             """{"version":1,"preferredTarget":"peer-1","manualPeers":[],"trustedPeerFingerprints":["aa11"],"receivePolicy":"trusted_only","clipboardSyncEnabled":false,"screenshotSyncEnabled":false,"startupEnabled":true,"downloadDestination":"/sdcard/Download/AirSend","mediaDestination":"/sdcard/Pictures/AirSend","transportPreference":"https"}"""
+
+        private fun transferJson(
+            id: String,
+            status: String,
+            startedAtMs: Long,
+            retryable: Boolean
+        ): String =
+            """{"id":"$id","direction":"outgoing","source":"app_picker","peerId":"peer-1","peerAlias":"Mac","files":[{"id":"file-1","name":"one.txt","mimeType":"text/plain","size":100,"transferredBytes":50,"status":"transferring"}],"totalBytes":100,"transferredBytes":50,"status":"$status","startedAtMs":$startedAtMs,"savedPaths":[],"retryable":$retryable}"""
     }
 }
 

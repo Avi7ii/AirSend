@@ -13,4 +13,6 @@ sealed interface AirSendRuntimeAction {
     data class SelectPeer(val targetId: String) : AirSendRuntimeAction
     data class SendClipboardText(val targetId: String? = null) : AirSendRuntimeAction
     data class SendFiles(val uris: List<Uri>, val targetId: String? = null) : AirSendRuntimeAction
+    data class CancelTransfer(val transferId: String) : AirSendRuntimeAction
+    data class RetryTransfer(val transferId: String) : AirSendRuntimeAction
 }

@@ -10,10 +10,13 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
 import androidx.core.content.ContextCompat
 import com.airsend.AirSendService
 import com.airsend.BootReceiver
 import com.airsend.core.utils.PathUtils
+import java.io.File
+import java.util.UUID
 
 data class AndroidRuntimeSnapshot(
     val serviceRunning: Boolean,
@@ -43,11 +46,7 @@ class AndroidRuntimeReaderImpl(context: Context) : AndroidRuntimeReader {
 
     override fun startService() {
         val intent = Intent(appContext, AirSendService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            ContextCompat.startForegroundService(appContext, intent)
-        } else {
-            appContext.startService(intent)
-        }
+        ContextCompat.startForegroundService(appContext, intent)
     }
 
     override fun stopService() {
@@ -77,7 +76,55 @@ class AndroidRuntimeReaderImpl(context: Context) : AndroidRuntimeReader {
             ?.toString()
     }
 
-    override fun resolvePath(uri: Uri): String? = PathUtils.getRealPathFromURI(appContext, uri)
+    override fun resolvePath(uri: Uri): String? {
+        val directPath = runCatching {
+            PathUtils.getRealPathFromURI(appContext, uri)
+        }.getOrNull()?.takeIf { File(it).isFile }
+        if (directPath != null) return directPath
+
+        val root = File(appContext.cacheDir, OUTGOING_CACHE_DIR).apply { mkdirs() }
+        pruneOutgoingCache(root)
+        val transferDir = File(root, UUID.randomUUID().toString()).apply { mkdirs() }
+        val destination = File(transferDir, displayName(uri))
+        return runCatching {
+            val input = appContext.contentResolver.openInputStream(uri)
+                ?: error("Unable to open $uri")
+            input.use { source ->
+                destination.outputStream().buffered().use { output ->
+                    source.copyTo(output, DEFAULT_BUFFER_SIZE)
+                }
+            }
+            destination.absolutePath
+        }.getOrElse {
+            transferDir.deleteRecursively()
+            null
+        }
+    }
+
+    private fun displayName(uri: Uri): String {
+        val providerName = runCatching {
+            appContext.contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        }.getOrNull()
+        return (providerName ?: uri.lastPathSegment ?: "file")
+            .replace(Regex("[\\/\\p{Cntrl}]"), "_")
+            .takeIf { it.isNotBlank() }
+            ?: "file"
+    }
+
+    private fun pruneOutgoingCache(root: File) {
+        val cutoff = System.currentTimeMillis() - OUTGOING_CACHE_RETENTION_MS
+        root.listFiles()
+            ?.filter { it.lastModified() < cutoff }
+            ?.forEach(File::deleteRecursively)
+    }
 
     @Suppress("DEPRECATION")
     private fun isServiceRunning(): Boolean {
@@ -120,5 +167,10 @@ class AndroidRuntimeReaderImpl(context: Context) : AndroidRuntimeReader {
             appContext,
             Manifest.permission.READ_EXTERNAL_STORAGE
         ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private companion object {
+        const val OUTGOING_CACHE_DIR = "airsend-outgoing"
+        const val OUTGOING_CACHE_RETENTION_MS = 24L * 60L * 60L * 1000L
     }
 }

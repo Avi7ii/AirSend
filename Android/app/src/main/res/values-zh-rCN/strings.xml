@@ -1131,4 +1131,23 @@
     <string name="airsend_select_target">设为默认设备</string>
     <string name="airsend_peer_count">%1$d 台设备在线</string>
     <string name="airsend_daemon_error">守护进程错误：%1$s</string>
+    <string name="airsend_transfer_queued">传输已加入队列。</string>
+    <string name="airsend_cancel_requested">已请求取消传输。</string>
+    <string name="airsend_cancel_transfer">取消传输</string>
+    <string name="airsend_retry_transfer">重试传输</string>
+    <string name="airsend_transfer_files_count">%1$d 个文件</string>
+    <string name="airsend_transfer_peer_status">%1$s · %2$s</string>
+    <string name="airsend_transfer_bytes">%1$s / %2$s</string>
+    <string name="airsend_transfer_status_queued">排队中</string>
+    <string name="airsend_transfer_status_waiting">等待接收确认</string>
+    <string name="airsend_transfer_status_preparing">准备中</string>
+    <string name="airsend_transfer_status_transferring">传输中</string>
+    <string name="airsend_transfer_status_paused">已暂停</string>
+    <string name="airsend_transfer_status_completed">已完成</string>
+    <string name="airsend_transfer_status_failed">失败</string>
+    <string name="airsend_transfer_status_cancelled">已取消</string>
+    <string name="airsend_transfer_status_declined">已拒绝</string>
+    <string name="airsend_transfer_status_unknown">未知状态</string>
+    <string name="airsend_select_target_before_sending">请先在设备页选择一台设备。</string>
+    <string name="airsend_single_target_mode">单目标：%1$s</string>
 </resources>

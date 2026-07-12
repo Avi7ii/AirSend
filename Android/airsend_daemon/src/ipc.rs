@@ -1,24 +1,32 @@
 use crate::config::{AirSendConfig, ConfigStore, CONFIG_VERSION};
-use crate::domain::{
-    FileTransferStatus, HistoryFile, HistoryRecord, TransferDirection, TransferSource,
-    TransferStatus,
-};
+use crate::domain::{TransferSource, TransferStatus};
 use crate::events::EventHub;
 use crate::history::{HistoryStore, SCHEMA_VERSION};
 use crate::logging::SizeRotatingWriter;
 use crate::protocol::{
     LegacyCommand, ParsedLine, RequestEnvelope, ResponseEnvelope, IPC_PROTOCOL_VERSION,
 };
-use crate::{process_command, send_data, AppState};
-use anyhow::{Context, Result};
+use crate::transfers::{
+    OutgoingItemSpec, OutgoingPayload, OutgoingTransferSpec, TransferExecution, TransferService,
+};
+use crate::{process_command, AppState};
+use anyhow::{anyhow, Context, Result};
+use futures_util::StreamExt;
+use localsend::models::file::FileMetadata;
+use reqwest::Body;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::io;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
-use tokio::sync::RwLock;
+use tokio::sync::{watch, RwLock};
 use tokio::task::JoinHandle;
+use tokio_util::io::ReaderStream;
 
 const MAX_REQUEST_BYTES: usize = 1024 * 1024;
 const DEFAULT_LOG_TAIL_BYTES: usize = 64 * 1024;
@@ -39,6 +47,10 @@ const CAPABILITIES: &[&str] = &[
     "clear_logs",
     "send_text",
     "send_file",
+    "send_files",
+    "get_transfers",
+    "cancel_transfer",
+    "retry_transfer",
 ];
 
 pub struct DaemonServices {
@@ -46,6 +58,7 @@ pub struct DaemonServices {
     config: RwLock<AirSendConfig>,
     history: Arc<HistoryStore>,
     events: EventHub,
+    transfers: TransferService,
     health_warnings: RwLock<Vec<String>>,
     log_writer: SizeRotatingWriter,
     tls_fingerprint: String,
@@ -63,11 +76,14 @@ impl DaemonServices {
         tls_fingerprint: String,
         transport_protocol: impl Into<String>,
     ) -> Self {
+        let events = EventHub::new(EVENT_CAPACITY);
+        let transfers = TransferService::new(history.clone(), events.clone(), 100);
         Self {
             config_store,
             config: RwLock::new(config),
             history,
-            events: EventHub::new(EVENT_CAPACITY),
+            events,
+            transfers,
             health_warnings: RwLock::new(health_warnings),
             log_writer,
             tls_fingerprint,
@@ -87,6 +103,13 @@ impl DaemonServices {
     async fn state_snapshot(&self, peer_count: usize) -> Result<Value> {
         let config = self.config().await;
         let history_count = self.history.list(usize::MAX)?.len();
+        let active_transfer_count = self
+            .transfers
+            .list()
+            .await
+            .into_iter()
+            .filter(|transfer| !transfer.status.is_terminal())
+            .count();
         let warnings = self.health_warnings.read().await.clone();
         Ok(json!({
             "protocolVersion": IPC_PROTOCOL_VERSION,
@@ -97,6 +120,7 @@ impl DaemonServices {
             "peerCount": peer_count,
             "preferredTarget": config.preferred_target,
             "historyCount": history_count,
+            "activeTransferCount": active_transfer_count,
             "healthWarnings": warnings,
             "tlsFingerprint": self.tls_fingerprint,
             "transportProtocol": self.transport_protocol,
@@ -178,7 +202,7 @@ pub async fn handle_client(stream: UnixStream, state: Arc<AppState>) -> Result<(
     Ok(())
 }
 
-async fn dispatch_request(request: RequestEnvelope, state: &AppState) -> ResponseEnvelope {
+async fn dispatch_request(request: RequestEnvelope, state: &Arc<AppState>) -> ResponseEnvelope {
     let id = request.id.clone();
     match request.op.as_str() {
         "get_peers" => ResponseEnvelope::success(id, peer_snapshot(state).await),
@@ -188,33 +212,21 @@ async fn dispatch_request(request: RequestEnvelope, state: &AppState) -> Respons
                 Ok(_) => return invalid_payload(id, "text must not be empty"),
                 Err(error) => return invalid_payload(id, &error.to_string()),
             };
-            let requested_target = payload.target_id.clone();
-            let started_at_ms = now_ms_i64();
-            match send_data(state, payload.target_id, &payload.text, true).await {
-                Ok(target_id) => {
-                    persist_outgoing_history(
-                        state,
-                        Some(&target_id),
-                        HistoryPayload::text(&payload.text),
-                        started_at_ms,
-                        None,
-                    )
-                    .await;
-                    ResponseEnvelope::success(id, json!({"completed": true, "targetId": target_id}))
-                }
-                Err(error) => {
-                    let message = error.to_string();
-                    persist_outgoing_history(
-                        state,
-                        requested_target.as_deref(),
-                        HistoryPayload::text(&payload.text),
-                        started_at_ms,
-                        Some(&message),
-                    )
-                    .await;
-                    transfer_error(id, message)
-                }
-            }
+            let item = OutgoingItemSpec {
+                id: uuid::Uuid::new_v4().to_string(),
+                name: "clipboard.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                size: payload.text.len() as u64,
+                payload: OutgoingPayload::Text(payload.text),
+            };
+            queue_outgoing_response(
+                id,
+                state,
+                payload.target_id,
+                TransferSource::Clipboard,
+                vec![item],
+            )
+            .await
         }
         "send_file" => {
             let payload = match serde_json::from_value::<SendFilePayload>(request.payload) {
@@ -222,38 +234,393 @@ async fn dispatch_request(request: RequestEnvelope, state: &AppState) -> Respons
                 Ok(_) => return invalid_payload(id, "path must not be empty"),
                 Err(error) => return invalid_payload(id, &error.to_string()),
             };
-            let requested_target = payload.target_id.clone();
-            let history_payload = HistoryPayload::file(&payload.path);
-            let started_at_ms = now_ms_i64();
-            match send_data(state, payload.target_id, &payload.path, false).await {
-                Ok(target_id) => {
-                    persist_outgoing_history(
-                        state,
-                        Some(&target_id),
-                        history_payload,
-                        started_at_ms,
-                        None,
-                    )
-                    .await;
-                    ResponseEnvelope::success(id, json!({"completed": true, "targetId": target_id}))
-                }
-                Err(error) => {
-                    let message = error.to_string();
-                    persist_outgoing_history(
-                        state,
-                        requested_target.as_deref(),
-                        history_payload,
-                        started_at_ms,
-                        Some(&message),
-                    )
-                    .await;
-                    transfer_error(id, message)
-                }
+            queue_paths_response(id, state, payload.target_id, vec![payload.path]).await
+        }
+        "send_files" => {
+            let payload = match serde_json::from_value::<SendFilesPayload>(request.payload) {
+                Ok(payload) if !payload.paths.is_empty() => payload,
+                Ok(_) => return invalid_payload(id, "paths must not be empty"),
+                Err(error) => return invalid_payload(id, &error.to_string()),
+            };
+            queue_paths_response(id, state, payload.target_id, payload.paths).await
+        }
+        "cancel_transfer" => {
+            let payload = match serde_json::from_value::<TransferIdPayload>(request.payload) {
+                Ok(payload) if !payload.id.trim().is_empty() => payload,
+                Ok(_) => return invalid_payload(id, "id must not be empty"),
+                Err(error) => return invalid_payload(id, &error.to_string()),
+            };
+            let Some(record) = state.services.transfers.get(&payload.id).await else {
+                return ResponseEnvelope::error(id, "transfer_not_found", "Transfer not found");
+            };
+            if record.status.is_terminal() {
+                return ResponseEnvelope::success(id, json!({"cancelRequested": false}));
             }
+            match state.services.transfers.request_cancel(&payload.id).await {
+                Ok(cancelled) => {
+                    ResponseEnvelope::success(id, json!({"cancelRequested": cancelled}))
+                }
+                Err(error) => transfer_error(id, error.to_string()),
+            }
+        }
+        "retry_transfer" => {
+            let payload = match serde_json::from_value::<TransferIdPayload>(request.payload) {
+                Ok(payload) if !payload.id.trim().is_empty() => payload,
+                Ok(_) => return invalid_payload(id, "id must not be empty"),
+                Err(error) => return invalid_payload(id, &error.to_string()),
+            };
+            let Some(record) = state.services.transfers.get(&payload.id).await else {
+                return ResponseEnvelope::error(id, "transfer_not_found", "Transfer not found");
+            };
+            if !record.retryable {
+                return ResponseEnvelope::error(
+                    id,
+                    "transfer_not_retryable",
+                    "Transfer cannot be retried",
+                );
+            }
+            let Some(spec) = state.services.transfers.retry_spec(&payload.id).await else {
+                return ResponseEnvelope::error(
+                    id,
+                    "transfer_not_retryable",
+                    "Transfer payload is no longer available",
+                );
+            };
+            queue_spec_response(id, state, spec).await
         }
         _ => {
             let peer_count = state.client.peers.lock().await.len();
             dispatch_service_request(request, &state.services, peer_count).await
+        }
+    }
+}
+
+async fn queue_paths_response(
+    id: String,
+    state: &Arc<AppState>,
+    target_id: Option<String>,
+    paths: Vec<String>,
+) -> ResponseEnvelope {
+    let mut items = Vec::with_capacity(paths.len());
+    for raw_path in paths {
+        let path = PathBuf::from(&raw_path);
+        let metadata = match tokio::fs::metadata(&path).await {
+            Ok(metadata) if metadata.is_file() => metadata,
+            Ok(_) => return invalid_payload(id, &format!("path is not a file: {raw_path}")),
+            Err(error) => return transfer_error(id, format!("{raw_path}: {error}")),
+        };
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("file")
+            .to_string();
+        items.push(OutgoingItemSpec {
+            id: uuid::Uuid::new_v4().to_string(),
+            name,
+            mime_type: crate::infer_campus_mime_type(&path),
+            size: metadata.len(),
+            payload: OutgoingPayload::File(path),
+        });
+    }
+    queue_outgoing_response(id, state, target_id, TransferSource::AppPicker, items).await
+}
+
+async fn queue_outgoing_response(
+    id: String,
+    state: &Arc<AppState>,
+    target_id: Option<String>,
+    source: TransferSource,
+    items: Vec<OutgoingItemSpec>,
+) -> ResponseEnvelope {
+    let target_id = match target_id {
+        Some(target_id) => Some(target_id),
+        None => state.services.config().await.preferred_target,
+    }
+    .filter(|value| !value.trim().is_empty());
+    let Some(target_id) = target_id else {
+        return ResponseEnvelope::error(id, "no_target", "Select a target before sending");
+    };
+    let (peer_alias, peer_fingerprint) = {
+        let peers = state.client.peers.lock().await;
+        peers
+            .get(&target_id)
+            .map(|(_, peer)| (peer.alias.clone(), Some(peer.fingerprint.clone())))
+            .unwrap_or_else(|| (target_id.clone(), None))
+    };
+    queue_spec_response(
+        id,
+        state,
+        OutgoingTransferSpec {
+            target_id,
+            peer_alias,
+            peer_fingerprint,
+            source,
+            items,
+        },
+    )
+    .await
+}
+
+async fn queue_spec_response(
+    id: String,
+    state: &Arc<AppState>,
+    spec: OutgoingTransferSpec,
+) -> ResponseEnvelope {
+    match state.services.transfers.register_outgoing(spec).await {
+        Ok(execution) => {
+            let record = state.services.transfers.get(&execution.transfer_id).await;
+            let task_state = state.clone();
+            tokio::spawn(async move {
+                run_outgoing_transfer(task_state, execution).await;
+            });
+            match record {
+                Some(record) => ResponseEnvelope::success(
+                    id,
+                    serde_json::to_value(record).unwrap_or(Value::Null),
+                ),
+                None => ResponseEnvelope::error(
+                    id,
+                    "transfer_failed",
+                    "Transfer session was not created",
+                ),
+            }
+        }
+        Err(error) => transfer_error(id, error.to_string()),
+    }
+}
+
+async fn run_outgoing_transfer(state: Arc<AppState>, execution: TransferExecution) {
+    let transfer_id = execution.transfer_id.clone();
+    match execute_outgoing_transfer(&state, execution).await {
+        Ok(OutgoingOutcome::Completed) => {
+            if let Err(error) = state
+                .services
+                .transfers
+                .finish_completed(&transfer_id)
+                .await
+            {
+                tracing::error!("Failed to complete transfer {transfer_id}: {error:#}");
+            }
+        }
+        Ok(OutgoingOutcome::Cancelled) => {
+            if let Err(error) = state
+                .services
+                .transfers
+                .finish_cancelled(&transfer_id)
+                .await
+            {
+                tracing::error!("Failed to cancel transfer {transfer_id}: {error:#}");
+            }
+        }
+        Err(error) => {
+            let message = error.to_string();
+            let code = transfer_error_code(&message);
+            let retryable = code != "file_not_found";
+            if let Err(finish_error) = state
+                .services
+                .transfers
+                .finish_failed(&transfer_id, code, &message, retryable)
+                .await
+            {
+                tracing::error!(
+                    "Failed to record transfer {transfer_id} failure: {finish_error:#}"
+                );
+            }
+        }
+    }
+}
+
+enum OutgoingOutcome {
+    Completed,
+    Cancelled,
+}
+
+async fn execute_outgoing_transfer(
+    state: &AppState,
+    mut execution: TransferExecution,
+) -> Result<OutgoingOutcome> {
+    let transfer_id = execution.transfer_id.clone();
+    state
+        .services
+        .transfers
+        .transition(&transfer_id, TransferStatus::Preparing)
+        .await?;
+
+    let files = execution
+        .spec
+        .items
+        .iter()
+        .map(|item| {
+            (
+                item.id.clone(),
+                FileMetadata {
+                    id: item.id.clone(),
+                    file_name: item.name.clone(),
+                    size: item.size,
+                    file_type: item.mime_type.clone(),
+                    sha256: None,
+                    preview: None,
+                    metadata: None,
+                },
+            )
+        })
+        .collect::<HashMap<_, _>>();
+
+    let prepare_result = tokio::select! {
+        biased;
+        _ = wait_for_cancel(&mut execution.cancel) => return Ok(OutgoingOutcome::Cancelled),
+        result = state.client.prepare_upload(execution.spec.target_id.clone(), files) => result,
+    };
+    let prepare = match prepare_result {
+        Ok(prepare) => prepare,
+        Err(direct_error) => {
+            tracing::warn!(
+                "Direct prepare failed for transfer {transfer_id}; trying campus fallback: {direct_error}"
+            );
+            return execute_campus_fallback(state, &mut execution)
+                .await
+                .with_context(|| format!("direct transfer failed: {direct_error}"));
+        }
+    };
+
+    state
+        .services
+        .transfers
+        .transition(&transfer_id, TransferStatus::Transferring)
+        .await?;
+
+    for item in &execution.spec.items {
+        if *execution.cancel.borrow() {
+            let _ = state.client.cancel_upload(prepare.session_id.clone()).await;
+            return Ok(OutgoingOutcome::Cancelled);
+        }
+        let token = prepare
+            .files
+            .get(&item.id)
+            .cloned()
+            .ok_or_else(|| anyhow!("receiver did not return a token for {}", item.name))?;
+        let body = outgoing_body(&state.services.transfers, &transfer_id, item).await?;
+        let upload = tokio::select! {
+            biased;
+            _ = wait_for_cancel(&mut execution.cancel) => {
+                let _ = state.client.cancel_upload(prepare.session_id.clone()).await;
+                return Ok(OutgoingOutcome::Cancelled);
+            }
+            result = state.client.upload(
+                prepare.session_id.clone(),
+                item.id.clone(),
+                token,
+                body,
+            ) => result,
+        };
+        upload.with_context(|| format!("failed to upload {}", item.name))?;
+        state
+            .services
+            .transfers
+            .set_file_progress(&transfer_id, &item.id, item.size)
+            .await?;
+    }
+
+    Ok(OutgoingOutcome::Completed)
+}
+
+async fn outgoing_body(
+    transfers: &TransferService,
+    transfer_id: &str,
+    item: &OutgoingItemSpec,
+) -> Result<Body> {
+    match &item.payload {
+        OutgoingPayload::Text(text) => Ok(Body::from(text.clone())),
+        OutgoingPayload::File(path) => {
+            let file = tokio::fs::File::open(path)
+                .await
+                .with_context(|| format!("failed to open {}", path.display()))?;
+            let service = transfers.clone();
+            let transfer_id = transfer_id.to_string();
+            let file_id = item.id.clone();
+            let transferred = Arc::new(AtomicU64::new(0));
+            let stream = ReaderStream::new(file).then(move |chunk| {
+                let service = service.clone();
+                let transfer_id = transfer_id.clone();
+                let file_id = file_id.clone();
+                let transferred = transferred.clone();
+                async move {
+                    let bytes = chunk?;
+                    let current = transferred.fetch_add(bytes.len() as u64, Ordering::Relaxed)
+                        + bytes.len() as u64;
+                    service
+                        .set_file_progress(&transfer_id, &file_id, current)
+                        .await
+                        .map_err(io::Error::other)?;
+                    Ok::<_, io::Error>(bytes)
+                }
+            });
+            Ok(Body::wrap_stream(stream))
+        }
+    }
+}
+
+async fn execute_campus_fallback(
+    state: &AppState,
+    execution: &mut TransferExecution,
+) -> Result<OutgoingOutcome> {
+    state
+        .services
+        .transfers
+        .transition(&execution.transfer_id, TransferStatus::Transferring)
+        .await?;
+    for item in &execution.spec.items {
+        let send = async {
+            match &item.payload {
+                OutgoingPayload::Text(text) => state
+                    .client
+                    .send_campus_text(&execution.spec.target_id, text)
+                    .await
+                    .map_err(anyhow::Error::from),
+                OutgoingPayload::File(path) => {
+                    if item.size > crate::MAX_FALLBACK_BYTES as u64 {
+                        return Err(anyhow!(
+                            "campus fallback only supports files up to {} bytes",
+                            crate::MAX_FALLBACK_BYTES
+                        ));
+                    }
+                    let bytes = tokio::fs::read(path)
+                        .await
+                        .with_context(|| format!("failed to read {}", path.display()))?;
+                    state
+                        .client
+                        .send_campus_file(
+                            &execution.spec.target_id,
+                            &item.name,
+                            &item.mime_type,
+                            &bytes,
+                        )
+                        .await
+                        .map_err(anyhow::Error::from)
+                }
+            }
+        };
+        tokio::select! {
+            biased;
+            _ = wait_for_cancel(&mut execution.cancel) => return Ok(OutgoingOutcome::Cancelled),
+            result = send => result?,
+        }
+        state
+            .services
+            .transfers
+            .set_file_progress(&execution.transfer_id, &item.id, item.size)
+            .await?;
+    }
+    Ok(OutgoingOutcome::Completed)
+}
+
+async fn wait_for_cancel(receiver: &mut watch::Receiver<bool>) {
+    if *receiver.borrow() {
+        return;
+    }
+    while receiver.changed().await.is_ok() {
+        if *receiver.borrow() {
+            return;
         }
     }
 }
@@ -276,6 +643,7 @@ async fn dispatch_service_request(
             | "clear_history"
             | "get_logs"
             | "clear_logs"
+            | "get_transfers"
     ) {
         return ResponseEnvelope::error(
             id,
@@ -310,6 +678,7 @@ async fn dispatch_service_request(
                         .list(payload.limit.unwrap_or(100).min(500))?,
                 )?)
             }
+            "get_transfers" => Ok(serde_json::to_value(services.transfers.list().await)?),
             "delete_history" => {
                 let payload = serde_json::from_value::<HistoryIdPayload>(request.payload)
                     .context("invalid history id payload")?;
@@ -441,7 +810,10 @@ fn transfer_error(id: String, message: String) -> ResponseEnvelope {
 
 fn transfer_error_code(message: &str) -> &'static str {
     let lower = message.to_ascii_lowercase();
-    if lower.contains("target not found") || lower.contains("no reachable target") {
+    if lower.contains("target not found")
+        || lower.contains("peer not found")
+        || lower.contains("no reachable target")
+    {
         "target_offline"
     } else if lower.contains("no target") {
         "no_target"
@@ -459,120 +831,6 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-fn now_ms_i64() -> i64 {
-    i64::try_from(now_ms()).unwrap_or(i64::MAX)
-}
-
-struct HistoryPayload {
-    source: TransferSource,
-    file: HistoryFile,
-}
-
-impl HistoryPayload {
-    fn text(text: &str) -> Self {
-        let size = text.len() as u64;
-        Self {
-            source: TransferSource::Clipboard,
-            file: HistoryFile {
-                id: uuid::Uuid::new_v4().to_string(),
-                name: "clipboard.txt".to_string(),
-                mime_type: "text/plain".to_string(),
-                size,
-                transferred_bytes: 0,
-                status: FileTransferStatus::Queued,
-            },
-        }
-    }
-
-    fn file(path: &str) -> Self {
-        let path = std::path::Path::new(path);
-        let size = std::fs::metadata(path)
-            .map(|value| value.len())
-            .unwrap_or(0);
-        Self {
-            source: TransferSource::AppPicker,
-            file: HistoryFile {
-                id: uuid::Uuid::new_v4().to_string(),
-                name: path
-                    .file_name()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or("file")
-                    .to_string(),
-                mime_type: "application/octet-stream".to_string(),
-                size,
-                transferred_bytes: 0,
-                status: FileTransferStatus::Queued,
-            },
-        }
-    }
-}
-
-async fn persist_outgoing_history(
-    state: &AppState,
-    peer_id: Option<&str>,
-    mut payload: HistoryPayload,
-    started_at_ms: i64,
-    error_message: Option<&str>,
-) {
-    let (peer_id, peer_alias, peer_fingerprint) = if let Some(peer_id) = peer_id {
-        let peers = state.client.peers.lock().await;
-        if let Some((_, peer)) = peers.get(peer_id) {
-            (
-                peer_id.to_string(),
-                peer.alias.clone(),
-                Some(peer.fingerprint.clone()),
-            )
-        } else {
-            (peer_id.to_string(), "Unknown device".to_string(), None)
-        }
-    } else {
-        (String::new(), "Unknown device".to_string(), None)
-    };
-
-    let completed = error_message.is_none();
-    payload.file.status = if completed {
-        FileTransferStatus::Completed
-    } else {
-        FileTransferStatus::Failed
-    };
-    payload.file.transferred_bytes = if completed { payload.file.size } else { 0 };
-    let error_code = error_message.map(transfer_error_code).map(str::to_string);
-    let record = HistoryRecord {
-        id: uuid::Uuid::new_v4().to_string(),
-        direction: TransferDirection::Outgoing,
-        source: payload.source,
-        peer_id,
-        peer_alias,
-        peer_fingerprint,
-        total_bytes: payload.file.size,
-        transferred_bytes: payload.file.transferred_bytes,
-        files: vec![payload.file],
-        status: if completed {
-            TransferStatus::Completed
-        } else {
-            TransferStatus::Failed
-        },
-        started_at_ms,
-        ended_at_ms: Some(now_ms_i64()),
-        saved_paths: Vec::new(),
-        error_code,
-        error_message: error_message.map(str::to_string),
-        retryable: error_message
-            .map(transfer_error_code)
-            .is_some_and(|code| code != "file_not_found"),
-    };
-    let record_id = record.id.clone();
-    match state.services.history.insert(&record) {
-        Ok(()) => {
-            state.services.events.publish(
-                "history_changed",
-                json!({"action": "insert", "id": record_id}),
-            );
-        }
-        Err(error) => tracing::error!("Failed to persist transfer history: {error:#}"),
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SendTextPayload {
@@ -587,6 +845,19 @@ struct SendFilePayload {
     #[serde(default)]
     target_id: Option<String>,
     path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SendFilesPayload {
+    #[serde(default)]
+    target_id: Option<String>,
+    paths: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct TransferIdPayload {
+    id: String,
 }
 
 #[derive(Default, Deserialize)]
@@ -670,6 +941,49 @@ mod tests {
             .unwrap()
             .iter()
             .any(|value| value == "get_state"));
+        for capability in [
+            "send_files",
+            "get_transfers",
+            "cancel_transfer",
+            "retry_transfer",
+        ] {
+            assert!(data["capabilities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == capability));
+        }
+    }
+
+    #[tokio::test]
+    async fn get_transfers_returns_registered_session() {
+        let harness = IpcHarness::new().await;
+        harness
+            .services
+            .transfers
+            .register_outgoing(OutgoingTransferSpec {
+                target_id: "peer-1".to_string(),
+                peer_alias: "Desktop".to_string(),
+                peer_fingerprint: Some("aa11".to_string()),
+                source: TransferSource::Clipboard,
+                items: vec![OutgoingItemSpec {
+                    id: "text-1".to_string(),
+                    name: "clipboard.txt".to_string(),
+                    mime_type: "text/plain".to_string(),
+                    size: 5,
+                    payload: OutgoingPayload::Text("hello".to_string()),
+                }],
+            })
+            .await
+            .unwrap();
+
+        let response = harness.request("get_transfers", json!({})).await;
+
+        assert!(response.ok);
+        let transfers = response.data.unwrap().as_array().unwrap().clone();
+        assert_eq!(transfers.len(), 1);
+        assert_eq!(transfers[0]["status"], "queued");
+        assert_eq!(transfers[0]["peerAlias"], "Desktop");
     }
 
     #[tokio::test]

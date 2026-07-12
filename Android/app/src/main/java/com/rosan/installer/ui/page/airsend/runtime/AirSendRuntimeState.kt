@@ -29,6 +29,8 @@ data class AirSendRuntimeState(
     val daemonStartedAtMs: Long? = null,
     val preferredTargetId: String? = null,
     val historyCount: Int = 0,
+    val activeTransferCount: Int = 0,
+    val transfers: List<AirSendTransferSnapshot> = emptyList(),
     val healthWarnings: List<String> = emptyList(),
     val tlsFingerprint: String? = null,
     val transportProtocol: String? = null,

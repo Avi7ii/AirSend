@@ -1152,4 +1152,23 @@
     <string name="airsend_select_target">Set as default device</string>
     <string name="airsend_peer_count">%1$d peer(s) online</string>
     <string name="airsend_daemon_error">Daemon error: %1$s</string>
+    <string name="airsend_transfer_queued">Transfer added to the queue.</string>
+    <string name="airsend_cancel_requested">Cancellation requested.</string>
+    <string name="airsend_cancel_transfer">Cancel transfer</string>
+    <string name="airsend_retry_transfer">Retry transfer</string>
+    <string name="airsend_transfer_files_count">%1$d files</string>
+    <string name="airsend_transfer_peer_status">%1$s · %2$s</string>
+    <string name="airsend_transfer_bytes">%1$s / %2$s</string>
+    <string name="airsend_transfer_status_queued">Queued</string>
+    <string name="airsend_transfer_status_waiting">Waiting for acceptance</string>
+    <string name="airsend_transfer_status_preparing">Preparing</string>
+    <string name="airsend_transfer_status_transferring">Transferring</string>
+    <string name="airsend_transfer_status_paused">Paused</string>
+    <string name="airsend_transfer_status_completed">Completed</string>
+    <string name="airsend_transfer_status_failed">Failed</string>
+    <string name="airsend_transfer_status_cancelled">Cancelled</string>
+    <string name="airsend_transfer_status_declined">Declined</string>
+    <string name="airsend_transfer_status_unknown">Unknown</string>
+    <string name="airsend_select_target_before_sending">Select a device on the Devices page first.</string>
+    <string name="airsend_single_target_mode">Single target: %1$s</string>
 </resources>

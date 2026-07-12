@@ -57,10 +57,51 @@ data class AirSendDaemonStateSnapshot(
     val peerCount: Int,
     val preferredTarget: String? = null,
     val historyCount: Int,
+    val activeTransferCount: Int = 0,
     val healthWarnings: List<String> = emptyList(),
     val tlsFingerprint: String,
     val transportProtocol: String
 )
+
+@Serializable
+data class AirSendTransferFileSnapshot(
+    val id: String,
+    val name: String,
+    val mimeType: String,
+    val size: Long,
+    val transferredBytes: Long,
+    val status: String
+)
+
+@Serializable
+data class AirSendTransferSnapshot(
+    val id: String,
+    val direction: String,
+    val source: String,
+    val peerId: String,
+    val peerAlias: String,
+    val peerFingerprint: String? = null,
+    val files: List<AirSendTransferFileSnapshot>,
+    val totalBytes: Long,
+    val transferredBytes: Long,
+    val status: String,
+    val startedAtMs: Long,
+    val endedAtMs: Long? = null,
+    val savedPaths: List<String> = emptyList(),
+    val errorCode: String? = null,
+    val errorMessage: String? = null,
+    val retryable: Boolean = false
+) {
+    val progress: Float
+        get() = if (totalBytes <= 0L) {
+            if (status == "completed") 1f else 0f
+        } else {
+            (transferredBytes.toDouble() / totalBytes.toDouble()).toFloat().coerceIn(0f, 1f)
+        }
+
+    val isTerminal: Boolean
+        get() = status in setOf("completed", "failed", "cancelled", "declined")
+}
 
 @Serializable
 data class AirSendPeerSnapshot(

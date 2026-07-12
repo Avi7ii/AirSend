@@ -2,7 +2,9 @@
 // Copyright (C) 2026 InstallerX Revived contributors
 package com.rosan.installer.ui.page.miuix.airsend
 
+import android.annotation.SuppressLint
 import android.widget.Toast
+import android.text.format.Formatter
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
@@ -21,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.pager.HorizontalPager
@@ -70,6 +74,7 @@ import com.rosan.installer.ui.page.airsend.deviceSubtitle
 import com.rosan.installer.ui.page.airsend.runtime.AirSendRuntimeAction
 import com.rosan.installer.ui.page.airsend.runtime.AirSendRuntimeEvent
 import com.rosan.installer.ui.page.airsend.runtime.AirSendRuntimeState
+import com.rosan.installer.ui.page.airsend.runtime.AirSendTransferSnapshot
 import com.rosan.installer.ui.page.airsend.runtime.AirSendRuntimeViewModel
 import com.rosan.installer.ui.page.miuix.widgets.MiuixSwitchWidget
 import com.rosan.installer.ui.page.miuix.widgets.MiuixNavigationItemWidget
@@ -82,6 +87,8 @@ import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
@@ -401,15 +408,163 @@ private fun LazyListScope.airSendMiuixActivity(
     onAction: (AirSendRuntimeAction) -> Unit,
     onPickFiles: () -> Unit
 ) {
-    item(key = "activity-empty-$selectedTab") {
-        MiuixAirSendActivityEmptyCard(
-            icon = layout.emptyIcon.asMiuixIcon(),
-            tint = MiuixTheme.colorScheme.primary,
-            title = stringResource(layout.emptyTitleRes),
-            description = stringResource(layout.emptyDescriptionRes)
-        )
+    val direction = if (selectedTab == 0) "outgoing" else "incoming"
+    val transfers = runtimeState.transfers.filter { it.direction == direction }
+    if (transfers.isEmpty()) {
+        item(key = "activity-empty-$selectedTab") {
+            MiuixAirSendActivityEmptyCard(
+                icon = layout.emptyIcon.asMiuixIcon(),
+                tint = MiuixTheme.colorScheme.primary,
+                title = stringResource(layout.emptyTitleRes),
+                description = stringResource(layout.emptyDescriptionRes)
+            )
+        }
+    } else {
+        item(key = "activity-title-$selectedTab") {
+            SmallTitle(stringResource(R.string.airsend_activity_history))
+        }
+        items(
+            count = transfers.size,
+            key = { index -> "activity-transfer-${transfers[index].id}" }
+        ) { index ->
+            MiuixAirSendTransferCard(transfers[index], onAction)
+        }
     }
     airSendMiuixSections(layout.sections, navigator, runtimeState, onAction, onPickFiles)
+}
+
+@Composable
+private fun MiuixAirSendTransferCard(
+    transfer: AirSendTransferSnapshot,
+    onAction: (AirSendRuntimeAction) -> Unit
+) {
+    val context = LocalContext.current
+    val title = transfer.files.singleOrNull()?.name
+        ?: stringResource(R.string.airsend_transfer_files_count, transfer.files.size)
+    val status = transferStatusLabel(transfer.status)
+    val transferred = Formatter.formatFileSize(context, transfer.transferredBytes)
+    val total = Formatter.formatFileSize(context, transfer.totalBytes)
+    val isActive = !transfer.isTerminal
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = transferStatusIcon(transfer.status),
+                    contentDescription = null,
+                    modifier = Modifier.size(28.dp),
+                    tint = transferStatusColor(transfer.status)
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = stringResource(
+                            R.string.airsend_transfer_peer_status,
+                            transfer.peerAlias,
+                            status
+                        ),
+                        fontSize = 13.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                when {
+                    isActive -> IconButton(
+                        onClick = {
+                            onAction(AirSendRuntimeAction.CancelTransfer(transfer.id))
+                        }
+                    ) {
+                        Icon(
+                            imageVector = AppIcons.Close,
+                            contentDescription = stringResource(R.string.airsend_cancel_transfer),
+                            tint = MiuixTheme.colorScheme.onSurfaceVariantActions
+                        )
+                    }
+                    transfer.retryable -> IconButton(
+                        onClick = {
+                            onAction(AirSendRuntimeAction.RetryTransfer(transfer.id))
+                        }
+                    ) {
+                        Icon(
+                            imageVector = AppIcons.Retry,
+                            contentDescription = stringResource(R.string.airsend_retry_transfer),
+                            tint = MiuixTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+
+            if (isActive) {
+                Spacer(Modifier.height(12.dp))
+                LinearProgressIndicator(
+                    progress = if (transfer.status in setOf("queued", "preparing")) {
+                        null
+                    } else {
+                        transfer.progress
+                    }
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.airsend_transfer_bytes, transferred, total),
+                fontSize = 12.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+            )
+            transfer.errorMessage?.takeIf { it.isNotBlank() }?.let { error ->
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = error,
+                    fontSize = 12.sp,
+                    color = MiuixTheme.colorScheme.error
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun transferStatusLabel(status: String): String = stringResource(
+    when (status) {
+        "queued" -> R.string.airsend_transfer_status_queued
+        "awaiting_acceptance" -> R.string.airsend_transfer_status_waiting
+        "preparing" -> R.string.airsend_transfer_status_preparing
+        "transferring" -> R.string.airsend_transfer_status_transferring
+        "paused" -> R.string.airsend_transfer_status_paused
+        "completed" -> R.string.airsend_transfer_status_completed
+        "failed" -> R.string.airsend_transfer_status_failed
+        "cancelled" -> R.string.airsend_transfer_status_cancelled
+        "declined" -> R.string.airsend_transfer_status_declined
+        else -> R.string.airsend_transfer_status_unknown
+    }
+)
+
+private fun transferStatusIcon(status: String): ImageVector = when (status) {
+    "completed" -> AppIcons.Active
+    "failed", "declined" -> AppIcons.Info
+    "cancelled" -> AppIcons.Close
+    else -> AppIcons.ArrowUp
+}
+
+@Composable
+private fun transferStatusColor(status: String): Color = when (status) {
+    "failed", "declined" -> MiuixTheme.colorScheme.error
+    "cancelled" -> MiuixTheme.colorScheme.onSurfaceVariantActions
+    else -> MiuixTheme.colorScheme.primary
 }
 
 private fun LazyListScope.airSendMiuixDevices(
@@ -567,7 +722,7 @@ private fun MiuixAirSendContentItem(
                     title
                 },
                 summary = description,
-                enabled = runtimeState.daemonReachable,
+                enabled = runtimeState.daemonReachable && runtimeState.preferredTargetId != null,
                 onClick = onPickFiles
             )
         }
@@ -575,7 +730,7 @@ private fun MiuixAirSendContentItem(
             BasicComponent(
                 title = title,
                 summary = description,
-                enabled = runtimeState.daemonReachable,
+                enabled = runtimeState.daemonReachable && runtimeState.preferredTargetId != null,
                 onClick = { onAction(AirSendRuntimeAction.SendClipboardText()) }
             )
         }
@@ -620,6 +775,7 @@ private fun MiuixAirSendContentItem(
 }
 
 @Composable
+@SuppressLint("LocalContextGetResourceValueCall")
 private fun MiuixAirSendRuntimeEvents(viewModel: AirSendRuntimeViewModel) {
     val context = LocalContext.current
     LaunchedEffect(viewModel) {
@@ -668,6 +824,17 @@ private fun miuixAirSendDescription(
         }
         AirSendContentId.NearbyTargets,
         AirSendContentId.SavedDevices -> stringResource(R.string.airsend_peer_count, runtimeState.peers.size)
+        AirSendContentId.SendFile,
+        AirSendContentId.SelectedFiles,
+        AirSendContentId.SendClipboard,
+        AirSendContentId.ClipboardPush -> runtimeState.peers
+            .firstOrNull { it.id == runtimeState.preferredTargetId }
+            ?.let { stringResource(R.string.airsend_send_to_peer, it.alias) }
+            ?: stringResource(R.string.airsend_select_target_before_sending)
+        AirSendContentId.SendMode -> runtimeState.peers
+            .firstOrNull { it.id == runtimeState.preferredTargetId }
+            ?.let { stringResource(R.string.airsend_single_target_mode, it.alias) }
+            ?: stringResource(R.string.airsend_select_target_before_sending)
         AirSendContentId.ClipboardSync -> if (runtimeState.daemonReachable) {
             stringResource(item.descriptionRes)
         } else {
@@ -687,7 +854,6 @@ private fun miuixAirSendNoDeviceDescription(runtimeState: AirSendRuntimeState): 
 private val miuixAirSendUnavailableActions = setOf(
     AirSendContentId.AddManual,
     AirSendContentId.PairTrust,
-    AirSendContentId.SendMode,
     AirSendContentId.ReceiveRequests,
     AirSendContentId.QuickSave,
     AirSendContentId.SaveLocation,

@@ -49,6 +49,7 @@ mod history;
 mod ipc;
 mod logging;
 mod protocol;
+mod transfers;
 
 use config::ConfigStore;
 use history::HistoryStore;

@@ -4,17 +4,21 @@ package com.rosan.installer.ui.page.airsend.runtime
 
 import android.net.Uri
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 
@@ -56,7 +60,31 @@ class AirSendRuntimeRepositoryImpl(
                     ipcClient.request("get_peers")
                 )
                 .map { it.toRuntimePeer(config.preferredTarget) }
-            RefreshSnapshot(hello, daemon, config, peers)
+            val activeTransfers = if ("get_transfers" in hello.capabilities) {
+                AirSendIpcCodec.json.decodeFromJsonElement<List<AirSendTransferSnapshot>>(
+                    ipcClient.request("get_transfers")
+                )
+            } else {
+                emptyList()
+            }
+            val history = if ("get_history" in hello.capabilities) {
+                AirSendIpcCodec.json.decodeFromJsonElement<List<AirSendTransferSnapshot>>(
+                    ipcClient.request(
+                        op = "get_history",
+                        payload = buildJsonObject { put("limit", 100) }
+                    )
+                )
+            } else {
+                emptyList()
+            }
+            val activeIds = activeTransfers.mapTo(mutableSetOf()) { it.id }
+            val durableHistory = history.map { transfer ->
+                if (transfer.id in activeIds) transfer else transfer.copy(retryable = false)
+            }
+            val transfers = (activeTransfers + durableHistory)
+                .distinctBy { it.id }
+                .sortedByDescending { it.startedAtMs }
+            RefreshSnapshot(hello, daemon, config, peers, transfers)
         }.onSuccess { snapshot ->
             val hello = snapshot.hello
             val daemon = snapshot.daemon
@@ -75,6 +103,8 @@ class AirSendRuntimeRepositoryImpl(
                 daemonStartedAtMs = daemon.startedAtMs,
                 preferredTargetId = snapshot.config.preferredTarget,
                 historyCount = daemon.historyCount,
+                activeTransferCount = daemon.activeTransferCount,
+                transfers = snapshot.transfers,
                 healthWarnings = daemon.healthWarnings + compatibilityWarnings,
                 tlsFingerprint = daemon.tlsFingerprint,
                 transportProtocol = daemon.transportProtocol,
@@ -127,11 +157,13 @@ class AirSendRuntimeRepositoryImpl(
 
     override suspend fun sendText(text: String, targetId: String?) {
         require(text.isNotEmpty()) { "Text must not be empty" }
+        val target = targetId ?: state.value.preferredTargetId
+        require(!target.isNullOrBlank()) { "Select a target before sending" }
         ipcClient.request(
             op = "send_text",
             payload = buildJsonObject {
                 put("text", text)
-                targetId?.let { put("targetId", it) }
+                put("targetId", target)
             }
         )
     }
@@ -144,17 +176,38 @@ class AirSendRuntimeRepositoryImpl(
 
     override suspend fun sendFiles(uris: List<Uri>, targetId: String?) {
         require(uris.isNotEmpty()) { "No files selected" }
-        uris.forEach { uri ->
-            val path = androidRuntimeReader.resolvePath(uri)
-            require(!path.isNullOrEmpty()) { "Unable to resolve file: $uri" }
-            ipcClient.request(
-                op = "send_file",
-                payload = buildJsonObject {
-                    put("path", path)
-                    targetId?.let { put("targetId", it) }
-                }
-            )
+        val target = targetId ?: state.value.preferredTargetId
+        require(!target.isNullOrBlank()) { "Select a target before sending" }
+        val paths = withContext(Dispatchers.IO) {
+            uris.map { uri ->
+                androidRuntimeReader.resolvePath(uri)
+                    ?.takeIf { it.isNotBlank() }
+                    ?: error("Unable to read selected file: $uri")
+            }
         }
+        ipcClient.request(
+            op = "send_files",
+            payload = buildJsonObject {
+                put("paths", JsonArray(paths.map(::JsonPrimitive)))
+                put("targetId", target)
+            }
+        )
+    }
+
+    override suspend fun cancelTransfer(transferId: String) {
+        require(transferId.isNotBlank()) { "Transfer id must not be blank" }
+        ipcClient.request(
+            op = "cancel_transfer",
+            payload = buildJsonObject { put("id", transferId) }
+        )
+    }
+
+    override suspend fun retryTransfer(transferId: String) {
+        require(transferId.isNotBlank()) { "Transfer id must not be blank" }
+        ipcClient.request(
+            op = "retry_transfer",
+            payload = buildJsonObject { put("id", transferId) }
+        )
     }
 
     private fun updateLocalState() {
@@ -190,7 +243,8 @@ class AirSendRuntimeRepositoryImpl(
         val hello: AirSendHelloSnapshot,
         val daemon: AirSendDaemonStateSnapshot,
         val config: AirSendConfigSnapshot,
-        val peers: List<AirSendPeer>
+        val peers: List<AirSendPeer>,
+        val transfers: List<AirSendTransferSnapshot>
     )
 
     companion object {

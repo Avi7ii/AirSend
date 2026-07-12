@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 # 🔋 精简 tokio features（原 "full"）
-tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time", "sync", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "fs", "time", "sync", "macros"] }
 localsend = "0.2.2"
 anyhow = "1"
 tracing = "0.1"
@@ -17,7 +17,8 @@ serde_json = "1.0"
 futures-util = "0.3"
 uuid = { version = "1", features = ["v4"] }
 openssl = { version = "0.10", features = ["vendored"] }
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+tokio-util = { version = "0.7", features = ["io"] }
 notify = "6.1.1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 

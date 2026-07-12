@@ -17,4 +17,6 @@ interface AirSendRuntimeRepository {
     suspend fun sendText(text: String, targetId: String? = null)
     suspend fun sendClipboardText(targetId: String? = null)
     suspend fun sendFiles(uris: List<Uri>, targetId: String? = null)
+    suspend fun cancelTransfer(transferId: String)
+    suspend fun retryTransfer(transferId: String)
 }

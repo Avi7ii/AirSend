@@ -39,7 +39,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -47,10 +47,12 @@ use tracing_subscriber::fmt::format::FmtSpan;
 mod config;
 mod domain;
 mod history;
+mod logging;
 mod protocol;
 
 use config::ConfigStore;
 use history::HistoryStore;
+use logging::{LogDecision, RepeatedErrorLimiter, SizeRotatingWriter};
 use protocol::{LegacyCommand, ParsedLine};
 
 const UDS_PATH: &str = "\0airsend_ipc";
@@ -63,6 +65,8 @@ const TLS_KEY_PATH: &str = "/data/adb/airsend/server-key.pem";
 const CONFIG_PATH: &str = "/data/adb/airsend/config.json";
 const HISTORY_PATH: &str = "/data/adb/airsend/history.db";
 const HISTORY_RETENTION: usize = 500;
+const LOG_MAX_BYTES: u64 = 4 * 1024 * 1024;
+const LOG_BACKUP_COUNT: usize = 3;
 #[derive(Clone)]
 struct PreparedTlsIdentity {
     cert_pem: Vec<u8>,
@@ -237,7 +241,7 @@ async fn main() -> Result<()> {
     std::env::remove_var("ALL_PROXY");
     std::env::remove_var("all_proxy");
 
-    let _log_guard = init_logging()?;
+    let (_log_guard, log_writer) = init_logging()?;
     info!("AirSend Daemon 启动 (LocalSend v0.2.2 兼容模式)");
 
     let config_store = ConfigStore::new(CONFIG_PATH);
@@ -267,6 +271,7 @@ async fn main() -> Result<()> {
     let device_info = DeviceInfo::headless_with_identity(tls_identity.fingerprint.clone(), "http");
 
     // 2. 🛡️ 引入韧性轮询：等待系统网络底层设备 (wlan0/tun0) 挂载完成
+    let mut startup_error_limiter = RepeatedErrorLimiter::new(Duration::from_secs(30));
     let mut client = loop {
         match Client::with_config(
             device_info.clone(),
@@ -281,7 +286,19 @@ async fn main() -> Result<()> {
                 break c;
             }
             Err(error) => {
-                tracing::warn!("等待局域网接口就绪: {}... 2秒后重试", error);
+                match startup_error_limiter.record("network_not_ready", Instant::now()) {
+                    LogDecision::Emit => {
+                        tracing::warn!("等待局域网接口就绪: {}... 2秒后重试", error);
+                    }
+                    LogDecision::EmitSummary { suppressed } => {
+                        tracing::warn!(
+                            "等待局域网接口就绪: {}（过去 30 秒抑制 {} 条重复错误）",
+                            error,
+                            suppressed
+                        );
+                    }
+                    LogDecision::Suppress => {}
+                }
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
         }
@@ -319,6 +336,7 @@ async fn main() -> Result<()> {
         client,
         preferred_target: Mutex::new(runtime_config.preferred_target),
         history: history_store,
+        log_writer,
     });
 
     // 🚀 点火：启动底层物理监控协程
@@ -358,6 +376,7 @@ struct AppState {
     client: Client,
     preferred_target: Mutex<Option<String>>,
     history: Arc<HistoryStore>,
+    log_writer: SizeRotatingWriter,
 }
 
 fn spawn_network_rebind_watcher(initial_binding: (Option<String>, Ipv4Addr)) {
@@ -517,9 +536,13 @@ fn notify_android_system(file_path: &str) {
     let _ = Command::new("sh").args(&["-c", &notification_cmd]).spawn();
 }
 
-fn init_logging() -> Result<tracing_appender::non_blocking::WorkerGuard> {
-    let file_appender = tracing_appender::rolling::never(LOG_PATH, LOG_FILE);
-    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+fn init_logging() -> Result<(
+    tracing_appender::non_blocking::WorkerGuard,
+    SizeRotatingWriter,
+)> {
+    let log_path = Path::new(LOG_PATH).join(LOG_FILE);
+    let writer = SizeRotatingWriter::new(log_path, LOG_MAX_BYTES, LOG_BACKUP_COUNT)?;
+    let (non_blocking, guard) = tracing_appender::non_blocking(writer.clone());
 
     // 允许使用 RUST_LOG=trace 从环境变量动态控制级别
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
@@ -535,7 +558,7 @@ fn init_logging() -> Result<tracing_appender::non_blocking::WorkerGuard> {
         // 🔋 后台守护进程无需终端输出（service.sh 已将 stdout 重定向到日志文件）
         .init();
 
-    Ok(guard)
+    Ok((guard, writer))
 }
 
 async fn handle_client(stream: UnixStream, state: Arc<AppState>) -> Result<()> {

@@ -10,8 +10,8 @@ impl Client {
 
     pub async fn listen_multicast(&self) -> crate::error::Result<()> {
         let mut buf = [0; 65536];
-        println!("Socket local addr: {:?}", self.socket.local_addr()?);
-        println!("Listening on multicast addr: {}", self.multicast_addr);
+        tracing::info!("Socket local addr: {:?}", self.socket.local_addr()?);
+        tracing::info!("Listening on multicast addr: {}", self.multicast_addr);
 
         loop {
             match self.socket.recv_from(&mut buf).await {
@@ -20,7 +20,7 @@ impl Client {
                     self.process_device(&received_msg, src).await;
                 }
                 Err(e) => {
-                    eprintln!("Error receiving message: {}", e);
+                    tracing::warn!("Error receiving message: {}", e);
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 }
             }

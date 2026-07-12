@@ -50,7 +50,7 @@ impl Client {
         }
 
         let peer = self.peers.lock().await.get(&peer).unwrap().clone();
-        println!("Peer: {:?}", peer);
+        tracing::debug!("Peer: {:?}", peer);
 
         let response = self
             .http_client
@@ -68,7 +68,7 @@ impl Client {
             .send()
             .await?;
 
-        println!("Response: {:?}", response);
+        tracing::debug!("Response: {:?}", response);
 
         let response: PrepareUploadResponse = response.json().await?;
 
@@ -130,11 +130,11 @@ impl Client {
             //.post(&format!("https://webhook.site/2f23a529-b687-4375-ad5f-54906ab26ac7?session_id={}&file_id={}&token={}", session_id, file_id, token))
             .body(body);
 
-        println!("Uploading file: {:?}", request);
+        tracing::debug!("Uploading file: {:?}", request);
         let response = request.send().await?;
 
         if response.status() != 200 {
-            println!("Upload failed: {:?}", response);
+            tracing::warn!("Upload failed: {:?}", response);
             return Err(LocalSendError::UploadFailed);
         }
 
@@ -204,7 +204,7 @@ pub async fn register_prepare_upload(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(req): Json<PrepareUploadRequest>,
 ) -> impl IntoResponse {
-    println!("Received upload request from alias: {}", req.info.alias);
+    tracing::info!("Received upload request from alias: {}", req.info.alias);
 
     let mut sender_addr = addr;
     sender_addr.set_port(req.info.port);
@@ -261,9 +261,10 @@ pub async fn register_upload(
     let file_id = &params.file_id;
     let token = &params.token;
 
-    println!(
+    tracing::info!(
         "📥 [register_upload] Receiving body stream, fileId: {}, sessionId: {}",
-        file_id, session_id
+        file_id,
+        session_id
     );
 
     // Validate the session while holding the lock, then stream outside it.
@@ -311,7 +312,7 @@ pub async fn register_upload(
             }
         };
         let text_content = String::from_utf8_lossy(&body).to_string();
-        println!("📥 拦截到纯文本/剪贴板数据，长度: {}", text_content.len());
+        tracing::info!("📥 拦截到纯文本/剪贴板数据，长度: {}", text_content.len());
 
         // 异步推给 Android App 的 LocalServerSocket
         tokio::spawn(async move {
@@ -321,9 +322,9 @@ pub async fn register_upload(
                 Ok(mut stream) => {
                     let _ = stream.write_all(text_content.as_bytes()).await;
                     let _ = stream.shutdown().await;
-                    println!("✅ 成功将文本推送到 Android App IPC 总线");
+                    tracing::info!("✅ 成功将文本推送到 Android App IPC 总线");
                 }
-                Err(e) => println!(
+                Err(e) => tracing::warn!(
                     "❌ 无法连接到 App IPC (请确保App在前台运行且已启动 Reverse IPC): {}",
                     e
                 ),
@@ -431,7 +432,7 @@ pub async fn register_upload(
         )
             .into_response();
     }
-    println!("✅ Streamed {} bytes to {}", written_bytes, file_path);
+    tracing::info!("✅ Streamed {} bytes to {}", written_bytes, file_path);
 
     // ==========================================
     // 📷 触发 Android 媒体扫描器
@@ -448,7 +449,7 @@ pub async fn register_upload(
                 &format!("file://{}", file_path),
             ])
             .spawn();
-        println!("📸 媒体已落盘至 {}，并触发系统相册刷新", file_path);
+        tracing::info!("📸 媒体已落盘至 {}，并触发系统相册刷新", file_path);
     }
 
     StatusCode::OK.into_response()

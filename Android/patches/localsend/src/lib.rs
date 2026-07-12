@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket as StdUdpSocket};
 use std::process::Command;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -47,6 +47,47 @@ pub struct Client {
 struct NetworkBinding {
     interface: Option<String>,
     ipv4: Option<Ipv4Addr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AnnouncementLogDecision {
+    Emit,
+    Suppress,
+    EmitSummary { suppressed: u64 },
+}
+
+struct AnnouncementLogGate {
+    window: Duration,
+    last_emit: Option<Instant>,
+    suppressed: u64,
+}
+
+impl AnnouncementLogGate {
+    fn new(window: Duration) -> Self {
+        Self {
+            window,
+            last_emit: None,
+            suppressed: 0,
+        }
+    }
+
+    fn record(&mut self, now: Instant) -> AnnouncementLogDecision {
+        let Some(last_emit) = self.last_emit else {
+            self.last_emit = Some(now);
+            return AnnouncementLogDecision::Emit;
+        };
+        if now.duration_since(last_emit) < self.window {
+            self.suppressed = self.suppressed.saturating_add(1);
+            return AnnouncementLogDecision::Suppress;
+        }
+        self.last_emit = Some(now);
+        let suppressed = std::mem::take(&mut self.suppressed);
+        if suppressed == 0 {
+            AnnouncementLogDecision::Emit
+        } else {
+            AnnouncementLogDecision::EmitSummary { suppressed }
+        }
+    }
 }
 
 fn is_private_lan_ipv4(ip: Ipv4Addr) -> bool {
@@ -366,7 +407,7 @@ impl Client {
             let client = self.clone();
             tokio::spawn(async move {
                 if let Err(e) = client.start_http_server().await {
-                    eprintln!("HTTP server error: {}", e);
+                    tracing::error!("HTTP server error: {}", e);
                 }
             })
         };
@@ -375,7 +416,7 @@ impl Client {
             let client = self.clone();
             tokio::spawn(async move {
                 if let Err(e) = client.listen_multicast().await {
-                    eprintln!("UDP listener error: {}", e);
+                    tracing::error!("UDP listener error: {}", e);
                 }
             })
         };
@@ -383,9 +424,22 @@ impl Client {
         let announcement_handle = {
             let client = self.clone();
             tokio::spawn(async move {
+                let mut log_gate = AnnouncementLogGate::new(Duration::from_secs(30));
                 loop {
                     if let Err(e) = client.announce(None).await {
-                        eprintln!("Announcement error: {}", e);
+                        match log_gate.record(Instant::now()) {
+                            AnnouncementLogDecision::Emit => {
+                                tracing::warn!("Announcement error: {}", e);
+                            }
+                            AnnouncementLogDecision::EmitSummary { suppressed } => {
+                                tracing::warn!(
+                                    "Announcement error: {} (suppressed {} repeats)",
+                                    e,
+                                    suppressed
+                                );
+                            }
+                            AnnouncementLogDecision::Suppress => {}
+                        }
                     }
                     let has_peers = !client.peers.lock().await.is_empty();
                     let next_interval_secs = if has_peers { 30 } else { 5 };
@@ -417,7 +471,7 @@ impl Client {
         };
 
         let peer_key = peer_ipv4.to_string();
-        let mut pinned = self.pinned_neighbors.lock().await;
+        let pinned = self.pinned_neighbors.lock().await;
         if pinned.get(&peer_key).map(String::as_str) == Some(mac_address) {
             return;
         }
@@ -443,22 +497,24 @@ impl Client {
             Ok(Ok(output)) if output.status.success() => {
                 let mut pinned = self.pinned_neighbors.lock().await;
                 pinned.insert(peer_key.clone(), mac_address.to_string());
-                eprintln!(
+                tracing::info!(
                     "Pinned peer neighbor {} -> {} on {}",
-                    peer_key, mac_address, interface
+                    peer_key,
+                    mac_address,
+                    interface
                 );
             }
             Ok(Ok(output)) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                eprintln!(
+                tracing::warn!(
                     "Failed to pin neighbor {} -> {}: {}",
                     peer_key,
                     mac_address,
                     stderr.trim()
                 );
             }
-            Ok(Err(err)) => eprintln!("Failed to spawn ip neigh command: {}", err),
-            Err(err) => eprintln!("Neighbor pin task failed: {}", err),
+            Ok(Err(err)) => tracing::warn!("Failed to spawn ip neigh command: {}", err),
+            Err(err) => tracing::warn!("Neighbor pin task failed: {}", err),
         }
     }
 }
@@ -469,4 +525,26 @@ fn is_valid_mac_address(value: &str) -> bool {
         && parts
             .iter()
             .all(|part| part.len() == 2 && u8::from_str_radix(part, 16).is_ok())
+}
+
+#[cfg(test)]
+mod announcement_log_tests {
+    use super::{AnnouncementLogDecision, AnnouncementLogGate};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn repeated_announcement_errors_are_suppressed_and_summarized() {
+        let now = Instant::now();
+        let mut gate = AnnouncementLogGate::new(Duration::from_secs(30));
+
+        assert_eq!(gate.record(now), AnnouncementLogDecision::Emit);
+        assert_eq!(
+            gate.record(now + Duration::from_secs(5)),
+            AnnouncementLogDecision::Suppress
+        );
+        assert_eq!(
+            gate.record(now + Duration::from_secs(31)),
+            AnnouncementLogDecision::EmitSummary { suppressed: 1 }
+        );
+    }
 }

@@ -172,13 +172,17 @@ impl Client {
         }
         let source_ip = source.ip().to_string();
 
-        eprintln!(
+        tracing::debug!(
             "Campus packet rx type={} transfer={} from={} to={} via={}",
-            envelope.kind, envelope.transfer_id, envelope.sender_id, envelope.target_id, source_ip
+            envelope.kind,
+            envelope.transfer_id,
+            envelope.sender_id,
+            envelope.target_id,
+            source_ip
         );
         match self.handle_campus_message(envelope, &source_ip).await {
             Ok(()) => {}
-            Err(err) => eprintln!("Campus fallback error: {}", err),
+            Err(err) => tracing::warn!("Campus fallback error: {}", err),
         }
         true
     }
@@ -636,11 +640,15 @@ impl Client {
 
     async fn send_campus_message(&self, message: &CampusEnvelope) -> crate::error::Result<()> {
         let payload = serde_json::to_vec(message)?;
-        eprintln!(
+        tracing::debug!(
             "Campus packet tx type={} transfer={} from={} to={}",
-            message.kind, message.transfer_id, message.sender_id, message.target_id
+            message.kind,
+            message.transfer_id,
+            message.sender_id,
+            message.target_id
         );
-        let broadcast_addr = SocketAddrV4::new(Ipv4Addr::new(255, 255, 255, 255), self.discovery_port);
+        let broadcast_addr =
+            SocketAddrV4::new(Ipv4Addr::new(255, 255, 255, 255), self.discovery_port);
 
         let multicast_result = self.socket.send_to(&payload, self.multicast_addr).await;
         let broadcast_result = self.socket.send_to(&payload, broadcast_addr).await;
@@ -800,9 +808,10 @@ impl Client {
         let incoming_pruned = incoming_before.saturating_sub(campus.incoming.len());
         let outgoing_pruned = outgoing_before.saturating_sub(campus.outgoing.len());
         if incoming_pruned > 0 || outgoing_pruned > 0 {
-            eprintln!(
+            tracing::info!(
                 "Campus fallback pruned stale transfers incoming={} outgoing={}",
-                incoming_pruned, outgoing_pruned
+                incoming_pruned,
+                outgoing_pruned
             );
         }
     }

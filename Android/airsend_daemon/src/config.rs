@@ -321,28 +321,30 @@ mod tests {
 
     #[test]
     fn normalizes_duplicate_peers_and_fingerprints() {
-        let mut config = AirSendConfig::default();
-        config.manual_peers = vec![
-            ManualPeer {
-                id: "one".to_string(),
-                alias: " First ".to_string(),
-                address: " 192.168.1.8 ".to_string(),
-                port: 53317,
-                fingerprint: None,
-            },
-            ManualPeer {
-                id: "two".to_string(),
-                alias: "Second".to_string(),
-                address: "192.168.1.8".to_string(),
-                port: 53317,
-                fingerprint: None,
-            },
-        ];
-        config.trusted_peer_fingerprints = vec![
-            " AA:BB ".to_string(),
-            "aa:bb".to_string(),
-            "CC:DD".to_string(),
-        ];
+        let config = AirSendConfig {
+            manual_peers: vec![
+                ManualPeer {
+                    id: "one".to_string(),
+                    alias: " First ".to_string(),
+                    address: " 192.168.1.8 ".to_string(),
+                    port: 53317,
+                    fingerprint: None,
+                },
+                ManualPeer {
+                    id: "two".to_string(),
+                    alias: "Second".to_string(),
+                    address: "192.168.1.8".to_string(),
+                    port: 53317,
+                    fingerprint: None,
+                },
+            ],
+            trusted_peer_fingerprints: vec![
+                " AA:BB ".to_string(),
+                "aa:bb".to_string(),
+                "CC:DD".to_string(),
+            ],
+            ..AirSendConfig::default()
+        };
 
         let normalized = config.normalized().unwrap();
 

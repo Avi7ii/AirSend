@@ -1,13 +1,13 @@
 use crate::domain::{HistoryFile, HistoryRecord};
 use anyhow::{anyhow, Context, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
-const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 1;
 
 #[derive(Debug)]
 pub struct HistoryStore {
@@ -174,25 +174,6 @@ impl HistoryStore {
             .lock()
             .map_err(|_| anyhow!("history database lock poisoned"))?;
         Ok(connection.execute("DELETE FROM transfer_history", [])?)
-    }
-
-    pub fn get(&self, id: &str) -> Result<Option<HistoryRecord>> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| anyhow!("history database lock poisoned"))?;
-        let mut statement = connection.prepare(
-            "SELECT id, direction, source, peer_id, peer_alias,
-                    peer_fingerprint, files_json, total_bytes,
-                    transferred_bytes, status, started_at_ms, ended_at_ms,
-                    saved_paths_json, error_code, error_message, retryable
-             FROM transfer_history WHERE id = ?1",
-        )?;
-        statement
-            .query_row([id], RawHistoryRecord::from_row)
-            .optional()?
-            .map(RawHistoryRecord::decode)
-            .transpose()
     }
 }
 

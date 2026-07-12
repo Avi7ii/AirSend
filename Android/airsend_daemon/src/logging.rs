@@ -61,6 +61,7 @@ impl RepeatedErrorLimiter {
         }
     }
 
+    #[cfg(test)]
     pub fn suppressed(&self, key: &str) -> u64 {
         self.errors
             .get(key)
@@ -261,7 +262,7 @@ mod tests {
         std::fs::write(&path, vec![b'x'; 80]).unwrap();
         let mut writer = SizeRotatingWriter::new(path.clone(), 100, 2).unwrap();
 
-        writer.write_all(&vec![b'y'; 40]).unwrap();
+        writer.write_all(&[b'y'; 40]).unwrap();
         writer.flush().unwrap();
 
         assert!(path.with_extension("log.1").exists());
@@ -335,7 +336,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("airsend.log");
         let mut writer = SizeRotatingWriter::new(path.clone(), 100, 2).unwrap();
-        writer.write_all(&vec![b'x'; 150]).unwrap();
+        writer.write_all(&[b'x'; 150]).unwrap();
         writer.flush().unwrap();
         assert!(path.with_extension("log.1").exists());
 

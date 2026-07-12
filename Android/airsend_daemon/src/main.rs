@@ -2,9 +2,9 @@ use notify::{
     event::AccessKind, event::AccessMode, event::ModifyKind, event::RenameMode, EventKind,
     RecursiveMode, Watcher,
 };
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::AsyncWriteExt;
 use tokio::net::{UnixListener, UnixStream};
-use tracing::{error, info, warn, Level};
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use anyhow::{Context, Result};
@@ -41,19 +41,20 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use tokio::sync::Mutex;
-use tracing_subscriber::fmt::format::FmtSpan;
 
 mod config;
 mod domain;
+mod events;
 mod history;
+mod ipc;
 mod logging;
 mod protocol;
 
 use config::ConfigStore;
 use history::HistoryStore;
+use ipc::DaemonServices;
 use logging::{LogDecision, RepeatedErrorLimiter, SizeRotatingWriter};
-use protocol::{LegacyCommand, ParsedLine};
+use protocol::LegacyCommand;
 
 const UDS_PATH: &str = "\0airsend_ipc";
 
@@ -255,6 +256,7 @@ async fn main() -> Result<()> {
         .save(&config_outcome.config)
         .context("Failed to persist normalized AirSend configuration")?;
     let runtime_config = config_outcome.config;
+    let health_warnings = config_outcome.warning.into_iter().collect::<Vec<_>>();
     let history_store = Arc::new(
         HistoryStore::open(HISTORY_PATH, HISTORY_RETENTION)
             .context("Failed to open AirSend transfer history")?,
@@ -268,7 +270,16 @@ async fn main() -> Result<()> {
     let tls_identity =
         load_or_create_tls_identity().context("Failed to initialize TLS identity")?;
     info!("🔐 TLS 设备指纹: {}", tls_identity.fingerprint);
-    let device_info = DeviceInfo::headless_with_identity(tls_identity.fingerprint.clone(), "http");
+    let device_info = DeviceInfo::headless_with_identity(tls_identity.fingerprint.clone(), "https");
+    let services = Arc::new(DaemonServices::new(
+        config_store,
+        runtime_config.clone(),
+        history_store,
+        log_writer,
+        health_warnings,
+        tls_identity.fingerprint.clone(),
+        "https",
+    ));
 
     // 2. 🛡️ 引入韧性轮询：等待系统网络底层设备 (wlan0/tun0) 挂载完成
     let mut startup_error_limiter = RepeatedErrorLimiter::new(Duration::from_secs(30));
@@ -305,7 +316,7 @@ async fn main() -> Result<()> {
     };
 
     // 原有的构建 HTTP Client 逻辑保持不变
-    let mut http_client_builder = reqwest::Client::builder()
+    let http_client_builder = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .no_proxy(); // 🔪 彻底物理切断所有内置代理探测逻辑
 
@@ -330,14 +341,12 @@ async fn main() -> Result<()> {
     client.http_client = http_client_builder
         .build()
         .context("Failed to build insecure HTTP client")?;
-    client.tls_identity = None;
-
-    let state = Arc::new(AppState {
-        client,
-        preferred_target: Mutex::new(runtime_config.preferred_target),
-        history: history_store,
-        log_writer,
+    client.tls_identity = Some(TlsIdentity {
+        cert_pem: tls_identity.cert_pem,
+        key_pem: tls_identity.key_pem,
     });
+
+    let state = Arc::new(AppState { client, services });
 
     // 🚀 点火：启动底层物理监控协程
     spawn_physical_watcher(state.clone());
@@ -362,7 +371,7 @@ async fn main() -> Result<()> {
             Ok((stream, _)) => {
                 let state_clone = state.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_client(stream, state_clone).await {
+                    if let Err(e) = ipc::handle_client(stream, state_clone).await {
                         error!("IPC Error: {:?}", e);
                     }
                 });
@@ -374,9 +383,7 @@ async fn main() -> Result<()> {
 
 struct AppState {
     client: Client,
-    preferred_target: Mutex<Option<String>>,
-    history: Arc<HistoryStore>,
-    log_writer: SizeRotatingWriter,
+    services: Arc<DaemonServices>,
 }
 
 fn spawn_network_rebind_watcher(initial_binding: (Option<String>, Ipv4Addr)) {
@@ -428,7 +435,7 @@ fn schedule_self_restart() -> Result<()> {
 }
 
 // 确保你传入了包含 LocalSend 客户端的 state
-pub fn spawn_physical_watcher(state: Arc<AppState>) {
+fn spawn_physical_watcher(state: Arc<AppState>) {
     // 1. 创建 Tokio 原生的异步 Channel，桥接同步内核中断与异步运行时
     let (tx, mut rx) = mpsc::unbounded_channel();
 
@@ -464,12 +471,12 @@ pub fn spawn_physical_watcher(state: Arc<AppState>) {
             match res {
                 Ok(event) => {
                     // 匹配系统截图落盘的真实物理动作 (关闭写入或重命名 .pending)
-                    let is_target_event = match event.kind {
-                        EventKind::Access(AccessKind::Close(AccessMode::Write)) => true,
-                        EventKind::Modify(ModifyKind::Name(RenameMode::To)) => true,
-                        EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => true,
-                        _ => false,
-                    };
+                    let is_target_event = matches!(
+                        event.kind,
+                        EventKind::Access(AccessKind::Close(AccessMode::Write))
+                            | EventKind::Modify(ModifyKind::Name(RenameMode::To))
+                            | EventKind::Modify(ModifyKind::Name(RenameMode::Both))
+                    );
 
                     if is_target_event {
                         if let Some(path_buf) = event.paths.first() {
@@ -515,27 +522,6 @@ pub fn spawn_physical_watcher(state: Arc<AppState>) {
     });
 }
 
-fn notify_android_system(file_path: &str) {
-    let _ = Command::new("am")
-        .args(&[
-            "broadcast",
-            "-a",
-            "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
-            "-d",
-            &format!("file://{}", file_path),
-        ])
-        .spawn();
-    let filename = Path::new(file_path)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("新文件");
-    let notification_cmd = format!(
-        "cmd notification post -S bigtext -t 'AirSend' 'airsend_rec' '已收到文件: {}'",
-        filename
-    );
-    let _ = Command::new("sh").args(&["-c", &notification_cmd]).spawn();
-}
-
 fn init_logging() -> Result<(
     tracing_appender::non_blocking::WorkerGuard,
     SizeRotatingWriter,
@@ -561,65 +547,7 @@ fn init_logging() -> Result<(
     Ok((guard, writer))
 }
 
-async fn handle_client(stream: UnixStream, state: Arc<AppState>) -> Result<()> {
-    let (reader, mut writer) = stream.into_split();
-    let mut buf_reader = BufReader::new(reader);
-    let mut line = String::new();
-    while buf_reader.read_line(&mut line).await? != 0 {
-        let cmd = line.strip_suffix('\n').unwrap_or(&line);
-        let cmd = cmd.strip_suffix('\r').unwrap_or(cmd);
-        if !cmd.is_empty() {
-            match ParsedLine::parse(cmd) {
-                Ok(ParsedLine::Legacy(LegacyCommand::GetPeers)) => {
-                    #[derive(serde::Serialize)]
-                    struct PeerDto {
-                        id: String,
-                        alias: String,
-                        device_model: String,
-                    }
-
-                    let peers = state.client.peers.lock().await;
-                    let mut peer_list = Vec::new();
-                    for (id, (_, info)) in peers.iter() {
-                        peer_list.push(PeerDto {
-                            id: id.clone(),
-                            alias: info.alias.clone(),
-                            device_model: info
-                                .device_model
-                                .clone()
-                                .unwrap_or_else(|| "Unknown".to_string()),
-                        });
-                    }
-                    if let Ok(json) = serde_json::to_string(&peer_list) {
-                        let response = format!("{}\n", json);
-                        if let Err(e) = writer.write_all(response.as_bytes()).await {
-                            error!("Write GET_PEERS error: {:?}", e);
-                        }
-                    }
-                }
-                Ok(ParsedLine::Legacy(command)) => {
-                    let state_ref = state.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = process_command(command, &state_ref).await {
-                            error!("Command failed: {:?}", e);
-                        }
-                    });
-                }
-                Ok(ParsedLine::Request(request)) => {
-                    warn!(
-                        "Versioned IPC request is not dispatched yet: {}",
-                        request.op
-                    );
-                }
-                Err(e) => warn!("Invalid IPC command {:?}: {}", cmd, e),
-            }
-        }
-        line.clear();
-    }
-    Ok(())
-}
-
-async fn process_command(command: LegacyCommand, state: &AppState) -> Result<()> {
+pub(crate) async fn process_command(command: LegacyCommand, state: &AppState) -> Result<()> {
     match command {
         LegacyCommand::GetPeers => {}
         LegacyCommand::SendText { target_id, text } => {
@@ -632,12 +560,16 @@ async fn process_command(command: LegacyCommand, state: &AppState) -> Result<()>
     Ok(())
 }
 
-async fn send_data(
+pub(crate) async fn send_data(
     state: &AppState,
     target_id_opt: Option<String>,
     data: &str,
     is_text: bool,
-) -> Result<()> {
+) -> Result<String> {
+    let target_id_opt = match target_id_opt {
+        Some(target_id) => Some(target_id),
+        None => state.services.config().await.preferred_target,
+    };
     if let Some(tid) = target_id_opt {
         let mut retries = 0;
         let (target_id, target_addr) = loop {
@@ -654,7 +586,8 @@ async fn send_data(
             tokio::time::sleep(Duration::from_millis(500)).await;
             retries += 1;
         };
-        return send_to_target(state, &target_id, &target_addr, data, is_text).await;
+        send_to_target(state, &target_id, &target_addr, data, is_text).await?;
+        return Ok(target_id);
     }
 
     // 自动模式：遍历所有候选 peer，避免卡死在陈旧 IP 上。
@@ -686,7 +619,7 @@ async fn send_data(
                 target_addr
             );
             match send_to_target(state, &target_id, &target_addr, data, is_text).await {
-                Ok(_) => return Ok(()),
+                Ok(_) => return Ok(target_id),
                 Err(err) => {
                     tracing::warn!("⚠️ 目标 [{}] 发送失败: {}", target_id, err);
                     last_error = Some(err);

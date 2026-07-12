@@ -48,7 +48,7 @@ fun ColorSpecSelector(viewModel: ThemeSettingsViewModel) {
 
     DropDownMenuWidget(
         icon = Icons.TwoTone.DesignServices,
-        title = stringResource(id = R.string.theme_settings_color_spec),
+        title = stringResource(id = R.string.settings_color_spec),
         description = descriptionText,
         enabled = isSpec2025Supported, // Disable interaction if not supported
         choice = availableSpecs.indexOf(activeSpec).coerceAtLeast(0),

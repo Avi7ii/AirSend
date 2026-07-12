@@ -38,7 +38,7 @@
     <string name="app_version_info_format">%1$s %2$s %3$s (%4$s)</string>
     <string name="user_terms">Политика за Потребителя</string>
     <string name="shizuku_not_available">Моля активирай Sui или Shizuku</string>
-    <string name="about_detail">Относно InstallerX Revived</string>
+    <string name="about_detail">Относно AirSend</string>
     <string name="updating">Актуализиране…</string>
     <string name="get_update">Вземи актуализация</string>
     <string name="update_available">Актуализация Налична: %1$s</string>
@@ -51,7 +51,6 @@
     <string name="stable">Стабилен</string>
     <string name="preview">Прегледай</string>
     <string name="unstable">Нестабилен</string>
-    <string name="telegram_group">Telegram група</string>
     <string name="open_source_license_settings_description">Преглед на библиотеки с отворен код от трета страна и техните лицензи</string>
     <string name="working_status_default_installer_desc">Приложението в момента е инсталаторът по подразбиране</string>
     <string name="working_status_system_installer">Работи като инсталатор на системни пакети</string>
@@ -66,10 +65,11 @@
     <string name="get_source_code_detail">Провери за ядрен код от GitHub</string>
     <string name="save_logs_desc">Запази лог в лоаклен файл за дебъгване</string>
     <string name="export_logs_desc">Изкарай логовете на приложението</string>
-    <string name="uninstall_title">Деинсталирай InstallerX Revived</string>
+    <string name="uninstall_title">Деинсталирай AirSend</string>
     <string name="enable_notification_hint">Моля активирай право за нотификаций за да инсталирате!</string>
     <string name="enable_storage_permission_hint">Моля активирай All Files право за да инсталирате!</string>
     <string name="discuss">Чат и Обратна Връзка и Актуализаций</string>
+    <string name="telegram_group">Telegram група</string>
     <string name="telegram_group_desc">Присъедини се в групата!</string>
     <string name="telegram_channel">Telegram Канал</string>
     <string name="telegram_channel_desc">Присъедини се в канала за да получиш новини и актуализаций!</string>
@@ -102,7 +102,6 @@
     <string name="theme_settings_dynamic_color">Динамичен Цвят</string>
     <string name="theme_settings_dynamic_color_desc">Темен цвят базиран по тапета ти</string>
     <string name="theme_settings_theme_color">Темен Цвят</string>
-    <string name="theme_settings_dynamic_color_follow_icon">Цветен Диалог</string>
     <string name="color_default">По Подразбиране</string>
     <string name="color_pink">Розов</string>
     <string name="color_red">Червен</string>
@@ -207,7 +206,6 @@
     <string name="config_package_source_downloaded_file">Изтеглен Файл</string>
     <string name="config_installer_mode_self">По Подразбиране</string>
     <string name="config_installer_mode_custom">Персонализиран</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon">Цветен Прогрес на Живо</string>
     <string name="home_device_info_model">Модел</string>
     <string name="home_device_info_system">Система</string>
     <string name="home_device_info_title">Информация за Устройството</string>
@@ -217,8 +215,8 @@
     <string name="notification_style">Стил на Нотификацията</string>
     <string name="priv_page_what_is_this_title">Какво е това?</string>
     <string name="lab_mi_island_outer_glow">Външен Блясък</string>
-    <string name="home_learn_more_installerx_title">Научи за InstallerX Revived</string>
-    <string name="home_learn_more_installerx_desc">Научи как да настроиш и използваш InstallerX</string>
+    <string name="home_learn_more_airsend_title">Научи за AirSend</string>
+    <string name="home_learn_more_airsend_desc">Научи как да настроиш и използваш AirSend</string>
     <string name="lab_mi_island">Mi Super Island</string>
     <string name="lab_show_apk_path_label">Файлова локация</string>
     <string name="lab_show_apk_path">Покажи файлова локация</string>

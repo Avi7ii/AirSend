@@ -6,6 +6,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.rosan.installer.domain.settings.model.app.NamedPackage
@@ -25,7 +26,8 @@ class AppDataStore(
     enum class PreferenceValueType {
         STRING,
         INT,
-        BOOLEAN
+        BOOLEAN,
+        FLOAT
     }
 
     data class SupportedPreferenceKey<T>(
@@ -57,6 +59,7 @@ class AppDataStore(
         val UI_USE_MIUIX = register(booleanPreferencesKey("ui_use_miui_x"), PreferenceValueType.BOOLEAN)
         val UI_USE_MIUIX_MONET = register(booleanPreferencesKey("ui_use_miui_x_monet"), PreferenceValueType.BOOLEAN)
         val UI_USE_APPLE_FLOATING_BAR = register(booleanPreferencesKey("ui_use_apple_floating_bar"), PreferenceValueType.BOOLEAN)
+        val UI_PAGE_SCALE = register(floatPreferencesKey("page_scale"), PreferenceValueType.FLOAT)
         val UI_DYN_COLOR_FOLLOW_PKG_ICON = register(booleanPreferencesKey("ui_dyn_color_follow_pkg_icon"), PreferenceValueType.BOOLEAN)
         val LIVE_ACTIVITY_DYN_COLOR_FOLLOW_PKG_ICON =
             register(booleanPreferencesKey("live_activity_dyn_color_follow_pkg_icon"), PreferenceValueType.BOOLEAN)
@@ -200,6 +203,13 @@ class AppDataStore(
     }
 
     fun getInt(key: Preferences.Key<Int>, default: Int = 0): Flow<Int> =
+        dataStore.data.map { it[key] ?: default }
+
+    suspend fun putFloat(key: Preferences.Key<Float>, value: Float) {
+        dataStore.edit { it[key] = value }
+    }
+
+    fun getFloat(key: Preferences.Key<Float>, default: Float = 0f): Flow<Float> =
         dataStore.data.map { it[key] ?: default }
 
     suspend fun putBoolean(key: Preferences.Key<Boolean>, value: Boolean) {

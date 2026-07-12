@@ -18,10 +18,8 @@ sealed interface ThemeSettingsAction {
     data class SetUseDynamicColor(val use: Boolean) : ThemeSettingsAction
     data class SetUseMiuixMonet(val use: Boolean) : ThemeSettingsAction
     data class SetUseAppleFloatingBar(val use: Boolean) : ThemeSettingsAction
-    data class SetDynColorFollowPkgIcon(val follow: Boolean) : ThemeSettingsAction
-    data class SetDynColorFollowPkgIconForLiveActivity(val follow: Boolean) : ThemeSettingsAction
+    data class SetPageScale(val scale: Float) : ThemeSettingsAction
     data class SetSeedColor(val color: Color) : ThemeSettingsAction
-    data class ChangePreferSystemIcon(val preferSystemIcon: Boolean) : ThemeSettingsAction
     data class SetPredictiveBackAnimation(val animation: PredictiveBackAnimation) : ThemeSettingsAction
     data class SetPredictiveBackExitDirection(val direction: PredictiveBackExitDirection) : ThemeSettingsAction
 }

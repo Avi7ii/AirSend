@@ -16,7 +16,7 @@
     <string name="menu">Menu</string>
     <string name="about">À propos</string>
     <string name="other">Autre</string>
-    <string name="about_detail">À propos d\'InstallerX Revived</string>
+    <string name="about_detail">À propos d\'AirSend</string>
     <string name="get_update">Mettre à jour</string>
     <string name="get_update_detail">Vérifier les mises à jour et nouvelles fonctionnalités</string>
     <string name="get_source_code">Voir le code source</string>
@@ -63,11 +63,11 @@
     <string name="ignore_battery_optimizations_desc">Utile sur certaines ROMs qui n\'aiment pas les applications en arrière-plan</string>
     <string name="ignore_battery_optimizations_desc_disabled">Déjà ignoré</string>
     <string name="lock_default_installer">Définir comme installateur par défaut</string>
-    <string name="lock_default_installer_desc">Définir InstallerX comme appli par défaut pour installer les APKs</string>
+    <string name="lock_default_installer_desc">Définir AirSend comme appli par défaut pour installer les APKs</string>
     <string name="lock_default_installer_success">Défini avec succès comme installateur par défaut</string>
     <string name="lock_default_installer_failed">Impossible de définir comme installateur par défaut</string>
     <string name="unlock_default_installer">Réinitialiser l\'installateur par défaut</string>
-    <string name="unlock_default_installer_desc">Retirez InstallerX comme installateur par défaut pour installer des APKs</string>
+    <string name="unlock_default_installer_desc">Retirez AirSend comme installateur par défaut pour installer des APKs</string>
     <string name="unlock_default_installer_success">Installateur par défaut réinitialiser avec succès</string>
     <string name="unlock_default_installer_failed">Échec de la réinitialisation de l\'installateur par défaut</string>
     <string name="clear_cache">Vider le cache</string>
@@ -228,7 +228,7 @@
     <string name="permission_write_external_storage">Modifier le stockage externe</string>
     <string name="permission_dhizuku">Utiliser Dhizuku</string>
     <string name="permission_unknown">Permission inconnue</string>
-    <string name="installer_running">InstallerX en cours d\'exécution</string>
+    <string name="installer_running">AirSend en cours d\'exécution</string>
     <string name="installer_version_short">Ver. %1$s (%2$s)</string>
     <string name="installer_version">Version: %1$s (%2$s)</string>
     <string name="installer_version2">%1$s (%2$s)</string>
@@ -311,9 +311,6 @@
     <string name="config_all_users">Installer pour tous les utilisateurs</string>
     <string name="config_all_users_desc">Installer le package pour tous les utilisateurs du système, au lieu de simplement l\'utilisateur spécifié ou par défaut</string>
     <string name="config_allow_downgrade">Autoriser la rétrogradation</string>
-    <string name="theme_settings_package_icons">Icône du package</string>
-    <string name="theme_settings_prefer_system_icon">Utiliser l\'icône du système</string>
-    <string name="theme_settings_prefer_system_icon_desc">Essaiera d\'obtenir l\'icône du système, utile quand vous utilisez des packs d\'icônes. Désactivez pour afficher l\'icône du package</string>
     <string name="no_cache">Pas de cache</string>
     <string name="clearing_cache">Suppression du cache…</string>
     <string name="cache_size">Taille du cache : %1$s</string>
@@ -452,8 +449,8 @@
     <string name="installer_show_oem_special">Afficher les infos d\'OEM</string>
     <string name="installer_show_oem_special_desc">Analyser et afficher des infos spécifiques aux APK de certains OEM dans le dialogue d\'installation</string>
     <string name="config_global_default">Valeur par défaut globale</string>
-    <string name="uninstall_title">Désinstaller InstallerX Revived</string>
-    <string name="uninstall_content">Après avoir désinstallé l\'appli, vous ne pourrez plus utiliser InstallerX Revived pour installer des applis.</string>
+    <string name="uninstall_title">Désinstaller AirSend</string>
+    <string name="uninstall_content">Après avoir désinstallé l\'appli, vous ne pourrez plus utiliser AirSend pour installer des applis.</string>
     <string name="auto_lock_default_installer">Définir automatiquement comme installateur par défaut</string>
     <string name="auto_lock_default_installer_desc">Définir automatiquement cette appli comme installateur lors du démarrage d\'une nouvelle installation</string>
     <string name="config_app_authorizer_desc">Autorisateur pour effectuer des opérations privilégiées</string>
@@ -532,10 +529,6 @@
     <string name="theme_settings_dynamic_color">Couleur dynamique</string>
     <string name="theme_settings_dynamic_color_desc">Personnalisez le thème en fonction de votre fond d\'écran</string>
     <string name="theme_settings_theme_color">Couleur du thème</string>
-    <string name="theme_settings_dynamic_color_follow_icon">Dialogue coloré</string>
-    <string name="theme_settings_dynamic_color_follow_icon_desc">Utiliser les couleurs de l\'icône de l\'appli à installer plutôt que celle du thème dans le dialogue d\'installation</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon">Progression colorée des notifications en direct</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon_desc">Utiliser les couleurs de l\'icône de l\'appli à installer dans la barre de progression des notification de mise à jour en direct</string>
     <string name="color_default">Défaut</string>
     <string name="color_pink">Rose</string>
     <string name="color_red">Rouge</string>

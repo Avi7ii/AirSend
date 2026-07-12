@@ -48,7 +48,7 @@
     <string name="lab">Laboratório</string>
     <string name="lab_desc">Acede recursos experimentais e para programadores</string>
     <string name="debug">Depuração</string>
-    <string name="about_detail">Sobre o InstallerX Revived</string>
+    <string name="about_detail">Sobre o AirSend</string>
     <string name="app_version_info_format">%1$s %2$s %3$s (%4$s)</string>
     <string name="updating">A atualizar…</string>
     <string name="get_update">Obter atualização</string>
@@ -64,8 +64,8 @@
     <string name="export_logs_desc">Exportar registos da app</string>
     <string name="internet_access_enabled">Online</string>
     <string name="internet_access_disabled">Offline</string>
-    <string name="uninstall_title">Desinstalar InstallerX Revived</string>
-    <string name="uninstall_content">Após desinstalar esta app, já não poderá usar o InstallerX Revived para instalar apps.</string>
+    <string name="uninstall_title">Desinstalar AirSend</string>
+    <string name="uninstall_content">Após desinstalar esta app, já não poderá usar o AirSend para instalar apps.</string>
     <string name="stable">Estável</string>
     <string name="preview">Pré-visualização</string>
     <string name="unstable">Instável</string>
@@ -105,10 +105,6 @@
     <string name="theme_settings_dynamic_color">Cor Dinâmica</string>
     <string name="theme_settings_dynamic_color_desc">Cor do tema baseada no papel de parede</string>
     <string name="theme_settings_theme_color">Cor do Tema</string>
-    <string name="theme_settings_dynamic_color_follow_icon">Diálogo Colorido</string>
-    <string name="theme_settings_dynamic_color_follow_icon_desc">A caixa de diálogo de instalação já não seguirá as cores do tema da app. Em vez disso, ela usará cores extraídas do ícone do pacote que está a ser instalado</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon">Colorir Progresso da Atividade ao Vivo</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon_desc">O segmento de progresso da atividade em direto utilizará cores extraídas do ícone do pacote</string>
     <string name="color_default">Padrão</string>
     <string name="color_pink">Rosa</string>
     <string name="color_red">Vermelho</string>
@@ -129,9 +125,6 @@
     <string name="color_grey">Cinzento</string>
     <string name="theme_settings_use_live_activity">Atividade ao Vivo</string>
     <string name="theme_settings_use_live_activity_desc">Use atividades em direto em vez de notificações, não pode ser suportado em ROMs personalizados</string>
-    <string name="theme_settings_package_icons">Fonte do ícone do pacote</string>
-    <string name="theme_settings_prefer_system_icon">Prefira o ícone do sistema para instalação da app</string>
-    <string name="theme_settings_prefer_system_icon_desc">Tente obter o ícone do sistema, útil ao usar pacotes de ícones. Desative para mostrar o ícone do pacote de instalação</string>
     <string name="theme_settings_launcher_icons">Ícone do lançador</string>
     <string name="theme_settings_predictive_back">Retorno Preditivo</string>
     <string name="theme_settings_predictive_back_animation">Animação do Retorno Preditivo</string>
@@ -194,7 +187,7 @@
     <string name="auto_lock_default_installer">Definir como padrão automaticamente</string>
     <string name="auto_lock_default_installer_desc">Definir automaticamente esta app como instalador ao iniciar uma nova instalação</string>
     <string name="lock_default_installer">Definir como instalador padrão</string>
-    <string name="lock_default_installer_desc">Definir o InstallerX como o instalador padrão de apks</string>
+    <string name="lock_default_installer_desc">Definir o AirSend como o instalador padrão de apks</string>
     <string name="lock_default_installer_success">Sucesso ao definir como instalador padrão</string>
     <string name="lock_default_installer_failed">Não foi possível definir como instalador padrão</string>
     <string name="unlock_default_installer">Ja não é o instalador predefinido</string>
@@ -526,7 +519,7 @@
     <string name="permission_access_mock_location">Aceder localização simulada</string>
     <string name="permission_dhizuku">Usar Dhizuku</string>
     <string name="permission_unknown">Permissão desconhecida</string>
-    <string name="installer_running">InstallerX em execução</string>
+    <string name="installer_running">AirSend em execução</string>
     <string name="installer_version_short">v. %1$s (%2$s)</string>
     <string name="version_with_prefix_format">%1$s %2$s</string>
     <string name="installer_version_name_label">Nome da Versão:</string>
@@ -544,7 +537,7 @@
     <string name="exception_install_failed_unknown">Erro desconhecido</string>
     <string name="exception_resolve_failed">Falha ao resolver URI</string>
     <string name="exception_resolve_failed_link_not_valid">Esta logação não contém um ficheiro válido</string>
-    <string name="exception_initiator_not_visible">Permissão negada devido a restrições de visibilidade do pacote. A app que está a solicitar a instalação está escondido do InstallerX. Se estiver a usar módulos como o \'Hide My Applist\', adicione o InstallerX à lista de permissões</string>
+    <string name="exception_initiator_not_visible">Permissão negada devido a restrições de visibilidade do pacote. A app que está a solicitar a instalação está escondido do AirSend. Se estiver a usar módulos como o \'Hide My Applist\', adicione o AirSend à lista de permissões</string>
     <string name="exception_resolve_failed_no_internet_access">Esta versão não pode aceder a Internet, para usar esta funcionalidade, reinstale outra versão</string>
     <string name="exception_analyse_failed_all_files_unsupported">Ficheiro não suportado</string>
     <string name="exception_authentication_failed">Falha na autenticação do utilizador</string>
@@ -772,7 +765,7 @@
     <string name="lab_module_flashing">Ativar flasheamento de módulo</string>
     <string name="lab_module_flashing_desc">Pense duas vezes e sempre confira antes de flashear qualquer módulo!</string>
     <string name="lab_module_flashing_show_art">Exibir arte ASCII</string>
-    <string name="lab_module_flashing_show_art_desc">Exibir arte ASCII do InstallerX quando a instalação começar</string>
+    <string name="lab_module_flashing_show_art_desc">Exibir arte ASCII do AirSend quando a instalação começar</string>
     <string name="lab_module_select_root_impl">Escolha a implementação de root</string>
     <string name="lab_http_save_file">Gravar ficheiros descarregados</string>
     <string name="lab_http_save_file_desc">Gravar os ficheiros na pasta Descargas após a conclusão da descarga</string>
@@ -877,7 +870,7 @@
     <string name="backup_settings_restore_ignored_settings">Configurações ignoradas: %1$d</string>
     <string name="backup_settings_restore_warnings_title">Avisos</string>
     <string name="backup_settings_validation_failed_title">Backup inválido</string>
-    <string name="backup_settings_validation_invalid_file">O ficheiro selecionado não é um backup válido do InstallerX Revived.</string>
+    <string name="backup_settings_validation_invalid_file">O ficheiro selecionado não é um backup válido do AirSend.</string>
     <string name="backup_settings_validation_unsupported_format">A versão %1$s do formato de backup não é compatível. A versão atual suporta até %2$s.</string>
     <string name="backup_settings_validation_empty">O backup não contém perfis, escopos, configurações nem histórico.</string>
     <string name="backup_settings_validation_invalid_profile_id">ID de perfil inválido: %1$s</string>
@@ -959,8 +952,8 @@
     <string name="suggestion_allow_unknown_source">Permitir Esta Fonte</string>
     <string name="suggestion_allow_unknown_source_desc">Abrir as configurações do Android para permitir que esta app solicite a instalação de pacotes</string>
     <string name="home_learn_more_title">Saiba Mais</string>
-    <string name="home_learn_more_installerx_title">Saiba mais sobre o InstallerX Revived</string>
-    <string name="home_learn_more_installerx_desc">Saiba como configurar e usar o InstallerX Revived</string>
+    <string name="home_learn_more_airsend_title">Saiba mais sobre o AirSend</string>
+    <string name="home_learn_more_airsend_desc">Saiba como configurar e usar o AirSend</string>
     <string name="unarchive_restore">Restaurar</string>
     <string name="unarchive_title">Restaurar %1$s?</string>
     <string name="unarchive_message">%1$s irá restaurar esta app arquivada.</string>

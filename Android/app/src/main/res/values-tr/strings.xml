@@ -16,7 +16,7 @@
     <string name="menu">Menü</string>
     <string name="about">Hakkında</string>
     <string name="other">Diğer</string>
-    <string name="about_detail">InstallerX Revived Hakkında</string>
+    <string name="about_detail">AirSend Hakkında</string>
     <string name="get_update">Güncellemeleri al</string>
     <string name="get_update_detail">Yazılım güncellemelerini ve yeni özellikleri kontrol edin</string>
     <string name="get_source_code">Kaynak kodunu kontrol et</string>
@@ -64,11 +64,11 @@
     <string name="ignore_battery_optimizations_desc">Sıkı arka plan politikalarına sahip ROM\'larda kullanışlıdır. Bildirim takılı kalırsa, pil optimizasyonunu göz ardı etmeyi deneyin</string>
     <string name="ignore_battery_optimizations_desc_disabled">Zaten Yoksayıldı</string>
     <string name="lock_default_installer">Varsayılan yükleyici olarak ayarla</string>
-    <string name="lock_default_installer_desc">APK\'ları yüklemek için InstallerX\'i varsayılan uygulama olarak ayarlar</string>
+    <string name="lock_default_installer_desc">APK\'ları yüklemek için AirSend\'i varsayılan uygulama olarak ayarlar</string>
     <string name="lock_default_installer_success">Başarıyla varsayılan yükleyici olarak ayarlandı</string>
     <string name="lock_default_installer_failed">Varsayılan yükleyici olarak ayarlanamadı</string>
     <string name="unlock_default_installer">Varsayılan yükleyici ayarını kaldır</string>
-    <string name="unlock_default_installer_desc">APK\'ları yüklemek için InstallerX\'in varsayılan yükleyici ayarını kaldırır</string>
+    <string name="unlock_default_installer_desc">APK\'ları yüklemek için AirSend\'in varsayılan yükleyici ayarını kaldırır</string>
     <string name="unlock_default_installer_success">Başarıyla varsayılan yükleyici ayarı kaldırıldı</string>
     <string name="unlock_default_installer_failed">Varsayılan yükleyici ayarı kaldırılamadı</string>
     <string name="clear_cache">Önbelleği temizle</string>
@@ -278,7 +278,7 @@
     <string name="permission_access_mock_location">Sahte konuma erişim</string>
     <string name="permission_dhizuku">Dhizu\'yu kullan</string>
     <string name="permission_unknown">Bilinmeyen izin</string>
-    <string name="installer_running">InstallerX çalışıyor</string>
+    <string name="installer_running">AirSend çalışıyor</string>
     <string name="installer_version_short">Sür. %1$s (%2$s)</string>
     <string name="installer_version">Sürüm: %1$s (%2$s)</string>
     <string name="installer_version2">%1$s (%2$s)</string>
@@ -347,9 +347,6 @@
     <string name="show_intelligent_suggestion_desc">Yükleme başarısız olduğunda akıllı öneriler gösterir</string>
     <string name="permission_list">İzin Listesi</string>
     <string name="permission_list_desc">Yüklenen paketin talep ettiği izinlerin listesi</string>
-    <string name="theme_settings_package_icons">Paket simgesi kaynağı</string>
-    <string name="theme_settings_prefer_system_icon">Yüklenecek uygulama için sistem simgesini tercih et</string>
-    <string name="theme_settings_prefer_system_icon_desc">Sistemden uygulama simgesini almaya çalış. Simge paketleri için kullanışlıdır. Kurulum paketindeki simgeler için bunu kapatın</string>
     <string name="no_cache">Önbellek yok</string>
     <string name="clearing_cache">Önbellek temizleniyor…</string>
     <string name="cache_size">Önbellek boyutu: %1$s</string>
@@ -457,8 +454,8 @@
     <string name="installer_package_min_sdk_label">Min SDK:</string>
     <string name="installer_package_target_sdk_label">Hedef SDK:</string>
     <string name="exception_uninstall_failed_internal_error">Paket Yöneticisi iç hatası</string>
-    <string name="uninstall_title">InstallerX Revived\'ı Kaldır</string>
-    <string name="uninstall_content">Bu uygulamayı kaldırırsanız, InstallerX Revived üzerinden artık uygulama yükleyemezsiniz.</string>
+    <string name="uninstall_title">AirSend\'ı Kaldır</string>
+    <string name="uninstall_content">Bu uygulamayı kaldırırsanız, AirSend üzerinden artık uygulama yükleyemezsiniz.</string>
     <string name="auto_lock_default_installer">Varsayılan yükleyici olarak otomatik ayarla</string>
     <string name="auto_lock_default_installer_desc">Yeni bir yükleme başlatıldığında bu uygulamayı otomatikmen yükleyici olarak ayarlar</string>
     <string name="config_label_install_options_desc">Kaynak, kullanıcı gibi yükleme parametrelerini yapılandırın</string>
@@ -529,8 +526,6 @@
     <string name="theme_settings_dynamic_color">Dinamik Renk</string>
     <string name="theme_settings_dynamic_color_desc">Duvar kağıdına dayalı tema rengi</string>
     <string name="theme_settings_theme_color">Tema Rengi</string>
-    <string name="theme_settings_dynamic_color_follow_icon">Renkli Diyalog</string>
-    <string name="theme_settings_dynamic_color_follow_icon_desc">Yükleme diyaloğu artık uygulamanın tema renklerini takip etmeyecek. Bunun yerine, yüklenen paketin simgesinden alınan renkleri kullanacak</string>
     <string name="color_default">Varsayılan</string>
     <string name="color_pink">Pembe</string>
     <string name="color_red">Kırmızı</string>
@@ -557,8 +552,6 @@
     <string name="suggestion_shizuku_isolation_desc">Shizuku ve geçerli yükleyiciyi kullanarak yeniden deneyin</string>
     <string name="theme_settings_miuix_custom_colors">Özel Renkler</string>
     <string name="theme_settings_miuix_custom_colors_desc">Miuix tema tarzında tema renklerini özelleştir</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon">Renkli Anlık Etkinlik İlerlemesi</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon_desc">Anlık etkinliğin ilerleme bölümü, paketin simgesinden çıkarılan renkleri kullanacaktır</string>
     <string name="config_install_mode_desc">Varsayılan Yükleme Modu ve ilgili ayarlar</string>
     <string name="installer_install_complete">Yükleme tamamlandı</string>
     <string name="updating">Güncelleniyor…</string>
@@ -669,7 +662,7 @@
     <string name="exception_zip_exception">Zip dosyası açılamadı</string>
     <string name="old_version_uninstalled">Kaldırıldı</string>
     <string name="lab_module_flashing_show_art">ASCII sanatını görüntüle</string>
-    <string name="lab_module_flashing_show_art_desc">Yükleme başladığında InstallerX ASCII sanatını görüntüleyin</string>
+    <string name="lab_module_flashing_show_art_desc">Yükleme başladığında AirSend ASCII sanatını görüntüleyin</string>
     <string name="lab_unstable_features">Kararsız özellikler</string>
     <string name="lab_set_install_requester">Yükleme İsteği Göndericisini Ayarla</string>
     <string name="lab_set_install_requester_desc">Etkinleştirildiğinde profillerde OriginatingUid alanı özelleştirmesini göster</string>
@@ -806,7 +799,7 @@
     <string name="priv_page_notice_desc">Bu ayar, uygulamanın ayrıcalıklı işlemler için kullanacağı yetkilendiriciyi kontrol eder. Yükleme profilleri, uygulamaları yüklerken kullanılan yetkilendiriciyi kontrol eder ve bu amaçla bu genel ayarı geçersiz kılabilir.</string>
     <string name="setting_lsposed_module_desc">Üçüncü taraf bir LSPosed modülü aracılığıyla varsayılan yükleyiciyi zorladıysanız bunu etkinleştirin. Bu, dahili durum kontrolünü devre dışı bırakır ve ana sayfa sürekli Etkin olarak görünür</string>
     <string name="priv_page_what_is_this_desc">Bu bölüm, bu uygulama için mevcut tüm yetkilendirme yöntemlerini algılar ve ayrıcalıklı işlemler için kullanılacak varsayılan yöntemi seçmenize olanak tanır. Burada yalnızca kullanılabilirlik kontrol edilir; gerekli izinler, uygulama gerçekten ihtiyaç duyduğunda talep edilecektir.</string>
-    <string name="exception_initiator_not_visible">Paket görünürlük kısıtlamaları nedeniyle izin reddedildi. Yüklemeyi talep eden uygulama InstallerX\'ten gizlenmiştir. \'Hide My Applist\' gibi modüller kullanıyorsanız, lütfen InstallerX\'i izin verilenler listesine ekleyin</string>
+    <string name="exception_initiator_not_visible">Paket görünürlük kısıtlamaları nedeniyle izin reddedildi. Yüklemeyi talep eden uygulama AirSend\'ten gizlenmiştir. \'Hide My Applist\' gibi modüller kullanıyorsanız, lütfen AirSend\'i izin verilenler listesine ekleyin</string>
     <string name="installer_settings_xposed_detection">Xposed Tespiti</string>
     <string name="config_detect_xposed_module">Xposed modüllerini tespit et</string>
     <string name="config_detect_xposed_module_desc">Yükleme sırasında Xposed modülü bilgilerini algıla ve göster</string>
@@ -828,8 +821,8 @@
     <string name="long_click_background_install">Arka planda yükleme için uzun basın</string>
     <string name="long_click_background_install_desc">Yükle düğmesine uzun basıldığında arka plan</string>
     <string name="home_learn_more_title">Daha fazla bilgi edin</string>
-    <string name="home_learn_more_installerx_title">InstallerX Revived hakkında bilgi edin</string>
-    <string name="home_learn_more_installerx_desc">InstallerX Revived\'ı nasıl yapılandıracağınızı ve kullanacağınızı öğrenin</string>
+    <string name="home_learn_more_airsend_title">AirSend hakkında bilgi edin</string>
+    <string name="home_learn_more_airsend_desc">AirSend\'ı nasıl yapılandıracağınızı ve kullanacağınızı öğrenin</string>
     <string name="history">Geçmiş</string>
     <string name="history_empty_title">Henüz kayıt yok</string>
     <string name="history_empty_desc">Bir işlem tamamlandıktan sonra yükleme ve kaldırma kayıtları burada görünecek.</string>
@@ -873,7 +866,7 @@
     <string name="backup_settings_restore_ignored_settings">Göz ardı edilen ayarlar: %1$d</string>
     <string name="backup_settings_restore_warnings_title">Uyarı</string>
     <string name="backup_settings_validation_failed_title">Geçersiz yedek</string>
-    <string name="backup_settings_validation_invalid_file">Seçilen dosya geçerli bir InstallerX Revived yedeği değil.</string>
+    <string name="backup_settings_validation_invalid_file">Seçilen dosya geçerli bir AirSend yedeği değil.</string>
     <string name="backup_settings_validation_unsupported_format">Desteklenmeyen yedek formatı sürümü %1$s. Mevcut sürüm desteği %2$s\'ye kadardır.</string>
     <string name="backup_settings_validation_empty">Yedek; profilleri, kapsamları, ayarları veya geçmiş kayıtlarını içermez.</string>
     <string name="backup_settings_validation_invalid_profile_id">Geçersiz profil kimliği: %1$s</string>

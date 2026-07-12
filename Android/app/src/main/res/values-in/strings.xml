@@ -18,7 +18,7 @@
     <string name="other">Lainnya</string>
     <string name="lab">Laboratorium</string>
     <string name="lab_desc">Akses fitur eksperimental dan pengembang</string>
-    <string name="about_detail">Tentang InstallerX Revived</string>
+    <string name="about_detail">Tentang AirSend</string>
     <string name="updating">Memperbarui…</string>
     <string name="get_update">Dapatkan pembaruan</string>
     <string name="get_update_detail">Periksa pembaruan perangkat lunak dan fitur baru</string>
@@ -29,8 +29,8 @@
     <string name="get_source_code_detail">Periksa sumber kode di GitHub</string>
     <string name="internet_access_enabled">Daring</string>
     <string name="internet_access_disabled">Luring</string>
-    <string name="uninstall_title">Copot Pemasangan InstallerX Revived</string>
-    <string name="uninstall_content">Setelah menghapus pemasangan aplikasi ini, Anda tidak akan dapat lagi menggunakan InstallerX Revived untuk memasang aplikasi.</string>
+    <string name="uninstall_title">Copot Pemasangan AirSend</string>
+    <string name="uninstall_content">Setelah menghapus pemasangan aplikasi ini, Anda tidak akan dapat lagi menggunakan AirSend untuk memasang aplikasi.</string>
     <string name="stable">Stabil</string>
     <string name="preview">Pratinjau</string>
     <string name="unstable">Tidak stabil</string>
@@ -51,7 +51,6 @@
     <string name="theme_settings_google_ui">Google Material 3</string>
     <string name="theme_settings_google_ui_desc">Standar UI Desain Material</string>
     <string name="lab_http_profile_local">Izinkan cleartext lokal (Localhost)</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon_desc">Segmen kemajuan aktivitas langsung akan menggunakan warna yang diekstrak dari paket ikon</string>
     <string name="color_default">Bawaan</string>
     <string name="color_pink">Merah muda</string>
     <string name="color_red">Merah</string>
@@ -71,9 +70,6 @@
     <string name="color_grey">Abu-abu</string>
     <string name="theme_settings_use_live_activity">Aktivitas langsung</string>
     <string name="theme_settings_use_live_activity_desc">Gunakan Aktivitas Langsung alih-alih notifikasi, mungkin tidak didukung pada ROM khusus</string>
-    <string name="theme_settings_package_icons">Sumber paket ikon</string>
-    <string name="theme_settings_prefer_system_icon">Lebih suka ikon sistem untuk aplikasi yang akan diinstal</string>
-    <string name="theme_settings_prefer_system_icon_desc">Mencoba mendapatkan ikon dari sistem, berguna saat menggunakan paket ikon. Nonaktifkan untuk menampilkan ikon dari paket pemasangan</string>
     <string name="disable_adb_install_verify_desc">Nonaktifkan verifikasi pemasangan ADB, berguna pada beberapa sistem dimana pemasangan akan memicu pemindaian (Play Protect)</string>
     <string name="disable_adb_install_verify_not_support_dhizuku_desc">Tidak mendukung Dhizuku</string>
     <string name="disable_adb_install_verify_failed">Tidak dapat menonaktifkan verifikasi pemasangan ADB</string>
@@ -98,11 +94,11 @@
     <string name="auto_lock_default_installer">Atur otomatis sebagai pemasang bawaan</string>
     <string name="auto_lock_default_installer_desc">Atur aplikasi ini secara otomatis sebagai pemasang saat memulai pemasangan baru</string>
     <string name="lock_default_installer">Atur sebagai pemasang bawaan</string>
-    <string name="lock_default_installer_desc">Atur InstallerX sebagai aplikasi bawaan untuk memasang apk</string>
+    <string name="lock_default_installer_desc">Atur AirSend sebagai aplikasi bawaan untuk memasang apk</string>
     <string name="lock_default_installer_success">Berhasil diatur sebagai pemasang bawaan</string>
     <string name="lock_default_installer_failed">Tidak dapat diatur sebagai pemasang bawaan</string>
     <string name="unlock_default_installer">Batalkan pengaturan sebagai pemasang bawaan</string>
-    <string name="unlock_default_installer_desc">Batalkan pengaturan InstallerX sebagai pemasang bawaan untuk memasang apk</string>
+    <string name="unlock_default_installer_desc">Batalkan pengaturan AirSend sebagai pemasang bawaan untuk memasang apk</string>
     <string name="unlock_default_installer_success">Berhasil membatalkan pengaturan sebagai pemasang bawaan</string>
     <string name="unlock_default_installer_failed">Tidak dapat membatalkan pengaturan sebagai pemasang bawaan</string>
     <string name="clear_cache">Hapus cache</string>
@@ -138,9 +134,6 @@
     <string name="theme_settings_dynamic_color">Warna Dinamis</string>
     <string name="theme_settings_dynamic_color_desc">Warna tema mengikuti wallpaper</string>
     <string name="theme_settings_theme_color">Warna Tema</string>
-    <string name="theme_settings_dynamic_color_follow_icon">Dialog Berwarna</string>
-    <string name="theme_settings_dynamic_color_follow_icon_desc">Kotak dialog pemasanangan tidak lagi mengikuti skema warna aplikasi. Sebagai gantinya, kotak dialog tersebut akan menggunakan warna yang diambil dari ikon paket yang sedang dipasang</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon">Progres Aktivitas Langsung Berwarna</string>
     <string name="color_teal">Biru Kehijauan</string>
     <string name="theme_settings_launcher_icons">Ikon peluncur</string>
     <string name="restore">Batal</string>
@@ -369,7 +362,7 @@
     <string name="permission_access_mock_location">Akses lokasi tiruan</string>
     <string name="permission_dhizuku">Gunakan Shizuku</string>
     <string name="permission_unknown">Izin tidak diketahui</string>
-    <string name="installer_running">InstallerX sedang berjalan</string>
+    <string name="installer_running">AirSend sedang berjalan</string>
     <string name="installer_version_short">Versi %1$s (%2$s)</string>
     <string name="installer_version_name_label">Nama Versi:</string>
     <string name="installer_version_code_label">Kode Versi:</string>
@@ -662,7 +655,7 @@
     <string name="lab_module_flashing">Aktifkan flashing modul</string>
     <string name="lab_module_flashing_desc">Selalu periksa dua kali sebelum flashing modul apa pun!</string>
     <string name="lab_module_flashing_show_art">Tampilkan seni ASCII</string>
-    <string name="lab_module_flashing_show_art_desc">Tampilkan seni ASCII InstallerX saat instalasi dimulai</string>
+    <string name="lab_module_flashing_show_art_desc">Tampilkan seni ASCII AirSend saat instalasi dimulai</string>
     <string name="lab_module_select_root_impl">Pilih implementasi root</string>
     <string name="lab_http_save_file">Simpan file yang diunduh</string>
     <string name="lab_http_save_file_desc">Simpan file ke folder Unduhan setelah unduhan selesai</string>
@@ -766,7 +759,7 @@
     <string name="install_confirm_question_update_owner_reminder">Aplikasi ini biasanya diperbarui oleh %1$s. Jika Anda memperbaruinya dari sumber lain, ponsel Anda mungkin menerima pembaruan berikutnya dari sumber apa pun. Fungsi aplikasi dapat berubah.</string>
     <string name="install_confirm_external_request_tip">Setujui permintaan instalasi dari %1$s?</string>
     <string name="installer_resolving_desc">Mengurai konten yang dapat diinstal dari masukan…</string>
-    <string name="exception_initiator_not_visible">Izin ditolak karena pembatasan visibilitas paket. Aplikasi yang meminta instalasi disembunyikan dari InstallerX. Jika Anda menggunakan modul seperti \'Hide My Applist\', harap masukkan InstallerX ke daftar izin</string>
+    <string name="exception_initiator_not_visible">Izin ditolak karena pembatasan visibilitas paket. Aplikasi yang meminta instalasi disembunyikan dari AirSend. Jika Anda menggunakan modul seperti \'Hide My Applist\', harap masukkan AirSend ke daftar izin</string>
     <string name="exception_install_failed_blocked_by_profile">Instalasi diblokir oleh kebijakan profil</string>
     <string name="exception_install_failed_permission_model_downgrade">Penurunan model izin tidak diizinkan</string>
     <string name="exception_install_failed_sandbox_version_downgrade">Penurunan versi sandbox tidak diizinkan</string>
@@ -870,7 +863,7 @@
     <string name="backup_settings_restore_ignored_settings">Pengaturan yang diabaikan: %1$d</string>
     <string name="backup_settings_restore_warnings_title">Peringatan</string>
     <string name="backup_settings_validation_failed_title">Cadangan tidak valid</string>
-    <string name="backup_settings_validation_invalid_file">Berkas yang dipilih bukanlah cadangan InstallerX Revived yang sah.</string>
+    <string name="backup_settings_validation_invalid_file">Berkas yang dipilih bukanlah cadangan AirSend yang sah.</string>
     <string name="backup_settings_validation_unsupported_format">Versi format cadangan %1$s tidak didukung. Versi saat ini mendukung hingga %2$s.</string>
     <string name="backup_settings_validation_empty">Cadangan ini tidak berisi profil, cakupan, pengaturan, atau catatan riwayat.</string>
     <string name="backup_settings_validation_invalid_profile_id">ID profil tidak sah: %1$s</string>
@@ -890,8 +883,8 @@
     <string name="backup_settings_file_write_failed">Tidak dapat menulis file cadangan</string>
     <string name="config_install_requester_mode_disable">Belum diatur</string>
     <string name="home_learn_more_title">Pelajari lebih lanjut</string>
-    <string name="home_learn_more_installerx_title">Pelajari tentang InstallerX Revived</string>
-    <string name="home_learn_more_installerx_desc">Pelajari cara mengonfigurasi dan menggunakan InstallerX Revived</string>
+    <string name="home_learn_more_airsend_title">Pelajari tentang AirSend</string>
+    <string name="home_learn_more_airsend_desc">Pelajari cara mengonfigurasi dan menggunakan AirSend</string>
     <string name="locking_default_installer">Tetapkan sebagai pemasang bawaan…</string>
     <string name="unlocking_default_installer">Menghapus pemasang bawaan…</string>
     <string name="config_try_multiple_authorizers_on_install">Otorisasi cerdas</string>

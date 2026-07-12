@@ -9,10 +9,12 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.rosan.installer.domain.settings.model.preferences.ThemeState
@@ -45,31 +47,35 @@ class SettingsActivity : ComponentActivity(), KoinComponent {
             // Prevent heavy navigation setup until state is ready
             if (!isThemeLoaded) return@setContent
 
+            val effectiveUiState = uiState.copy(useMiuix = true)
             val layoutInfo = rememberWindowLayoutInfo()
+            val systemDensity = LocalDensity.current
+            val density = remember(systemDensity, effectiveUiState.pageScale) {
+                Density(
+                    systemDensity.density * effectiveUiState.pageScale,
+                    systemDensity.fontScale
+                )
+            }
 
             CompositionLocalProvider(
-                LocalWindowLayoutInfo provides layoutInfo
+                LocalWindowLayoutInfo provides layoutInfo,
+                LocalDensity provides density
             ) {
                 InstallerTheme(
-                    useMiuix = uiState.useMiuix,
-                    themeMode = uiState.themeMode,
-                    paletteStyle = uiState.paletteStyle,
-                    colorSpec = uiState.colorSpec,
-                    useDynamicColor = uiState.useDynamicColor,
-                    useMiuixMonet = uiState.useMiuixMonet,
-                    seedColor = androidx.compose.ui.graphics.Color(uiState.seedColor)
+                    useMiuix = effectiveUiState.useMiuix,
+                    themeMode = effectiveUiState.themeMode,
+                    paletteStyle = effectiveUiState.paletteStyle,
+                    colorSpec = effectiveUiState.colorSpec,
+                    useDynamicColor = effectiveUiState.useDynamicColor,
+                    useMiuixMonet = effectiveUiState.useMiuixMonet,
+                    seedColor = androidx.compose.ui.graphics.Color(effectiveUiState.seedColor)
                 ) {
-                    val backgroundColor =
-                        if (uiState.useMiuix)
-                            MiuixTheme.colorScheme.surface
-                        else
-                            MaterialTheme.colorScheme.surfaceContainer
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(backgroundColor)
+                            .background(MiuixTheme.colorScheme.surface)
                     ) {
-                        InstallerNavContainer(uiState)
+                        InstallerNavContainer(effectiveUiState)
                     }
                 }
             }

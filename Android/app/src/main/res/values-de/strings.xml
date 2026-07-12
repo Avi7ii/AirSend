@@ -16,7 +16,7 @@
     <string name="menu">Menü</string>
     <string name="about">Über</string>
     <string name="other">Andere</string>
-    <string name="about_detail">Über InstallerX Revived</string>
+    <string name="about_detail">Über AirSend</string>
     <string name="get_update">Update erhalten</string>
     <string name="get_update_detail">Nach Software-Updates und neuen Funktionen suchen</string>
     <string name="internet_access_enabled">Internetzugriff aktiviert</string>
@@ -61,11 +61,11 @@
     <string name="ignore_battery_optimizations_desc">Nützlich bei einigen benutzerdefinierten ROMs mit String-Hintergrundrichtlinie</string>
     <string name="ignore_battery_optimizations_desc_disabled">Bereits ignoriert</string>
     <string name="lock_default_installer">Als Standard-installer setzen</string>
-    <string name="lock_default_installer_desc">InstallerX als Standard-App zum Installieren von APKs festlegen</string>
+    <string name="lock_default_installer_desc">AirSend als Standard-App zum Installieren von APKs festlegen</string>
     <string name="lock_default_installer_success">Erfolgreich als Standard-installer festgelegt</string>
     <string name="lock_default_installer_failed">Konnte nicht als Standard-installer festlegen</string>
     <string name="unlock_default_installer">Einstellung als Standard-installer zurücksetzen</string>
-    <string name="unlock_default_installer_desc">Deaktiviert InstallerX als Standardinstallationsprogramm zum Installieren von Apks</string>
+    <string name="unlock_default_installer_desc">Deaktiviert AirSend als Standardinstallationsprogramm zum Installieren von Apks</string>
     <string name="unlock_default_installer_success">Erfolgreich</string>
     <string name="unlock_default_installer_failed">Konnte nicht zurücksetzen</string>
     <string name="clear_cache">Cache leeren</string>
@@ -259,7 +259,7 @@
     <string name="permission_access_mock_location">Auf Mock Standort zugreifen</string>
     <string name="permission_dhizuku">Dhizuku nutzen</string>
     <string name="permission_unknown">Unbekannte Berechtigung</string>
-    <string name="installer_running">InstallerX wird ausgeführt</string>
+    <string name="installer_running">AirSend wird ausgeführt</string>
     <string name="installer_version_short">Vers. %1$s (%2$s)</string>
     <string name="installer_version">Version: %1$s (%2$s)</string>
     <string name="installer_version2">%1$s (%2$s)</string>
@@ -430,8 +430,8 @@
     <string name="update_available">Aktualisierung verfügbar: %1$s</string>
     <string name="get_update_directly">Aktualisierung direkt abrufen</string>
     <string name="get_update_directly_desc">Aktualisierung direkt von Github herunterladen und installieren, kein Cache wird verbleiben</string>
-    <string name="uninstall_title">Deinstalliere InstallerX Revived</string>
-    <string name="uninstall_content">Nach der Deinstallation dieser App wirst du InstallerX Revived nicht mehr zum installieren von Apps verwenden können.</string>
+    <string name="uninstall_title">Deinstalliere AirSend</string>
+    <string name="uninstall_content">Nach der Deinstallation dieser App wirst du AirSend nicht mehr zum installieren von Apps verwenden können.</string>
     <string name="theme_settings_miuix_custom_colors">Benutzerdefinierte Farben</string>
     <string name="theme_settings_miuix_custom_colors_desc">Designfarben im MIUI-Designstil anpassen</string>
     <string name="theme_settings_theme_mode">Designmodus</string>
@@ -444,10 +444,6 @@
     <string name="theme_settings_dynamic_color">Dynamische Farben</string>
     <string name="theme_settings_dynamic_color_desc">Designfarbe basierend auf dem Hintergrundbild</string>
     <string name="theme_settings_theme_color">Designfarbe</string>
-    <string name="theme_settings_dynamic_color_follow_icon">Farbiger Dialog</string>
-    <string name="theme_settings_dynamic_color_follow_icon_desc">Der Installationsdialog verwendet nicht mehr die Designfarben der App. Stattdessen werden die Farben aus dem Symbol des zu installierenden Pakets extrahiert</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon">Farbiger Live-Aktivitätsfortschritt</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon_desc">Das Fortschrittssegment der Live-Aktivität verwendet Farben, die aus dem Symbol des Pakets extrahiert werden</string>
     <string name="color_default">Standart</string>
     <string name="color_pink">Pink</string>
     <string name="color_red">Rot</string>
@@ -468,9 +464,6 @@
     <string name="color_grey">Grau</string>
     <string name="theme_settings_use_live_activity">Live-Aktivität</string>
     <string name="theme_settings_use_live_activity_desc">Live-Aktivität anstelle von Benachrichtigungen verwenden, wird möglicherweise nicht von benutzerdefinierten ROMs unterstützt</string>
-    <string name="theme_settings_package_icons">Paket-Icon-Quelle</string>
-    <string name="theme_settings_prefer_system_icon">Systemsymbol für zu installierende App bevorzugen</string>
-    <string name="theme_settings_prefer_system_icon_desc">Versuch, Symbol vom System zu beziehen, nützlich bei Verwendung von Symbolpaketen. Deaktivieren, um das Symbol aus dem Installationspaket anzuzeigen</string>
     <string name="installer_settings_auto_clear_success_notification">Lösche Benachrichtigungen automatisch</string>
     <string name="installer_settings_auto_clear_success_notification_desc">Lösche Benachrichtigungen von erfolgreichen Installationen automatisch</string>
     <string name="installer_settings_auto_clear_time_never">Nie</string>
@@ -633,7 +626,7 @@
     <string name="uninstall_progress_text">Deinstallieren...</string>
     <string name="uninstall_enter_package_name">Geben Sie den Paketnamen zum Deinstallieren ein</string>
     <string name="lab_module_flashing_show_art">ASCII-Kunst anzeigen</string>
-    <string name="lab_module_flashing_show_art_desc">Display InstallerX ASCII-Kunst, wenn die Installation startet</string>
+    <string name="lab_module_flashing_show_art_desc">Display AirSend ASCII-Kunst, wenn die Installation startet</string>
     <string name="installer_settings_require_biometric_auth">Biometrische Authentifizierung erforderlich, um installiert zu werden</string>
     <string name="installer_settings_require_biometric_auth_desc">Biometrische Authentifizierung bei der Installation erforderlich</string>
     <string name="uninstaller_settings_require_biometric_auth">Biometrische Authentifizierung erforderlich, um sie zu deinstallieren</string>

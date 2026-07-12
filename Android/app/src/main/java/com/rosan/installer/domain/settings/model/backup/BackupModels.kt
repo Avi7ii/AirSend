@@ -123,7 +123,10 @@ enum class BackupSettingType {
     INT,
 
     @SerialName("boolean")
-    BOOLEAN
+    BOOLEAN,
+
+    @SerialName("float")
+    FLOAT
 }
 
 data class RestoreResult(

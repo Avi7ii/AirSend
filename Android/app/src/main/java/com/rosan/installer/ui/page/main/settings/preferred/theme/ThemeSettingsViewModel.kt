@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.rosan.installer.domain.settings.provider.SystemEnvProvider
 import com.rosan.installer.domain.settings.repository.AppSettingsRepository
 import com.rosan.installer.domain.settings.repository.BooleanSetting
+import com.rosan.installer.domain.settings.repository.FloatSetting
 import com.rosan.installer.domain.settings.repository.IntSetting
 import com.rosan.installer.domain.settings.repository.StringSetting
 import com.rosan.installer.domain.settings.usecase.settings.UpdateSettingUseCase
@@ -63,12 +64,9 @@ class ThemeSettingsViewModel(
             useDynamicColor = prefs.useDynamicColor,
             useMiuixMonet = prefs.useMiuixMonet,
             useAppleFloatingBar = prefs.useAppleFloatingBar,
+            pageScale = prefs.pageScale,
             seedColor = effectiveSeedColor,
             availableColors = availableColors,
-            useDynColorFollowPkgIcon = prefs.useDynColorFollowPkgIcon,
-            useDynColorFollowPkgIconForLiveActivity = prefs.useDynColorFollowPkgIconForLiveActivity,
-            preferSystemIcon = prefs.preferSystemIcon,
-            showLiveActivity = prefs.showLiveActivity,
             predictiveBackAnimation = prefs.predictiveBackAnimation,
             predictiveBackExitDirection = prefs.predictiveBackExitDirection
         )
@@ -99,26 +97,13 @@ class ThemeSettingsViewModel(
                 )
             }
 
-            is ThemeSettingsAction.SetDynColorFollowPkgIcon -> viewModelScope.launch {
-                updateSetting(
-                    BooleanSetting.UiDynColorFollowPkgIcon,
-                    action.follow
-                )
+            is ThemeSettingsAction.SetPageScale -> viewModelScope.launch {
+                updateSetting(FloatSetting.UiPageScale, action.scale.coerceIn(0.8f, 1.1f))
             }
 
-            is ThemeSettingsAction.SetDynColorFollowPkgIconForLiveActivity -> viewModelScope.launch {
-                updateSetting(
-                    BooleanSetting.LiveActivityDynColorFollowPkgIcon,
-                    action.follow
-                )
-            }
-
-            is ThemeSettingsAction.SetSeedColor -> viewModelScope.launch { updateSetting(IntSetting.ThemeSeedColor, action.color.toArgb()) }
-            is ThemeSettingsAction.ChangePreferSystemIcon -> viewModelScope.launch {
-                updateSetting(
-                    BooleanSetting.PreferSystemIconForInstall,
-                    action.preferSystemIcon
-                )
+            is ThemeSettingsAction.SetSeedColor -> viewModelScope.launch {
+                updateSetting(IntSetting.ThemeSeedColor, action.color.toArgb())
+                updateSetting(BooleanSetting.ThemeUseDynamicColor, false)
             }
 
             is ThemeSettingsAction.SetPredictiveBackAnimation -> viewModelScope.launch {

@@ -16,7 +16,7 @@
     <string name="menu">Menu</string>
     <string name="about">Sobre</string>
     <string name="other">Outro</string>
-    <string name="about_detail">Sobre o InstallerX Revived</string>
+    <string name="about_detail">Sobre o AirSend</string>
     <string name="get_update">Obter atualização</string>
     <string name="get_update_detail">Verifique se há atualizações de software e novos recursos</string>
     <string name="internet_access_enabled">Online</string>
@@ -61,7 +61,7 @@
     <string name="ignore_battery_optimizations_desc">Útil em ROMs com políticas de execução em segundo plano rigorosas. Se a notificação ficar travada, tente ignorar a otimização da bateria</string>
     <string name="ignore_battery_optimizations_desc_disabled">Já Ignorado</string>
     <string name="lock_default_installer">Definir como instalador padrão</string>
-    <string name="lock_default_installer_desc">Definir o InstallerX como o instalador padrão de apks</string>
+    <string name="lock_default_installer_desc">Definir o AirSend como o instalador padrão de apks</string>
     <string name="lock_default_installer_success">Sucesso ao definir como instalador padrão</string>
     <string name="lock_default_installer_failed">Não foi possível definir como instalador padrão</string>
     <string name="unlock_default_installer">Não é mais o instalador padrão</string>
@@ -256,7 +256,7 @@
     <string name="permission_access_mock_location">Acessar localização simulada</string>
     <string name="permission_dhizuku">Usar Dhizuku</string>
     <string name="permission_unknown">Permissão desconhecida</string>
-    <string name="installer_running">InstallerX em execução</string>
+    <string name="installer_running">AirSend em execução</string>
     <string name="installer_version_short">v. %1$s (%2$s)</string>
     <string name="installer_version">Versão: %1$s (%2$s)</string>
     <string name="installer_version2">%1$s (%2$s)</string>
@@ -428,9 +428,6 @@
     <string name="theme_settings_use_live_activity_desc">Use atividades ao vivo em vez de notificações, não pode ser suportado em ROMs personalizados</string>
     <string name="installer_live_channel_name">Progresso da Instalação</string>
     <string name="cache_size">Tamanho do Cache: %1$s</string>
-    <string name="theme_settings_package_icons">Fonte do ícone do pacote</string>
-    <string name="theme_settings_prefer_system_icon">Prefira o ícone do sistema para instalação do app</string>
-    <string name="theme_settings_prefer_system_icon_desc">Tente obter o ícone do sistema, útil ao usar pacotes de ícones. Desative para mostrar o ícone do pacote de instalação</string>
     <string name="no_cache">Sem cache</string>
     <string name="clearing_cache">Limpando o cache…</string>
     <string name="config_authorizer_none_tips">Quando não se utilizam privilégios, a maioria das opções fica desativada.</string>
@@ -474,8 +471,8 @@
     <string name="split_name_language_group_title">Partes de Idioma</string>
     <string name="split_name_density_group_title">Partes de Densidade de Tela</string>
     <string name="split_name_feature_group_title">Partes de Funções</string>
-    <string name="uninstall_title">Desinstalar InstallerX Revived</string>
-    <string name="uninstall_content">Após desinstalar este app, você não poderá mais usar o InstallerX Revived para instalar apps.</string>
+    <string name="uninstall_title">Desinstalar AirSend</string>
+    <string name="uninstall_content">Após desinstalar este app, você não poderá mais usar o AirSend para instalar apps.</string>
     <string name="exception_install_parse_failed_no_certificates">Certificados ausentes</string>
     <string name="config_install_authorizer_desc">Autorizador para instalar aplicativos</string>
     <string name="config_app_authorizer_desc">Autorizador para realizar operações privilegiadas</string>
@@ -517,8 +514,6 @@
     <string name="theme_settings_dynamic_color">Cor Dinâmica</string>
     <string name="theme_settings_dynamic_color_desc">Cor do tema baseada no papel de parede</string>
     <string name="theme_settings_theme_color">Cor do Tema</string>
-    <string name="theme_settings_dynamic_color_follow_icon">Diálogo Colorido</string>
-    <string name="theme_settings_dynamic_color_follow_icon_desc">A caixa de diálogo de instalação não seguirá mais as cores do tema do aplicativo. Em vez disso, ela usará cores extraídas do ícone do pacote que está sendo instalado</string>
     <string name="color_default">Padrão</string>
     <string name="color_pink">Rosa</string>
     <string name="color_red">Vermelho</string>
@@ -557,8 +552,6 @@
     <string name="suggestion_shizuku_isolation_desc">Tente novamente usando o Shizuku e um instalador válido</string>
     <string name="theme_settings_miuix_custom_colors">Cores Personalizadas</string>
     <string name="theme_settings_miuix_custom_colors_desc">Personalize as cores do tema no estilo Miuix</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon">Colorir Progresso da Atividade ao Vivo</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon_desc">O segmento de progresso da atividade ao vivo utilizará cores extraídas do ícone do pacote</string>
     <string name="config_install_mode_desc">Modo de Instalação Padrão e configurações relacionadas</string>
     <string name="installer_install_complete">Instalação concluída</string>
     <string name="updating">Atualizando…</string>
@@ -633,7 +626,7 @@
     <string name="performance">Desempenho</string>
     <string name="installer_notification_tap_to_disable">Notificação de serviço em primeiro plano, toque para desativar</string>
     <string name="lab_module_flashing_show_art">Exibir arte ASCII</string>
-    <string name="lab_module_flashing_show_art_desc">Exibir arte ASCII do InstallerX quando a instalação começar</string>
+    <string name="lab_module_flashing_show_art_desc">Exibir arte ASCII do AirSend quando a instalação começar</string>
     <string name="installer_settings_require_biometric_auth">Exigir Autenticação Biométrica para Instalar</string>
     <string name="installer_settings_require_biometric_auth_desc">Exigir autenticação biométrica ao instalar pacotes</string>
     <string name="uninstaller_settings_require_biometric_auth">Exigir Autenticação Biométrica para Desinstalar</string>
@@ -797,7 +790,7 @@
     <string name="dhizuku_not_authorized">Por favor, conceda permissão para acessar o Dhizuku</string>
     <string name="dhizuku_not_available">Por favor, ative o Dhizuku</string>
     <string name="default_installer">Instalador Padrão</string>
-    <string name="exception_initiator_not_visible">Permissão negada devido a restrições de visibilidade do pacote. O app que está solicitando a instalação está escondido do InstallerX. Se você estiver usando módulos como o \'Hide My Applist\', adicione o InstallerX à lista de permissões</string>
+    <string name="exception_initiator_not_visible">Permissão negada devido a restrições de visibilidade do pacote. O app que está solicitando a instalação está escondido do AirSend. Se você estiver usando módulos como o \'Hide My Applist\', adicione o AirSend à lista de permissões</string>
     <string name="priv_page_what_is_this_title">O que é isso?</string>
     <string name="priv_page_what_is_this_desc">Esta seção identifica todos os métodos de autorização disponíveis para este app e permite que você escolha o método padrão a ser usado para operações privilegiadas. Ela verifica a disponibilidade apenas aqui; qualquer permissão necessária será solicitada quando o app realmente precisar utilizá-la.</string>
     <string name="priv_page_notice_title">Diferença dos perfis de instalação</string>
@@ -828,8 +821,8 @@
     <string name="long_click_background_install">Pressionar para instalar em segundo plano</string>
     <string name="long_click_background_install_desc">O que acontece ao pressionar o botão de instalação</string>
     <string name="home_learn_more_title">Saiba Mais</string>
-    <string name="home_learn_more_installerx_title">Saiba mais sobre o InstallerX Revived</string>
-    <string name="home_learn_more_installerx_desc">Saiba como configurar e usar o InstallerX Revived</string>
+    <string name="home_learn_more_airsend_title">Saiba mais sobre o AirSend</string>
+    <string name="home_learn_more_airsend_desc">Saiba como configurar e usar o AirSend</string>
     <string name="history">Histórico</string>
     <string name="history_empty_title">Sem registros ainda</string>
     <string name="history_empty_desc">Os registros de instalações e desinstalações aparecerão aqui assim que alguma operação for concluída.</string>
@@ -873,7 +866,7 @@
     <string name="backup_settings_restore_ignored_settings">Configurações ignoradas: %1$d</string>
     <string name="backup_settings_restore_warnings_title">Avisos</string>
     <string name="backup_settings_validation_failed_title">Backup inválido</string>
-    <string name="backup_settings_validation_invalid_file">O arquivo selecionado não é um backup válido do InstallerX Revived.</string>
+    <string name="backup_settings_validation_invalid_file">O arquivo selecionado não é um backup válido do AirSend.</string>
     <string name="backup_settings_validation_unsupported_format">A versão %1$s do formato de backup não é compatível. A versão atual suporta até %2$s.</string>
     <string name="backup_settings_validation_empty">O backup não contém perfis, escopos, configurações nem histórico.</string>
     <string name="backup_settings_validation_invalid_profile_id">ID de perfil inválido: %1$s</string>

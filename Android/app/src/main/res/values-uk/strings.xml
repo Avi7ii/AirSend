@@ -15,7 +15,7 @@
     <string name="menu">Меню</string>
     <string name="about">Про застосунок</string>
     <string name="other">Інше</string>
-    <string name="about_detail">Про InstallerX Revived</string>
+    <string name="about_detail">Про AirSend</string>
     <string name="get_update">Отримувати оновлення</string>
     <string name="get_update_detail">Перевіряти наявність оновлень ПЗ та нових функцій</string>
     <string name="internet_access_enabled">У мережі</string>
@@ -28,6 +28,8 @@
     <string name="discuss">Чат, відгук та оновлення</string>
     <string name="telegram_group">Група в Telegram</string>
     <string name="telegram_group_desc">Приєднуйтесь до групи!</string>
+    <string name="telegram_channel">Канал в Telegram</string>
+    <string name="telegram_channel_desc">Підпишіться на канал, щоб отримувати новини та оновлення!</string>
     <string name="theme_settings">Налаштування теми</string>
     <string name="theme_settings_ui_style">Стиль інтерфейсу</string>
     <string name="theme_settings_desc">Змінити тему застосунку</string>
@@ -45,11 +47,11 @@
     <string name="ignore_battery_optimizations_desc">Корисно на ПЗУ із суворою фоновою політикою. Якщо сповіщення зависає, спробуйте проігнорувати оптимізацію акумулятора</string>
     <string name="ignore_battery_optimizations_desc_disabled">Уже проігноровано</string>
     <string name="lock_default_installer">Встановити як типовий встановлювач</string>
-    <string name="lock_default_installer_desc">Встановіть InstallerX як додаток за замовчуванням для встановлення apks</string>
+    <string name="lock_default_installer_desc">Встановіть AirSend як додаток за замовчуванням для встановлення apks</string>
     <string name="lock_default_installer_success">Успішно встановлено як типовий встановлювач</string>
     <string name="lock_default_installer_failed">Не вдалося встановити як типовий встановлювач</string>
     <string name="unlock_default_installer">Скасувати встановлення як типовий встановлювач</string>
-    <string name="unlock_default_installer_desc">Вимкнути InstallerX як інсталятор за замовчуванням для встановлення apks</string>
+    <string name="unlock_default_installer_desc">Вимкнути AirSend як інсталятор за замовчуванням для встановлення apks</string>
     <string name="unlock_default_installer_success">Типовий встановлювач успішно скинуто</string>
     <string name="unlock_default_installer_failed">Не вдалося встановити як типовий встановлювач</string>
     <string name="clear_cache">Очистити кеш</string>
@@ -254,10 +256,8 @@
     <string name="save_logs_desc">Зберегти журнал у локальний файл для налагодження</string>
     <string name="export_logs">Експорт журналів</string>
     <string name="export_logs_desc">Експорт журналів програми</string>
-    <string name="uninstall_title">Видалення InstallerX Revived</string>
-    <string name="uninstall_content">Після видалення цієї програми ви більше не зможете використовувати InstallerX Revived для встановлення програм.</string>
-    <string name="telegram_channel">Канал в Telegram</string>
-    <string name="telegram_channel_desc">Підпишіться на канал, щоб отримувати новини та оновлення!</string>
+    <string name="uninstall_title">Видалення AirSend</string>
+    <string name="uninstall_content">Після видалення цієї програми ви більше не зможете використовувати AirSend для встановлення програм.</string>
     <string name="theme_settings_miuix_ui">Miuix</string>
     <string name="theme_settings_miuix_ui_desc">Схожі на Hyperos</string>
     <string name="theme_settings_miuix_custom_colors">Користувацькі кольори</string>
@@ -280,10 +280,6 @@
     <string name="theme_settings_dynamic_color">Динамічний колір</string>
     <string name="theme_settings_dynamic_color_desc">Колір теми на основі шпалер</string>
     <string name="theme_settings_theme_color">Колір теми</string>
-    <string name="theme_settings_dynamic_color_follow_icon">Барвистий діалог</string>
-    <string name="theme_settings_dynamic_color_follow_icon_desc">Діалогове вікно встановлення більше не відповідатиме кольорам теми програми. Натомість воно використовуватиме кольори, отримані з піктограми пакета, який встановлюється</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon">Барвистий прогрес активності</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon_desc">Сегмент прогресу активності використовуватиме кольори, отримані з піктограми пакета</string>
     <string name="color_default">За замовчуванням</string>
     <string name="color_pink">Рожевий</string>
     <string name="color_red">Червоний</string>
@@ -304,9 +300,6 @@
     <string name="color_grey">Сірий</string>
     <string name="theme_settings_use_live_activity_desc">Використовуйте Live Activity замість сповіщень, може не підтримуватися на користувацьких ПЗУ</string>
     <string name="theme_settings_use_live_activity">Жива Активність</string>
-    <string name="theme_settings_package_icons">Джерело іконки пакета</string>
-    <string name="theme_settings_prefer_system_icon">Надавати перевагу системній іконці для встановлюваної програми</string>
-    <string name="theme_settings_prefer_system_icon_desc">Спроба отримати іконку із системи. Корисно під час використання пакетів значків. Вимикається відображення значка з інсталяційного пакета</string>
     <string name="theme_settings_launcher_icons">Іконка на головному екрані</string>
     <string name="theme_settings_hide_launcher_icon">Приховати іконку на головному екрані</string>
     <string name="theme_settings_hide_launcher_icon_desc">Наберіть в телефоні *#*#46789#*#*, щоб відкрити налаштування</string>
@@ -430,7 +423,7 @@
     <string name="installer_uninstall_app">Видалити застосунок</string>
     <string name="installer_uninstalling">Видалення</string>
     <string name="uninstall_authorizer_tip">Деінсталятор завжди використовує авторизатор, встановлений у профілі за замовчуванням</string>
-    <string name="installer_running">Запущено InstallerX</string>
+    <string name="installer_running">Запущено AirSend</string>
     <string name="installer_version_short">Вер. %1$s (%2$s)</string>
     <string name="installer_version_name_label">Назва версії:</string>
     <string name="installer_version_code_label">Код версії:</string>

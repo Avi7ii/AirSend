@@ -21,7 +21,7 @@
     <string name="lab">آزمایشگاه</string>
     <string name="lab_desc">دسترسی به ویژگی‌های آزمایشی و توسعه‌دهنده</string>
     <string name="debug">اشکال‌زدایی</string>
-    <string name="about_detail">درباره InstallerX Revived</string>
+    <string name="about_detail">درباره AirSend</string>
     <string name="updating">درحال بروزرسانی…</string>
     <string name="get_update">دریافت بروزرسانی</string>
     <string name="get_update_detail">بررسی به‌روزرسانی نرم‌افزار و ویژگی‌های جدید</string>
@@ -36,8 +36,8 @@
     <string name="export_logs_desc">خروجی گرفتن از گزارش‌های برنامه</string>
     <string name="internet_access_enabled">آنلاین</string>
     <string name="internet_access_disabled">آفلاین</string>
-    <string name="uninstall_title">حذف InstallerX Revived</string>
-    <string name="uninstall_content">بعد از حذف این برنامه، دیگر قادر به استفاده از InstallerX Revived برای نصب برنامه‌ها نخواهید بود.</string>
+    <string name="uninstall_title">حذف AirSend</string>
+    <string name="uninstall_content">بعد از حذف این برنامه، دیگر قادر به استفاده از AirSend برای نصب برنامه‌ها نخواهید بود.</string>
     <string name="stable">پایدار</string>
     <string name="preview">پیش‌نمایش</string>
     <string name="unstable">ناپایدار</string>
@@ -72,10 +72,6 @@
     <string name="theme_settings_dynamic_color">رنگ داینامیک</string>
     <string name="theme_settings_dynamic_color_desc">رنگ پوسته بر اساس تصویر زمینه</string>
     <string name="theme_settings_theme_color">رنگ پوسته</string>
-    <string name="theme_settings_dynamic_color_follow_icon">دیالوگ رنگی</string>
-    <string name="theme_settings_dynamic_color_follow_icon_desc">دیالوگ نصب دیگر از رنگ‌های پوسته برنامه پیروی نخواهد کرد. در عوض، از رنگ‌هایی استفاده می‌کند که از آیکون بسته‌ای که در حال نصب است استخراج شده‌اند</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon">پیشرفت فعالیت زنده رنگی</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon_desc">بخش پیشرفت فعالیت زنده از رنگ‌هایی استفاده خواهد کرد که از آیکون بسته استخراج شده‌اند</string>
     <string name="color_default">پیش‌فرض</string>
     <string name="color_pink">صورتی</string>
     <string name="color_red">قرمز</string>
@@ -96,9 +92,6 @@
     <string name="color_grey">خاکستری</string>
     <string name="theme_settings_use_live_activity">فعالیت زنده</string>
     <string name="theme_settings_use_live_activity_desc">استفاده از فعالیت زنده به جای اعلان‌ها، ممکن است در رام‌های سفارشی پشتیبانی نشود</string>
-    <string name="theme_settings_package_icons">منبع آیکون بسته</string>
-    <string name="theme_settings_prefer_system_icon">استفاده از آیکون سیستم برای برنامه‌ای که قرار است نصب شود</string>
-    <string name="theme_settings_prefer_system_icon_desc">تلاش برای دریافت آیکون از سیستم، هنگام استفاده از بسته‌های آیکون مفید است. غیرفعال کردن این گزینه باعث می‌شود آیکون از بسته نصب شده نمایش داده شود</string>
     <string name="theme_settings_launcher_icons">آیکون لانچر</string>
     <string name="theme_settings_hide_launcher_icon">مخفی کردن آیکون لانچر</string>
     <string name="theme_settings_hide_launcher_icon_desc">با شماره گیری *#*#46789#*#* تنظیمات را باز کنید</string>
@@ -134,11 +127,11 @@
     <string name="auto_lock_default_installer">تنظیم خودکار به‌عنوان نصب‌کننده پیش‌فرض</string>
     <string name="auto_lock_default_installer_desc">به‌طور خودکار این برنامه را هنگام شروع نصب جدید به‌عنوان نصب‌کننده تنظیم کنید</string>
     <string name="lock_default_installer">تنظیم به‌عنوان نصب‌کننده پیش‌فرض</string>
-    <string name="lock_default_installer_desc">تنظیم InstallerX به‌عنوان برنامه پیش‌فرض برای نصب فایل‌های apk</string>
+    <string name="lock_default_installer_desc">تنظیم AirSend به‌عنوان برنامه پیش‌فرض برای نصب فایل‌های apk</string>
     <string name="lock_default_installer_success">با موفقیت به‌عنوان نصب‌کننده پیش‌فرض تنظیم شد</string>
     <string name="lock_default_installer_failed">تنظیم به‌عنوان نصب‌کننده پیش‌فرض انجام نشد</string>
     <string name="unlock_default_installer">لغو تنظیم به‌عنوان نصب‌کننده پیش‌فرض</string>
-    <string name="unlock_default_installer_desc">لغو تنظیم InstallerX به‌عنوان نصب‌کننده پیش‌فرض برای نصب فایل‌های apk</string>
+    <string name="unlock_default_installer_desc">لغو تنظیم AirSend به‌عنوان نصب‌کننده پیش‌فرض برای نصب فایل‌های apk</string>
     <string name="unlock_default_installer_success">با موفقیت لغو شد و دیگر به‌عنوان نصب‌کننده پیش‌فرض تنظیم نیست</string>
     <string name="unlock_default_installer_failed">لغو تنظیم به‌عنوان نصب‌کننده پیش‌فرض انجام نشد</string>
     <string name="clear_cache">پاک‌سازی کش</string>

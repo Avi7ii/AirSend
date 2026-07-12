@@ -19,7 +19,7 @@
     <string name="performance">પરફૉર્મન્સ</string>
     <string name="lab">પ્રયોગશાળા</string>
     <string name="lab_desc">પ્રાયોગિક અને વિકાસકર્તા સુવિધાઓ ઍક્સેસ કરો</string>
-    <string name="about_detail">InstallerX Revived ના વિશે</string>
+    <string name="about_detail">AirSend ના વિશે</string>
     <string name="updating">અપડેટ થઈ રહ્યું છે…</string>
     <string name="get_update">અપડેટ મેળવો</string>
     <string name="update_available">અપડેટ ઉપલબ્ધ છે: %1$s</string>
@@ -27,8 +27,8 @@
     <string name="save_logs">લોગ્સ સાચવો</string>
     <string name="internet_access_enabled">ઓનલાઇન</string>
     <string name="internet_access_disabled">ઓફલાઈન</string>
-    <string name="uninstall_title">InstallerX Revived ને કાઢી કાઢો</string>
-    <string name="uninstall_content">આ ઍપ ને કાઢી નાખ્યા પછી, તમે InstallerX Revived નો ઉપયોગ ઍપ ને ઇન્સ્ટોલ કરવા, નહીં કરી શકો.</string>
+    <string name="uninstall_title">AirSend ને કાઢી કાઢો</string>
+    <string name="uninstall_content">આ ઍપ ને કાઢી નાખ્યા પછી, તમે AirSend નો ઉપયોગ ઍપ ને ઇન્સ્ટોલ કરવા, નહીં કરી શકો.</string>
     <string name="stable">સ્થિર</string>
     <string name="preview">પ્રિવ્યૂ</string>
     <string name="unstable">અસ્થિર</string>

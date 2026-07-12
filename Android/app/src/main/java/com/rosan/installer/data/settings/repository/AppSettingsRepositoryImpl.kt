@@ -22,6 +22,7 @@ import com.rosan.installer.domain.settings.model.preferences.theme.ThemeColorSpe
 import com.rosan.installer.domain.settings.model.preferences.theme.ThemeMode
 import com.rosan.installer.domain.settings.repository.AppSettingsRepository
 import com.rosan.installer.domain.settings.repository.BooleanSetting
+import com.rosan.installer.domain.settings.repository.FloatSetting
 import com.rosan.installer.domain.settings.repository.IntSetting
 import com.rosan.installer.domain.settings.repository.NamedPackageListSetting
 import com.rosan.installer.domain.settings.repository.SharedUidListSetting
@@ -140,6 +141,7 @@ class AppSettingsRepositoryImpl(
             useDynamicColor = prefs[AppDataStore.THEME_USE_DYNAMIC_COLOR] ?: true,
             useMiuixMonet = prefs[AppDataStore.UI_USE_MIUIX_MONET] ?: false,
             useAppleFloatingBar = prefs[AppDataStore.UI_USE_APPLE_FLOATING_BAR] ?: false,
+            pageScale = (prefs[AppDataStore.UI_PAGE_SCALE] ?: 1.0f).coerceIn(0.8f, 1.1f),
             seedColorInt = prefs[AppDataStore.THEME_SEED_COLOR] ?: DEFAULT_SEED_COLOR,
             useDynColorFollowPkgIcon = prefs[AppDataStore.UI_DYN_COLOR_FOLLOW_PKG_ICON] ?: false,
             useDynColorFollowPkgIconForLiveActivity = prefs[AppDataStore.LIVE_ACTIVITY_DYN_COLOR_FOLLOW_PKG_ICON] ?: false,
@@ -169,6 +171,12 @@ class AppSettingsRepositoryImpl(
 
     override fun getInt(setting: IntSetting, default: Int): Flow<Int> =
         appDataStore.getInt(intKey(setting), default)
+
+    override suspend fun putFloat(setting: FloatSetting, value: Float) =
+        appDataStore.putFloat(floatKey(setting), value)
+
+    override fun getFloat(setting: FloatSetting, default: Float): Flow<Float> =
+        appDataStore.getFloat(floatKey(setting), default)
 
     override suspend fun putBoolean(setting: BooleanSetting, value: Boolean) =
         appDataStore.putBoolean(booleanKey(setting), value)
@@ -227,6 +235,11 @@ class AppSettingsRepositoryImpl(
             IntSetting.NotificationSuccessAutoClearSeconds -> AppDataStore.NOTIFICATION_SUCCESS_AUTO_CLEAR_SECONDS
             IntSetting.CloseSessionCountdown -> AppDataStore.CLOSE_SESSION_COUNTDOWN
             IntSetting.UninstallFlags -> AppDataStore.UNINSTALL_FLAGS
+        }
+
+    private fun floatKey(setting: FloatSetting): Preferences.Key<Float> =
+        when (setting) {
+            FloatSetting.UiPageScale -> AppDataStore.UI_PAGE_SCALE
         }
 
     private fun booleanKey(setting: BooleanSetting): Preferences.Key<Boolean> =

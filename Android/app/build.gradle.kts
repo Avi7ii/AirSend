@@ -124,6 +124,8 @@ room3 {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
+
     implementation(libs.androidx.profileinstaller)
     implementation(libs.android.tools.apksig)
     compileOnly(project(":hidden-api"))

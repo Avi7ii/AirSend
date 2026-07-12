@@ -50,6 +50,7 @@ class ThemeStateProviderImpl(
             useDynamicColor = prefs.useDynamicColor,
             useMiuixMonet = prefs.useMiuixMonet,
             useAppleFloatingBar = prefs.useAppleFloatingBar,
+            pageScale = prefs.pageScale,
             seedColor = effectiveSeedColor,
             useBlur = prefs.useBlur,
             predictiveBackAnimation = prefs.predictiveBackAnimation,

@@ -74,6 +74,7 @@ data class AppPreferences(
     val useDynamicColor: Boolean,
     val useMiuixMonet: Boolean,
     val useAppleFloatingBar: Boolean,
+    val pageScale: Float,
     val seedColorInt: Int, // Stored as raw Int from DataStore
     val useDynColorFollowPkgIcon: Boolean,
     val useDynColorFollowPkgIconForLiveActivity: Boolean,

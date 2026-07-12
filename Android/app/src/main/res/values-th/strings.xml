@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="about">เกี่ยวกับ</string>
-    <string name="about_detail">เกี่ยวกับ InstallerX Revived</string>
+    <string name="about_detail">เกี่ยวกับ AirSend</string>
     <string name="add">เพิ่ม</string>
     <string name="allocate_aggressive">จัดสรรอย่างเข้มข้น</string>
     <string name="allocate_aggressive_desc">ระบุว่าแพ็คเกจเป็น ส่วนสำคัญต่อสุขภาพหรือความปลอดภัยของระบบ และจะลบไฟล์ที่ล้างได้มากขึ้นเพื่อเพิ่มพื้นที่หากจำเป็น</string>
@@ -203,7 +203,7 @@
     <string name="installer_resolve_failed">การแก้ไขล้มเหลว</string>
     <string name="installer_resolve_success">การแก้ไขผ่าน</string>
     <string name="installer_resolving">กำลังตรวจสอบ…</string>
-    <string name="installer_running">InstallerX กำลังทำงาน</string>
+    <string name="installer_running">AirSend กำลังทำงาน</string>
     <string name="installer_select_from_zip">เลือกจากไฟล์ zip</string>
     <string name="installer_select_install">เลือกแอปที่จะติดตั้ง</string>
     <string name="installer_settings">การตั้งค่าตัวติดตั้ง</string>
@@ -225,7 +225,7 @@
     <string name="internet_access_enabled">ออนไลน์</string>
     <string name="loading">กำลังโหลด…</string>
     <string name="lock_default_installer">ตั้งเป็นตัวติดตั้งเริ่มต้น</string>
-    <string name="lock_default_installer_desc">ตั้งค่า InstallerX เป็นแอปเริ่มต้นเพื่อติดตั้ง apks</string>
+    <string name="lock_default_installer_desc">ตั้งค่า AirSend เป็นแอปเริ่มต้นเพื่อติดตั้ง apks</string>
     <string name="lock_default_installer_failed">ไม่สามารถตั้งเป็นตัวติดตั้งเริ่มต้นได้</string>
     <string name="lock_default_installer_success">ตั้งเป็นตัวติดตั้งเริ่มต้นสำเร็จ</string>
     <string name="menu">เมนู</string>
@@ -354,7 +354,7 @@
     <string name="uninstall_keep_data">เก็บข้อมูลไว้</string>
     <string name="uninstall_success_message">ถอนการติดตั้งสำเร็จ</string>
     <string name="unlock_default_installer">ยกเลิกการตั้งค่าตัวติดตั้งเริ่มต้น</string>
-    <string name="unlock_default_installer_desc">ยกเลิกการตั้งค่า InstallerX เป็นตัวติดตั้งเริ่มต้นเพื่อติดตั้ง apks</string>
+    <string name="unlock_default_installer_desc">ยกเลิกการตั้งค่า AirSend เป็นตัวติดตั้งเริ่มต้นเพื่อติดตั้ง apks</string>
     <string name="unlock_default_installer_failed">ไม่สามารถยกเลิกการตั้งค่าตัวติดตั้งเริ่มต้นได้</string>
     <string name="unlock_default_installer_success">ยกเลิกการตั้งค่าตัวติดตั้งเริ่มต้นสำเร็จ</string>
     <string name="unstable">ไม่เสถียร</string>

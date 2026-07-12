@@ -303,6 +303,10 @@ class BackupRepositoryImpl(
                 AppDataStore.PreferenceValueType.BOOLEAN -> (value as? Boolean)?.let {
                     BackupSettingEntry(key.name, BackupSettingType.BOOLEAN, it.toString())
                 }
+
+                AppDataStore.PreferenceValueType.FLOAT -> (value as? Float)?.let {
+                    BackupSettingEntry(key.name, BackupSettingType.FLOAT, it.toString())
+                }
             }
         }
     }
@@ -509,6 +513,7 @@ class BackupRepositoryImpl(
             AppDataStore.PreferenceValueType.INT -> this.type == BackupSettingType.INT && value.toIntOrNull() != null
             AppDataStore.PreferenceValueType.BOOLEAN -> this.type == BackupSettingType.BOOLEAN &&
                     value.toBooleanStrictOrNull() != null
+            AppDataStore.PreferenceValueType.FLOAT -> this.type == BackupSettingType.FLOAT && value.toFloatOrNull() != null
         }
 
     private fun invalidProfileField(field: String): BackupValidationIssue =
@@ -605,6 +610,13 @@ class BackupRepositoryImpl(
                 if (entry.type != BackupSettingType.BOOLEAN) return false
                 val value = entry.value.toBooleanStrictOrNull() ?: return false
                 this[supportedKey.key as Preferences.Key<Boolean>] = value
+                true
+            }
+
+            AppDataStore.PreferenceValueType.FLOAT -> {
+                if (entry.type != BackupSettingType.FLOAT) return false
+                val value = entry.value.toFloatOrNull() ?: return false
+                this[supportedKey.key as Preferences.Key<Float>] = value
                 true
             }
         }

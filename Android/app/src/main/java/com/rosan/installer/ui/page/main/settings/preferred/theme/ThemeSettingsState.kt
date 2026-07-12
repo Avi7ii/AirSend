@@ -21,12 +21,9 @@ data class ThemeSettingsState(
     val useDynamicColor: Boolean = true,
     val useMiuixMonet: Boolean = false,
     val useAppleFloatingBar: Boolean = false,
+    val pageScale: Float = 1.0f,
     val seedColor: Color = PresetColors[0].color,
     val availableColors: List<RawColor> = PresetColors,
-    val useDynColorFollowPkgIcon: Boolean = false,
-    val useDynColorFollowPkgIconForLiveActivity: Boolean = false,
-    val preferSystemIcon: Boolean = false,
-    val showLiveActivity: Boolean = false,
     val predictiveBackAnimation: PredictiveBackAnimation = PredictiveBackAnimation.None,
     val predictiveBackExitDirection: PredictiveBackExitDirection = PredictiveBackExitDirection.FOLLOW_GESTURE
 )

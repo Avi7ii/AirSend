@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="about">О приложении</string>
-    <string name="about_detail">Об InstallerX Revived</string>
+    <string name="about_detail">Об AirSend</string>
     <string name="add">Добавить</string>
     <string name="allocate_aggressive">Агрессивные методы</string>
     <string name="allocate_aggressive_desc">Позволяет приложению использовать агрессивные методы распределения ресурсов для удаления доступных для очистки файлов, чтобы освободить больше места</string>
@@ -195,7 +195,7 @@
     <string name="installer_resolve_failed">Попытка не удалась</string>
     <string name="installer_resolve_success">Успешно завершено</string>
     <string name="installer_resolving">Проверка…</string>
-    <string name="installer_running">InstallerX запущен</string>
+    <string name="installer_running">AirSend запущен</string>
     <string name="installer_select_from_zip">Выберите из zip-файла</string>
     <string name="installer_select_install">Выберите приложения для установки</string>
     <string name="installer_settings">Настройки установщика</string>
@@ -215,7 +215,7 @@
     <string name="internal_desc">Принудительно установить пакет во внутреннее хранилище</string>
     <string name="loading">Загрузка…</string>
     <string name="lock_default_installer">Назначить установщиком по умолчанию</string>
-    <string name="lock_default_installer_desc">Установите InstallerX в качестве приложения по умолчанию для установки apks</string>
+    <string name="lock_default_installer_desc">Установите AirSend в качестве приложения по умолчанию для установки apks</string>
     <string name="lock_default_installer_failed">Не удалось назначить установщиком по умолчанию</string>
     <string name="lock_default_installer_success">Успешно назначен установщиком по умолчанию</string>
     <string name="menu">Меню</string>
@@ -339,7 +339,7 @@
     <string name="unarchive">Разархивировать</string>
     <string name="unarchive_desc">Разархивируйте существующий пакет</string>
     <string name="unlock_default_installer">Отменить назначение установщиком по умолчанию</string>
-    <string name="unlock_default_installer_desc">Отключить InstallerX как установщик по умолчанию для установки apks</string>
+    <string name="unlock_default_installer_desc">Отключить AirSend как установщик по умолчанию для установки apks</string>
     <string name="unlock_default_installer_failed">Не удалось отменить назначение</string>
     <string name="unlock_default_installer_success">Назначение успешно отменено</string>
     <string name="unstable">Альфа</string>
@@ -360,12 +360,13 @@
     <string name="get_source_code_detail">Просмотреть исходный код на GitHub</string>
     <string name="internet_access_enabled">Онлайн</string>
     <string name="internet_access_disabled">Офлайн</string>
-    <string name="uninstall_title">Удалить InstallerX Revived</string>
-    <string name="uninstall_content">После удаления этого приложения вы больше не сможете использовать InstallerX Revived для установки приложений.</string>
+    <string name="uninstall_title">Удалить AirSend</string>
+    <string name="uninstall_content">После удаления этого приложения вы больше не сможете использовать AirSend для установки приложений.</string>
     <string name="discuss">Чат, отзывы и обновления</string>
     <string name="telegram_group">Группа в Telegram</string>
     <string name="telegram_channel">Канал в Telegram</string>
     <string name="telegram_channel_desc">Подпишитесь на канал, чтобы получать новости и обновления!</string>
+    <string name="telegram_group_desc">Присоединяйтесь к группе!</string>
     <string name="theme_settings_miuix_ui">MiuiX</string>
     <string name="theme_settings_miuix_ui_desc">В стиле HyperOS</string>
     <string name="theme_settings_google_ui_desc">Стандартный Material Design</string>
@@ -383,10 +384,6 @@
     <string name="theme_settings_miuix_custom_colors_desc">Настройка цветов темы в стиле Miuix</string>
     <string name="theme_settings_dynamic_color_desc">Динамическое изменение акцентов цвета темы в тон обоев</string>
     <string name="theme_settings_theme_color">Цвет темы</string>
-    <string name="theme_settings_dynamic_color_follow_icon">Цвет диалогов</string>
-    <string name="theme_settings_dynamic_color_follow_icon_desc">Палитра диалогов установки будет генерироваться из цвета иконки устанавливаемого приложения</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon">Цвет прогресс-бара</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon_desc">Цвета прогресс-бара будут использоваться из иконки устанавливаемого приложения</string>
     <string name="color_default">По умолчанию</string>
     <string name="color_pink">Розовый</string>
     <string name="color_red">Красный</string>
@@ -407,9 +404,6 @@
     <string name="color_grey">Серый</string>
     <string name="theme_settings_use_live_activity">Живая активность</string>
     <string name="theme_settings_use_live_activity_desc">Використовуйте \"Живу Активність\" замість сповіщень, може не підтримуватися на користувацьких ROMs</string>
-    <string name="theme_settings_package_icons">Иконка приложения</string>
-    <string name="theme_settings_prefer_system_icon">Иконки из системы</string>
-    <string name="theme_settings_prefer_system_icon_desc">Пробовать получить иконки из системы при обновлении. При отключении иконки будут загружены из установочного пакета</string>
     <string name="theme_settings_launcher_icons">Иконка на рабочем столе</string>
     <string name="theme_settings_hide_launcher_icon">Скрыть иконку с рабочего стола</string>
     <string name="theme_settings_hide_launcher_icon_desc">Для доступа к настройкам набирайте *#*#46789#*#*</string>
@@ -479,7 +473,6 @@
     <string name="installer_install_module">Установить модуль</string>
     <string name="installer_installing_module">Установка модуля</string>
     <string name="agreement_title">Политика</string>
-    <string name="telegram_group_desc">Присоединяйтесь к группе!</string>
     <string name="theme_settings_google_ui">Google Material 3</string>
     <string name="config_app_authorizer_desc">Авторизатор имеет право выполнять привилегированные операции</string>
     <string name="config_install_authorizer_desc">Авторизатор для установки приложений</string>
@@ -631,7 +624,7 @@
     <string name="installer_error_mixed_selection">Невозможно установить приложения и модули одновременно</string>
     <string name="installer_error_multiple_modules">Невозможно установить несколько модулей сразу</string>
     <string name="lab_module_flashing_show_art">Показывать ASCII-арт</string>
-    <string name="lab_module_flashing_show_art_desc">Отображать ASCII-арт InstallerX в начале установки</string>
+    <string name="lab_module_flashing_show_art_desc">Отображать ASCII-арт AirSend в начале установки</string>
     <string name="lab_http_save_file">Сохранять скачанные файлы</string>
     <string name="lab_http_save_file_desc">Сохранять файлы в папку Загрузки после окончания скачивания</string>
     <string name="lab_http_profile">Политика безопасности HTTP</string>
@@ -806,7 +799,7 @@
     <string name="home_device_info_system">Система</string>
     <string name="home_device_info_active_authorizer">Используется авторизатор</string>
     <string name="home_device_info_default_installer">Активность установщика по умолчанию</string>
-    <string name="exception_initiator_not_visible">Доступ запрещен из-за ограничений видимости пакета. Приложение, запрашивающее установку, скрыто от InstallerX. Если вы используете такие модули, как \'Скрыть мой список приложений\', добавьте InstallerX в список разрешенных</string>
+    <string name="exception_initiator_not_visible">Доступ запрещен из-за ограничений видимости пакета. Приложение, запрашивающее установку, скрыто от AirSend. Если вы используете такие модули, как \'Скрыть мой список приложений\', добавьте AirSend в список разрешенных</string>
     <string name="installer_settings_xposed_detection">Обнаружение Xposed</string>
     <string name="config_detect_xposed_module">Обнаружение модулей Xposed</string>
     <string name="config_detect_xposed_module_desc">Обнаружение и отображение информации о модуле Xposed во время установки</string>
@@ -828,8 +821,8 @@
     <string name="long_click_background_install">Длительное нажатие для установки в фоне</string>
     <string name="long_click_background_install_desc">Фоновый режим при длительном нажатии кнопки \'Установить\'</string>
     <string name="home_learn_more_title">Узнать больше</string>
-    <string name="home_learn_more_installerx_title">Узнайте больше о InstallerX Revived</string>
-    <string name="home_learn_more_installerx_desc">Руководство по настройке и использованию InstallerX Revived</string>
+    <string name="home_learn_more_airsend_title">Узнайте больше о AirSend</string>
+    <string name="home_learn_more_airsend_desc">Руководство по настройке и использованию AirSend</string>
     <string name="history_clear_confirm_desc">История установок и удалений будет стерта без возможности восстановления.</string>
     <string name="history_clear">Очистить историю</string>
     <string name="history">История</string>
@@ -873,7 +866,7 @@
     <string name="backup_settings_restore_ignored_settings">Пропущено настроек: %1$d</string>
     <string name="backup_settings_restore_warnings_title">Предупреждения</string>
     <string name="backup_settings_validation_failed_title">Поврежденный файл бэкапа</string>
-    <string name="backup_settings_validation_invalid_file">Выбранный файл не является резервной копией InstallerX Revived.</string>
+    <string name="backup_settings_validation_invalid_file">Выбранный файл не является резервной копией AirSend.</string>
     <string name="backup_settings_validation_unsupported_format">Формат бэкапа версии %1$s не поддерживается. Текущая сборка работает с версиями не выше %2$s.</string>
     <string name="backup_settings_validation_empty">Файл резервной копии пуст.</string>
     <string name="backup_settings_validation_invalid_profile_id">Неверный ID профиля: %1$s</string>

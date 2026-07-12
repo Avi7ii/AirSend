@@ -13,7 +13,7 @@
     <string name="menu">メニュー</string>
     <string name="about">このアプリについて</string>
     <string name="other">その他</string>
-    <string name="about_detail">InstallerX Revived について</string>
+    <string name="about_detail">AirSend について</string>
     <string name="user_terms">ユーザーポリシー</string>
     <string name="agree">同意</string>
     <string name="warning">警告</string>
@@ -29,8 +29,8 @@
     <string name="get_source_code_detail">GitHub でソースコードを確認します</string>
     <string name="internet_access_enabled">オンライン</string>
     <string name="internet_access_disabled">オフライン</string>
-    <string name="uninstall_title">InstallerX Revived をアンインストール</string>
-    <string name="uninstall_content">このアプリをアンインストールすると、InstallerX Revived を使用してアプリをインストールできなくなります。</string>
+    <string name="uninstall_title">AirSend をアンインストール</string>
+    <string name="uninstall_content">このアプリをアンインストールすると、AirSend を使用してアプリをインストールできなくなります。</string>
     <string name="stable">安定版</string>
     <string name="preview">プレビュー</string>
     <string name="unstable">不安定版</string>
@@ -109,11 +109,9 @@
     <string name="auto_lock_default_installer">デフォルトのインストーラーとして自動的に設定</string>
     <string name="auto_lock_default_installer_desc">新規にインストールを開始するときに、このアプリを自動的にインストーラーとして設定します</string>
     <string name="lock_default_installer">デフォルトインストーラーの設定</string>
-    <string name="lock_default_installer_desc">InstallerX を APK をインストールするためのデフォルトのアプリとして設定します</string>
+    <string name="lock_default_installer_desc">AirSend を APK をインストールするためのデフォルトのアプリとして設定します</string>
     <string name="lock_default_installer_success">デフォルトのインストーラーとして正常に設定されました</string>
     <string name="lock_default_installer_failed">デフォルトのインストーラーとして設定できませんでした</string>
-    <string name="theme_settings_dynamic_color_follow_icon">カラフルなダイアログ</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon">カラフルなライブ アクティビティ進捗</string>
     <string name="config_allow_downgrade">ダウングレードを許可</string>
     <string name="from_adb">ADBからインストールをリクエスト</string>
     <string name="reboot">再起動</string>
@@ -142,7 +140,7 @@
     <string name="clearing_cache">キャッシュをクリア中…</string>
     <string name="no_cache">キャッシュはありません</string>
     <string name="unlock_default_installer">デフォルトインストーラーの設定を解除</string>
-    <string name="unlock_default_installer_desc">InstallerX を APK をインストールするためのデフォルトのアプリから設定解除します</string>
+    <string name="unlock_default_installer_desc">AirSend を APK をインストールするためのデフォルトのアプリから設定解除します</string>
     <string name="unlock_default_installer_success">デフォルトのインストーラーから正常に設定解除されました</string>
     <string name="unlock_default_installer_failed">デフォルトのインストーラーから設定解除できませんでした</string>
     <string name="cache_size">キャッシュサイズ: %1$s</string>
@@ -207,7 +205,6 @@
     <string name="suggestion_shizuku_isolation">shizuku を使用してください</string>
     <string name="suggestion_shizuku_isolation_desc">shizuku と有効なインストーラーを使用してください</string>
     <string name="suggestion_mi_isolation">有効なインストーラーを試してください</string>
-    <string name="theme_settings_package_icons">パッケージアイコンのソース</string>
     <string name="uninstaller_settings">アンインストーラー設定</string>
     <string name="uninstaller_settings_desc">アンインストーラーのグローバル設定を変更します</string>
     <string name="installer_settings_auto_clear_time_never_desc">インストール成功通知をクリアしない</string>
@@ -246,7 +243,6 @@
     <string name="uninstall_keep_data_desc">アプリデータとキャッシュは保持されます</string>
     <string name="installer_background_channel_name">バックグラウンド通知</string>
     <string name="performance">パフォーマンス</string>
-    <string name="theme_settings_prefer_system_icon">アプリをインストールする際はシステムアイコンを優先する</string>
     <string name="empty_configs">プロファイルがありません。以下にプロファイルを追加してください</string>
     <string name="config_global_default">グローバルのデフォルト</string>
     <string name="config_authorizer_root">Root</string>
@@ -433,9 +429,6 @@
     <string name="permission_request_install_packages">インストールパッケージのリクエスト</string>
     <string name="permission_write_settings">設定の書き込み</string>
     <string name="open_source_license_settings_description">サードパーティのオープンソースライブラリとそのライセンスを表示する</string>
-    <string name="theme_settings_dynamic_color_follow_icon_desc">インストールダイアログはアプリのテーマカラーに従わなくなり、代わりにインストールするパッケージのアイコンの色が使用されます</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon_desc">ライブアクティビティの進行セグメントでは、パッケージのアイコンから抽出した色が使用されます</string>
-    <string name="theme_settings_prefer_system_icon_desc">システムからアイコンを取得しようとします。アイコンパックを使用する場合に便利です。インストールパッケージからアイコンを表示したい場合には無効にしてください</string>
     <string name="config_authorizer_none_system_app_tips">システムパッケージインストーラーとして実行する場合、ほとんどのオプションは不要です。</string>
     <string name="config_customize_install_reason_desc">インストールの理由を設定します。新規インストールの場合、「ユーザー」を選択すると、通常、ランチャーにアイコンが作成されます</string>
     <string name="config_customize_package_source_desc">パッケージのソースを指定します。ローカルファイルまたはダウンロードファイルの場合は、追加の制限が適用されます</string>
@@ -461,7 +454,7 @@
     <string name="permission_access_mock_location">模擬位置情報へのアクセス</string>
     <string name="permission_dhizuku">Dhizuku の使用</string>
     <string name="permission_unknown">不明な権限</string>
-    <string name="installer_running">InstallerX 動作中</string>
+    <string name="installer_running">AirSend 動作中</string>
     <string name="installer_version_short">バージョン: %1$s (%2$s)</string>
     <string name="installer_version_name_label">バージョン名:</string>
     <string name="installer_version_code_label">バージョンコード:</string>
@@ -598,7 +591,7 @@
     <string name="lab_http_save_file">ダウンロードしたファイルを保存する</string>
     <string name="lab_http_save_file_desc">ダウンロードが完了したら、ファイルをダウンロードフォルダに保存します</string>
     <string name="lab_module_flashing_show_art">アスキーアートを表示</string>
-    <string name="lab_module_flashing_show_art_desc">インストール開始時に InstallerX のアスキーアートを表示します</string>
+    <string name="lab_module_flashing_show_art_desc">インストール開始時に AirSend のアスキーアートを表示します</string>
     <string name="lab_set_install_requester_desc">有効にするとプロファイルに OriginatingUid フィールドのカスタマイズが表示されます</string>
     <string name="config_grant_all_permissions_desc">パッケージが要求するすべての権限を自動的に付与します。ただし、これは実行時の権限にのみ適用されます。「すべてのファイルへのアクセス」や「アクセシビリティ」などの特別な権限は自動的に付与されません</string>
     <string name="config_split_choose_all">デフォルトですべての分割 apk を選択</string>
@@ -770,7 +763,7 @@
     <string name="installer_temp_settings_tip">これらの設定は今回のセッションのみ有効です。設定を保存するには、「設定」に移動してください</string>
     <string name="install_confirm_question_update_owner_reminder">このアプリは通常、%1$s によって更新されます。他のソースから更新した場合、今後の更新はどのソースからでも受信される可能性があります。アプリの機能が変更される場合もあります。</string>
     <string name="install_confirm_external_request_tip">%1$s からのインストールリクエストを承認しますか？</string>
-    <string name="exception_initiator_not_visible">パッケージの表示制限により、アクセスが拒否されました。インストールを要求しているアプリは InstallerX から非表示になっています。「Hide My Applist」などのモジュールを使用している場合は、InstallerX を許可リストに追加してください</string>
+    <string name="exception_initiator_not_visible">パッケージの表示制限により、アクセスが拒否されました。インストールを要求しているアプリは AirSend から非表示になっています。「Hide My Applist」などのモジュールを使用している場合は、AirSend を許可リストに追加してください</string>
     <string name="exception_install_failed_blocked_by_profile">プロファイルポリシーによりインストールがブロックされました</string>
     <string name="dialog_settings">ダイアログ設定</string>
     <string name="dialog_settings_desc">インストールダイアログの外観と動作をカスタマイズします</string>

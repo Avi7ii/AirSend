@@ -17,6 +17,7 @@ data class ThemeState(
     val useDynamicColor: Boolean = true,
     val useMiuixMonet: Boolean = false,
     val useAppleFloatingBar: Boolean = false,
+    val pageScale: Float = 1.0f,
     val seedColor: Int = 0xFF6750A4.toInt(),
     val useBlur: Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU,
     val predictiveBackAnimation: PredictiveBackAnimation = PredictiveBackAnimation.MIUIX,

@@ -18,7 +18,7 @@
     <string name="other">Andere</string>
     <string name="lab">Laboratorium</string>
     <string name="lab_desc">Toegang tot experimentele en ontwikkelaarsfuncties</string>
-    <string name="about_detail">Over InstallerX Revived</string>
+    <string name="about_detail">Over AirSend</string>
     <string name="updating">Bijwerken…</string>
     <string name="get_update">Update krijgen</string>
     <string name="get_update_detail">Naar software-updates en nieuwe functies zoeken</string>
@@ -29,8 +29,8 @@
     <string name="get_source_code_detail">Naar broncode zoeken op GitHub</string>
     <string name="internet_access_enabled">Online</string>
     <string name="internet_access_disabled">Offline</string>
-    <string name="uninstall_title">InstallerX Revived verwijderen</string>
-    <string name="uninstall_content">Na het verwijderen van deze app zal je niet langer InstallerX Revived kunnen gebruiken om apps te installeren.</string>
+    <string name="uninstall_title">AirSend verwijderen</string>
+    <string name="uninstall_content">Na het verwijderen van deze app zal je niet langer AirSend kunnen gebruiken om apps te installeren.</string>
     <string name="stable">Stabiel</string>
     <string name="preview">Voorbeeld</string>
     <string name="unstable">Onstabiel</string>
@@ -64,10 +64,6 @@
     <string name="theme_settings_dynamic_color">Dynamische kleur</string>
     <string name="theme_settings_dynamic_color_desc">Themakleur op basis van de achtergrond</string>
     <string name="theme_settings_theme_color">Themakleur</string>
-    <string name="theme_settings_dynamic_color_follow_icon">Kleurvolle dialoog</string>
-    <string name="theme_settings_dynamic_color_follow_icon_desc">De installatiedialoog zal niet langer de themakleuren van de app opvolgen. In plaats daarvan zal het kleuren die gevonden zijn in het icoon van het te installeren pakket gebruiken</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon">Kleurvolle live-activiteitsvoortgang</string>
-    <string name="theme_settings_live_activity_dynamic_color_follow_icon_desc">Het voortgangsgedeelte van de live-activiteit zal kleuren gebruiken die gevonden zijn in het icoon van het pakket</string>
     <string name="color_default">Standaard</string>
     <string name="color_pink">Roze</string>
     <string name="color_red">Rood</string>
@@ -88,9 +84,6 @@
     <string name="color_grey">Grijs</string>
     <string name="theme_settings_use_live_activity">Live-activiteit</string>
     <string name="theme_settings_use_live_activity_desc">Gebruik live-activiteit in plaats van meldingen, wordt mogelijk niet ondersteund door aangepaste ROM\'s</string>
-    <string name="theme_settings_package_icons">Pakketicoonbron</string>
-    <string name="theme_settings_prefer_system_icon">Geef voorkeur aan systeemiconen voor de te installeren app</string>
-    <string name="theme_settings_prefer_system_icon_desc">Probeert om het icoon van het systeem te krijgen, handig als je icoonpakketten gebruikt. Zet uit om het icoon van het te installeren pakket te gebruiken</string>
     <string name="theme_settings_launcher_icons">Startschermicoon</string>
     <string name="theme_settings_hide_launcher_icon">Verberg startschermicoon</string>
     <string name="theme_settings_hide_launcher_icon_desc">Bel *#*#46789#*#* om instellingen te openen</string>
@@ -116,11 +109,11 @@
     <string name="auto_lock_default_installer">Automatisch instellen als de standaard installateur</string>
     <string name="auto_lock_default_installer_desc">Automatisch deze app instellen als de standaard installateur bij het starten van een nieuwe installatie</string>
     <string name="lock_default_installer">Als standaard installateur instellen</string>
-    <string name="lock_default_installer_desc">InstallerX als de standaard app om APK\'s te installeren instellen</string>
+    <string name="lock_default_installer_desc">AirSend als de standaard app om APK\'s te installeren instellen</string>
     <string name="lock_default_installer_success">Succesvol ingesteld als standaard installateur</string>
     <string name="lock_default_installer_failed">Kon niet als standaard installateur ingesteld worden</string>
     <string name="unlock_default_installer">Als standaard installateur uitzetten</string>
-    <string name="unlock_default_installer_desc">InstallerX als standaard installateur voor het installeren van APK\'s uitzetten</string>
+    <string name="unlock_default_installer_desc">AirSend als standaard installateur voor het installeren van APK\'s uitzetten</string>
     <string name="unlock_default_installer_success">Succesvol uitgezet als standaard installateur</string>
     <string name="unlock_default_installer_failed">Kon niet uitzetten als standaard installateur</string>
     <string name="clear_cache">Cache legen</string>
@@ -370,7 +363,7 @@
     <string name="permission_access_mock_location">Toegang tot neplocatie</string>
     <string name="permission_dhizuku">Gebruik Dhizuku</string>
     <string name="permission_unknown">Onbekende machtiging</string>
-    <string name="installer_running">InstallerX wordt uitgevoerd</string>
+    <string name="installer_running">AirSend wordt uitgevoerd</string>
     <string name="installer_version_short">Ver. %1$s (%2$s)</string>
     <string name="installer_version_name_label">Versienaam:</string>
     <string name="installer_version_code_label">Versiecode:</string>
@@ -633,7 +626,7 @@
     <string name="uninstall_progress_text">Verwijderen…</string>
     <string name="uninstall_enter_package_name">Voer pakketnaam in om te verwijderen</string>
     <string name="lab_module_flashing_show_art">ASCII-kunst weergeven</string>
-    <string name="lab_module_flashing_show_art_desc">InstallerX ASCII-kunst weergeven bij start installatie</string>
+    <string name="lab_module_flashing_show_art_desc">AirSend ASCII-kunst weergeven bij start installatie</string>
     <string name="installer_settings_require_biometric_auth">Biometrische authenticatie vereisen voor installatie</string>
     <string name="installer_settings_require_biometric_auth_desc">Biometrische authenticatie vereisen tijdens installeren van pakketten</string>
     <string name="uninstaller_settings_require_biometric_auth">Biometrische authenticatie vereisen voor verwijderen</string>
@@ -858,7 +851,7 @@
     <string name="backup_settings_restore_ignored_settings">Genegeerde instellingen: %1$d</string>
     <string name="backup_settings_restore_warnings_title">Waarschuwingen</string>
     <string name="backup_settings_validation_failed_title">Ongeldige back-up</string>
-    <string name="backup_settings_validation_invalid_file">Het geselecteerde bestand is niet een geldige InstallerX Revived back-up.</string>
+    <string name="backup_settings_validation_invalid_file">Het geselecteerde bestand is niet een geldige AirSend back-up.</string>
     <string name="backup_settings_validation_unsupported_format">Ongeldig back-upformaat met de versie %1$s. De huidige versie ondersteunt tot %2$s.</string>
     <string name="backup_settings_validation_empty">Deze back-up bevat geen profielen, scopes, instellingen of geschiedenisgegevens.</string>
     <string name="backup_settings_validation_invalid_profile_id">Ongeldige profiel-id: %1$s</string>

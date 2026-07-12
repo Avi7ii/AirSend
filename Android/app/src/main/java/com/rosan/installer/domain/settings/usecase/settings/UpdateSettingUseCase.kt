@@ -4,6 +4,7 @@ package com.rosan.installer.domain.settings.usecase.settings
 
 import com.rosan.installer.domain.settings.repository.AppSettingsRepository
 import com.rosan.installer.domain.settings.repository.BooleanSetting
+import com.rosan.installer.domain.settings.repository.FloatSetting
 import com.rosan.installer.domain.settings.repository.IntSetting
 import com.rosan.installer.domain.settings.repository.StringSetting
 
@@ -20,5 +21,9 @@ class UpdateSettingUseCase(
 
     suspend operator fun invoke(setting: IntSetting, value: Int) {
         appSettingsRepo.putInt(setting, value)
+    }
+
+    suspend operator fun invoke(setting: FloatSetting, value: Float) {
+        appSettingsRepo.putFloat(setting, value)
     }
 }

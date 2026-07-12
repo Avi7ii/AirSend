@@ -35,6 +35,8 @@ jobs:
           bash -n AirSend-macOS/build.sh
           bash -n AirSend-macOS/script/make_appcast.sh
           bash -n build_magisk_payload.sh
+          bash -n magisk_module/service.sh
+          bash -n tools/test_magisk_service_version_guard.sh
           bash -n tools/prepare_release_assets.sh
           bash -n tools/test_prepare_release_assets.sh
 
@@ -51,9 +53,13 @@ jobs:
           test -x AirSend-macOS/build.sh
           test -x tools/prepare_release_assets.sh
           test -x tools/test_prepare_release_assets.sh
+          test -x tools/test_magisk_service_version_guard.sh
 
       - name: Test release asset completeness guard
         run: tools/test_prepare_release_assets.sh
+
+      - name: Test Magisk APK version guard
+        run: tools/test_magisk_service_version_guard.sh
 
   macos-swift:
     name: macOS Swift build and app bundle

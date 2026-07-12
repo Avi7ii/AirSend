@@ -6,6 +6,7 @@ ANDROID_DIR="$ROOT_DIR/Android"
 DAEMON_DIR="$ANDROID_DIR/airsend_daemon"
 MAGISK_DIR="$ROOT_DIR/magisk_module"
 MODULE_VERSION="$(sed -n 's/^version=//p' "$MAGISK_DIR/module.prop" | head -n1)"
+MODULE_VERSION_CODE="$(sed -n 's/^versionCode=//p' "$MAGISK_DIR/module.prop" | head -n1)"
 if [[ -z "$MODULE_VERSION" ]]; then
   MODULE_VERSION="latest"
 fi
@@ -25,6 +26,101 @@ log() {
 fail() {
   printf '[build-magisk] ERROR: %s\n' "$1" >&2
   exit 1
+}
+
+sha256_file() {
+  local path="$1"
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$path" | awk '{print $1}'
+  else
+    sha256sum "$path" | awk '{print $1}'
+  fi
+}
+
+verify_same_hash() {
+  local source="$1"
+  local destination="$2"
+  local source_hash
+  local destination_hash
+  source_hash="$(sha256_file "$source")"
+  destination_hash="$(sha256_file "$destination")"
+  [[ "$source_hash" == "$destination_hash" ]] ||
+    fail "payload hash mismatch: $source ($source_hash) != $destination ($destination_hash)"
+}
+
+detect_android_home() {
+  if [[ -n "${ANDROID_HOME:-}" && -d "$ANDROID_HOME" ]]; then
+    return
+  fi
+
+  local props="$ANDROID_DIR/local.properties"
+  if [[ -f "$props" ]]; then
+    local sdk_dir
+    sdk_dir="$(sed -n 's/^sdk\.dir=//p' "$props" | head -n1)"
+    if [[ -n "$sdk_dir" && -d "$sdk_dir" ]]; then
+      export ANDROID_HOME="$sdk_dir"
+      return
+    fi
+  fi
+
+  if [[ -d "$HOME/Library/Android/sdk" ]]; then
+    export ANDROID_HOME="$HOME/Library/Android/sdk"
+  fi
+}
+
+detect_java_home() {
+  if [[ -n "${JAVA_HOME:-}" && -x "$JAVA_HOME/bin/java" ]]; then
+    return
+  fi
+  local android_studio_jbr="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+  if [[ -x "$android_studio_jbr/bin/java" ]]; then
+    export JAVA_HOME="$android_studio_jbr"
+  fi
+}
+
+find_aapt2() {
+  [[ -n "${ANDROID_HOME:-}" ]] || return 1
+  find "$ANDROID_HOME/build-tools" -type f -name aapt2 -perm -111 2>/dev/null |
+    sort -V |
+    tail -n1
+}
+
+read_apk_version_code() {
+  local apk="$1"
+  local aapt2
+  aapt2="$(find_aapt2 || true)"
+  if [[ -n "$aapt2" ]]; then
+    "$aapt2" dump badging "$apk" |
+      sed -n "s/.*versionCode='\([0-9][0-9]*\)'.*/\1/p" |
+      head -n1
+    return
+  fi
+
+  local apkanalyzer="${ANDROID_HOME:-}/cmdline-tools/latest/bin/apkanalyzer"
+  if [[ -x "$apkanalyzer" ]]; then
+    "$apkanalyzer" manifest version-code "$apk" | tr -d '[:space:]'
+    return
+  fi
+  fail "Neither aapt2 nor apkanalyzer is available to verify APK versionCode"
+}
+
+verify_version_sources() {
+  local normalized_module_version="${MODULE_VERSION#v}"
+  local cargo_version
+  local android_version_name
+  local android_version_code
+  cargo_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$DAEMON_DIR/Cargo.toml" | head -n1)"
+  android_version_name="$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' "$ANDROID_DIR/app/build.gradle.kts" | head -n1)"
+  android_version_code="$(sed -n 's/.*versionCode = \([0-9][0-9]*\).*/\1/p' "$ANDROID_DIR/app/build.gradle.kts" | head -n1)"
+
+  [[ -n "$MODULE_VERSION_CODE" && "$MODULE_VERSION_CODE" =~ ^[0-9]+$ ]] ||
+    fail "module.prop versionCode is missing or invalid"
+  [[ "$cargo_version" == "$normalized_module_version" ]] ||
+    fail "daemon version $cargo_version does not match module version $normalized_module_version"
+  [[ "$android_version_name" == "$normalized_module_version" ]] ||
+    fail "Android versionName $android_version_name does not match module version $normalized_module_version"
+  [[ "$android_version_code" == "$MODULE_VERSION_CODE" ]] ||
+    fail "Android versionCode $android_version_code does not match module versionCode $MODULE_VERSION_CODE"
 }
 
 prepare_module_scripts() {
@@ -70,6 +166,7 @@ ensure_prereqs() {
   command -v cargo >/dev/null 2>&1 || fail "cargo not found"
   command -v install >/dev/null 2>&1 || fail "install not found"
   command -v zip >/dev/null 2>&1 || fail "zip not found"
+  command -v unzip >/dev/null 2>&1 || fail "unzip not found"
   [[ -x "$ANDROID_DIR/gradlew" ]] || fail "Android/gradlew is missing or not executable"
   cargo ndk --help >/dev/null 2>&1 || fail "cargo-ndk is required (install via: cargo install cargo-ndk)"
 }
@@ -117,6 +214,7 @@ build_daemon() {
   [[ -f "$daemon_src" ]] || fail "daemon output not found: $daemon_src"
 
   replace_file_atomic "$daemon_src" "$DAEMON_DST" 0755
+  verify_same_hash "$daemon_src" "$DAEMON_DST"
   log "Daemon replaced at: $DAEMON_DST"
 }
 
@@ -158,11 +256,16 @@ build_apk() {
   done
 
   [[ -n "$apk_src" ]] || fail "APK output not found after task $gradle_task"
+  local apk_version_code
+  apk_version_code="$(read_apk_version_code "$apk_src")"
+  [[ "$apk_version_code" == "$MODULE_VERSION_CODE" ]] ||
+    fail "built APK versionCode=$apk_version_code does not match module versionCode=$MODULE_VERSION_CODE"
 
   # Keep only one APK in the module app directory.
   mkdir -p "$APK_DST_DIR"
   find "$APK_DST_DIR" -maxdepth 1 -type f -name "*.apk" -delete
   replace_file_atomic "$apk_src" "$APK_DST" 0644
+  verify_same_hash "$apk_src" "$APK_DST"
   log "APK replaced at: $APK_DST"
 }
 
@@ -174,12 +277,29 @@ package_magisk_module() {
     cd "$MAGISK_DIR"
     COPYFILE_DISABLE=1 zip -qry "$ZIP_OUTPUT" . -x '*.DS_Store' '*/.DS_Store' '._*' '*/._*'
   )
+  verify_zip_payload
   log "Magisk zip created: $ZIP_OUTPUT"
 }
 
+verify_zip_payload() {
+  local temp_dir
+  temp_dir="$(mktemp -d)"
+  trap 'rm -rf "$temp_dir"' RETURN
+  unzip -qq "$ZIP_OUTPUT" -d "$temp_dir"
+  [[ -f "$temp_dir/system/bin/airsend_daemon" ]] || fail "zip daemon payload missing"
+  [[ -f "$temp_dir/system/app/AirSend/AirSend.apk" ]] || fail "zip APK payload missing"
+  verify_same_hash "$DAEMON_DST" "$temp_dir/system/bin/airsend_daemon"
+  verify_same_hash "$APK_DST" "$temp_dir/system/app/AirSend/AirSend.apk"
+  rm -rf "$temp_dir"
+  trap - RETURN
+}
+
 main() {
+  detect_android_home
+  detect_java_home
   ensure_prereqs
   detect_ndk_home
+  verify_version_sources
   prepare_module_scripts
   build_daemon
   build_apk
@@ -190,4 +310,6 @@ main() {
   log "  - $ZIP_OUTPUT"
 }
 
-main "$@"
+if [[ "${AIRSEND_BUILD_TEST_MODE:-0}" != "1" ]]; then
+  main "$@"
+fi

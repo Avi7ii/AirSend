@@ -205,6 +205,7 @@ impl WriterState {
             file.flush()?;
             file.sync_data()?;
         }
+        self.cap_active_to_tail()?;
         if self.backup_count > 0 {
             remove_if_exists(&self.backup_path(self.backup_count))?;
             for index in (1..self.backup_count).rev() {
@@ -221,6 +222,32 @@ impl WriterState {
         }
         self.active_bytes = 0;
         self.open_active()
+    }
+
+    fn cap_active_to_tail(&mut self) -> Result<()> {
+        if self.active_bytes <= self.max_bytes || !self.path.exists() {
+            return Ok(());
+        }
+
+        let mut source = File::open(&self.path)
+            .with_context(|| format!("failed to open {}", self.path.display()))?;
+        source.seek(SeekFrom::Start(self.active_bytes - self.max_bytes))?;
+        let mut tail = Vec::with_capacity(self.max_bytes as usize);
+        source.read_to_end(&mut tail)?;
+
+        let temporary_path = PathBuf::from(format!("{}.trim", self.path.display()));
+        remove_if_exists(&temporary_path)?;
+        let mut temporary = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(&temporary_path)
+            .with_context(|| format!("failed to create {}", temporary_path.display()))?;
+        temporary.write_all(&tail)?;
+        temporary.sync_all()?;
+        fs::rename(&temporary_path, &self.path)?;
+        self.active_bytes = tail.len() as u64;
+        Ok(())
     }
 
     fn open_active(&mut self) -> Result<()> {
@@ -273,11 +300,16 @@ mod tests {
     fn rotates_oversized_existing_log_during_initialization() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("airsend.log");
-        std::fs::write(&path, vec![b'x'; 101]).unwrap();
+        std::fs::write(&path, vec![b'x'; 250]).unwrap();
 
         let _writer = SizeRotatingWriter::new(path.clone(), 100, 3).unwrap();
 
-        assert!(path.with_extension("log.1").exists());
+        assert_eq!(
+            std::fs::metadata(path.with_extension("log.1"))
+                .unwrap()
+                .len(),
+            100
+        );
         assert_eq!(std::fs::metadata(path).unwrap().len(), 0);
     }
 

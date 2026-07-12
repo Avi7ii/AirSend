@@ -80,10 +80,10 @@ class LocalSocketAirSendIpcClient : AirSendIpcClient {
     }.flowOn(Dispatchers.IO)
 
     private fun connect(socket: LocalSocket, timeoutMs: Int) {
-        socket.soTimeout = timeoutMs
         socket.connect(
             LocalSocketAddress(SOCKET_NAME, LocalSocketAddress.Namespace.ABSTRACT)
         )
+        socket.soTimeout = timeoutMs
     }
 
     private fun writeRequest(socket: LocalSocket, request: AirSendIpcRequest) {

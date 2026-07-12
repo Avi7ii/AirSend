@@ -14,6 +14,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 
 class AirSendRuntimeRepositoryImpl(
@@ -46,13 +48,18 @@ class AirSendRuntimeRepositoryImpl(
             val daemon = AirSendIpcCodec.json.decodeFromJsonElement<AirSendDaemonStateSnapshot>(
                 ipcClient.request("get_state")
             )
+            val config = AirSendIpcCodec.json.decodeFromJsonElement<AirSendConfigSnapshot>(
+                ipcClient.request("get_config")
+            )
             val peers = AirSendIpcCodec.json
                 .decodeFromJsonElement<List<AirSendPeerSnapshot>>(
                     ipcClient.request("get_peers")
                 )
-                .map { it.toRuntimePeer() }
-            Triple(hello, daemon, peers)
-        }.onSuccess { (hello, daemon, peers) ->
+                .map { it.toRuntimePeer(config.preferredTarget) }
+            RefreshSnapshot(hello, daemon, config, peers)
+        }.onSuccess { snapshot ->
+            val hello = snapshot.hello
+            val daemon = snapshot.daemon
             val compatibilityWarnings = if (hello.protocolVersion == SUPPORTED_PROTOCOL_VERSION) {
                 emptyList()
             } else {
@@ -60,13 +67,13 @@ class AirSendRuntimeRepositoryImpl(
             }
             _state.value = readLocalState(_state.value).copy(
                 daemonReachable = true,
-                peers = peers,
+                peers = snapshot.peers,
                 protocolVersion = hello.protocolVersion,
                 daemonVersion = hello.daemonVersion,
                 configVersion = daemon.configVersion,
                 historySchemaVersion = daemon.historySchemaVersion,
                 daemonStartedAtMs = daemon.startedAtMs,
-                preferredTargetId = daemon.preferredTarget,
+                preferredTargetId = snapshot.config.preferredTarget,
                 historyCount = daemon.historyCount,
                 healthWarnings = daemon.healthWarnings + compatibilityWarnings,
                 tlsFingerprint = daemon.tlsFingerprint,
@@ -104,6 +111,18 @@ class AirSendRuntimeRepositoryImpl(
     override fun setBootStartEnabled(enabled: Boolean) {
         androidRuntimeReader.setBootStartEnabled(enabled)
         updateLocalState()
+    }
+
+    override suspend fun setPreferredTarget(targetId: String?) {
+        require(targetId == null || targetId.isNotBlank()) { "Target id must not be blank" }
+        val config = AirSendIpcCodec.json.decodeFromJsonElement<AirSendConfigSnapshot>(
+            ipcClient.request("get_config")
+        )
+        val updated = config.copy(preferredTarget = targetId)
+        ipcClient.request(
+            op = "set_config",
+            payload = AirSendIpcCodec.json.encodeToJsonElement(updated).jsonObject
+        )
     }
 
     override suspend fun sendText(text: String, targetId: String?) {
@@ -154,7 +173,7 @@ class AirSendRuntimeRepositoryImpl(
         )
     }
 
-    private fun AirSendPeerSnapshot.toRuntimePeer(): AirSendPeer = AirSendPeer(
+    private fun AirSendPeerSnapshot.toRuntimePeer(preferredTarget: String?): AirSendPeer = AirSendPeer(
         id = id,
         alias = alias,
         deviceModel = deviceModel ?: "Unknown",
@@ -163,8 +182,15 @@ class AirSendRuntimeRepositoryImpl(
         fingerprint = fingerprint,
         address = address,
         protocol = protocol,
-        selected = selected,
+        selected = id == preferredTarget,
         manual = manual
+    )
+
+    private data class RefreshSnapshot(
+        val hello: AirSendHelloSnapshot,
+        val daemon: AirSendDaemonStateSnapshot,
+        val config: AirSendConfigSnapshot,
+        val peers: List<AirSendPeer>
     )
 
     companion object {

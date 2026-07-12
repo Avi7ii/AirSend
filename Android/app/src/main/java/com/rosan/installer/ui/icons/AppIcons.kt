@@ -39,6 +39,7 @@ import androidx.compose.material.icons.twotone.Compress
 import androidx.compose.material.icons.twotone.Copyright
 import androidx.compose.material.icons.twotone.Delete
 import androidx.compose.material.icons.twotone.DeveloperMode
+import androidx.compose.material.icons.twotone.DesktopWindows
 import androidx.compose.material.icons.twotone.DoNotDisturbOn
 import androidx.compose.material.icons.twotone.Download
 import androidx.compose.material.icons.twotone.Downloading
@@ -60,6 +61,7 @@ import androidx.compose.material.icons.twotone.Info
 import androidx.compose.material.icons.twotone.InstallMobile
 import androidx.compose.material.icons.twotone.KeyboardArrowDown
 import androidx.compose.material.icons.twotone.LibraryAddCheck
+import androidx.compose.material.icons.twotone.LaptopMac
 import androidx.compose.material.icons.twotone.LocalPolice
 import androidx.compose.material.icons.twotone.Memory
 import androidx.compose.material.icons.twotone.NoEncryption
@@ -68,6 +70,7 @@ import androidx.compose.material.icons.twotone.NotificationsActive
 import androidx.compose.material.icons.twotone.NotificationsOff
 import androidx.compose.material.icons.twotone.People
 import androidx.compose.material.icons.twotone.PermDeviceInformation
+import androidx.compose.material.icons.twotone.PhoneAndroid
 import androidx.compose.material.icons.twotone.Refresh
 import androidx.compose.material.icons.twotone.RocketLaunch
 import androidx.compose.material.icons.twotone.RoomPreferences
@@ -85,12 +88,15 @@ import androidx.compose.material.icons.twotone.Style
 import androidx.compose.material.icons.twotone.SwapHoriz
 import androidx.compose.material.icons.twotone.SystemUpdate
 import androidx.compose.material.icons.twotone.Tag
+import androidx.compose.material.icons.twotone.TabletMac
 import androidx.compose.material.icons.twotone.TaskAlt
 import androidx.compose.material.icons.twotone.Terminal
 import androidx.compose.material.icons.twotone.Timer
 import androidx.compose.material.icons.twotone.TouchApp
+import androidx.compose.material.icons.twotone.Tv
 import androidx.compose.material.icons.twotone.VerifiedUser
 import androidx.compose.material.icons.twotone.WebAsset
+import androidx.compose.material.icons.twotone.Watch
 import androidx.compose.material.icons.twotone.Widgets
 import com.rosan.installer.R
 
@@ -102,6 +108,13 @@ object AppIcons {
     // You need to add the 'androidx.compose.material:material-icons-extended' dependency to use all icons
     // Or replace them with your own icon resources
     val Android = Icons.TwoTone.Android
+    val DevicePhone = Icons.TwoTone.PhoneAndroid
+    val DeviceTablet = Icons.TwoTone.TabletMac
+    val DeviceLaptop = Icons.TwoTone.LaptopMac
+    val DeviceDesktop = Icons.TwoTone.DesktopWindows
+    val DeviceTv = Icons.TwoTone.Tv
+    val DeviceWatch = Icons.TwoTone.Watch
+    val DeviceOther = Icons.TwoTone.PermDeviceInformation
     val Active = Icons.Rounded.CheckCircleOutline
     val Info = Icons.TwoTone.Info
     val Add = Icons.TwoTone.Add

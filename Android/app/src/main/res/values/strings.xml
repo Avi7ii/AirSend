@@ -1148,6 +1148,8 @@
     <string name="airsend_files_sent">Selected files sent to AirSend daemon.</string>
     <string name="airsend_pick_files">Pick files to send</string>
     <string name="airsend_send_to_peer">Send to %1$s</string>
+    <string name="airsend_target_selected">Default device selected.</string>
+    <string name="airsend_select_target">Set as default device</string>
     <string name="airsend_peer_count">%1$d peer(s) online</string>
     <string name="airsend_daemon_error">Daemon error: %1$s</string>
 </resources>

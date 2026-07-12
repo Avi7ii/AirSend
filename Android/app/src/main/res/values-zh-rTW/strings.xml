@@ -1033,4 +1033,6 @@
     <string name="airsend_network_discovery_desc">掃描區域網路裝置，並保持廣播探索可用。</string>
     <string name="airsend_trusted_devices">可信裝置</string>
     <string name="airsend_trusted_devices_desc">管理已配對桌面和後續自動接收規則。</string>
+    <string name="airsend_target_selected">已設為預設裝置。</string>
+    <string name="airsend_select_target">設為預設裝置</string>
 </resources>

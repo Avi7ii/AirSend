@@ -13,6 +13,7 @@ interface AirSendRuntimeRepository {
     fun stopService()
     fun restartService()
     fun setBootStartEnabled(enabled: Boolean)
+    suspend fun setPreferredTarget(targetId: String?)
     suspend fun sendText(text: String, targetId: String? = null)
     suspend fun sendClipboardText(targetId: String? = null)
     suspend fun sendFiles(uris: List<Uri>, targetId: String? = null)

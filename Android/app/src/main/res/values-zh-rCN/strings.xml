@@ -1127,6 +1127,8 @@
     <string name="airsend_files_sent">已选文件已发送给 AirSend 守护进程。</string>
     <string name="airsend_pick_files">选择要发送的文件</string>
     <string name="airsend_send_to_peer">发送给 %1$s</string>
+    <string name="airsend_target_selected">已设为默认设备。</string>
+    <string name="airsend_select_target">设为默认设备</string>
     <string name="airsend_peer_count">%1$d 台设备在线</string>
     <string name="airsend_daemon_error">守护进程错误：%1$s</string>
 </resources>

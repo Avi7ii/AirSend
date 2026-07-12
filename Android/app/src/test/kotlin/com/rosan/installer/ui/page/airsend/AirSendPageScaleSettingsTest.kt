@@ -47,11 +47,13 @@ class AirSendPageScaleSettingsTest {
         assertTrue(themeState.contains("val pageScale: Float = 1.0f"))
         assertTrue(provider.contains("pageScale = prefs.pageScale"))
 
-        listOf(settingsActivity, installerActivityContent).forEach { source ->
-            assertTrue(source.contains("LocalDensity"))
-            assertTrue(source.contains("Density(systemDensity.density * uiState.pageScale, systemDensity.fontScale)"))
-            assertTrue(source.contains("LocalDensity provides density"))
-        }
+        assertTrue(settingsActivity.contains("LocalDensity"))
+        assertTrue(settingsActivity.contains("systemDensity.density * effectiveUiState.pageScale"))
+        assertTrue(settingsActivity.contains("LocalDensity provides density"))
+
+        assertTrue(installerActivityContent.contains("LocalDensity"))
+        assertTrue(installerActivityContent.contains("systemDensity.density * uiState.pageScale"))
+        assertTrue(installerActivityContent.contains("LocalDensity provides density"))
     }
 
     @Test

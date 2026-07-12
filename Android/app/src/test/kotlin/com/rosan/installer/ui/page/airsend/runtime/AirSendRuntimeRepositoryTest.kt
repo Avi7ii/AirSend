@@ -35,6 +35,7 @@ class AirSendRuntimeRepositoryTest {
                 "get_peers",
                 """[{"id":"peer-1","alias":"Mac","deviceModel":"MacBook Pro","deviceType":"desktop","version":"2.1","fingerprint":"11:22","address":"192.168.1.2:53317","protocol":"https","selected":true,"manual":false}]"""
             )
+            respond("get_config", configJson())
         }
         val runtime = FakeAndroidRuntimeReader()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
@@ -76,6 +77,33 @@ class AirSendRuntimeRepositoryTest {
         }
         assertEquals("peer-1", client.payloads.getValue("send_text")["targetId"]?.toString()?.trim('"'))
         scope.cancel()
+    }
+
+    @Test
+    fun selectingPeerPreservesConfigAndUpdatesPreferredTarget() = runBlocking {
+        val client = FakeAirSendIpcClient().apply {
+            respond("get_config", configJson())
+        }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val repository = AirSendRuntimeRepositoryImpl(
+            client,
+            FakeAndroidRuntimeReader(),
+            scope
+        )
+
+        repository.setPreferredTarget("peer-2")
+
+        val payload = client.payloads.getValue("set_config")
+        assertEquals("peer-2", payload["preferredTarget"]?.toString()?.trim('"'))
+        assertEquals("trusted_only", payload["receivePolicy"]?.toString()?.trim('"'))
+        assertEquals("/sdcard/Download/AirSend", payload["downloadDestination"]?.toString()?.trim('"'))
+        assertEquals(1, (payload["trustedPeerFingerprints"] as kotlinx.serialization.json.JsonArray).size)
+        scope.cancel()
+    }
+
+    companion object {
+        private fun configJson(): String =
+            """{"version":1,"preferredTarget":"peer-1","manualPeers":[],"trustedPeerFingerprints":["aa11"],"receivePolicy":"trusted_only","clipboardSyncEnabled":false,"screenshotSyncEnabled":false,"startupEnabled":true,"downloadDestination":"/sdcard/Download/AirSend","mediaDestination":"/sdcard/Pictures/AirSend","transportPreference":"https"}"""
     }
 }
 

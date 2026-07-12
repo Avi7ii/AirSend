@@ -76,6 +76,30 @@ data class AirSendPeerSnapshot(
     val manual: Boolean = false
 )
 
+@Serializable
+data class AirSendManualPeerSnapshot(
+    val id: String,
+    val alias: String,
+    val address: String,
+    val port: Int,
+    val fingerprint: String? = null
+)
+
+@Serializable
+data class AirSendConfigSnapshot(
+    val version: Int,
+    val preferredTarget: String? = null,
+    val manualPeers: List<AirSendManualPeerSnapshot> = emptyList(),
+    val trustedPeerFingerprints: List<String> = emptyList(),
+    val receivePolicy: String,
+    val clipboardSyncEnabled: Boolean,
+    val screenshotSyncEnabled: Boolean,
+    val startupEnabled: Boolean,
+    val downloadDestination: String,
+    val mediaDestination: String,
+    val transportPreference: String
+)
+
 class AirSendIpcException(
     val code: String,
     message: String,

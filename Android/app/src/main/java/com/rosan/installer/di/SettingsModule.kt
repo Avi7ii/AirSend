@@ -46,6 +46,12 @@ import com.rosan.installer.domain.settings.usecase.settings.SetLauncherIconUseCa
 import com.rosan.installer.domain.settings.usecase.settings.ToggleUninstallFlagUseCase
 import com.rosan.installer.domain.settings.usecase.settings.UpdateSettingUseCase
 import com.rosan.installer.domain.history.usecase.RecordOperationHistoryUseCase
+import com.rosan.installer.ui.page.airsend.runtime.AirSendRuntimeRepository
+import com.rosan.installer.ui.page.airsend.runtime.AirSendRuntimeRepositoryImpl
+import com.rosan.installer.ui.page.airsend.runtime.AirSendIpcClient
+import com.rosan.installer.ui.page.airsend.runtime.AndroidRuntimeReader
+import com.rosan.installer.ui.page.airsend.runtime.AndroidRuntimeReaderImpl
+import com.rosan.installer.ui.page.airsend.runtime.LocalSocketAirSendIpcClient
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.bind
 import org.koin.core.module.dsl.factoryOf
@@ -90,6 +96,15 @@ val settingsModule = module {
         AppSettingsRepositoryImpl(
             appDataStore = get(),
             capabilityProvider = get(),
+            appScope = get(named("AppScope"))
+        )
+    }
+    single<AirSendIpcClient> { LocalSocketAirSendIpcClient() }
+    single<AndroidRuntimeReader> { AndroidRuntimeReaderImpl(androidContext()) }
+    single<AirSendRuntimeRepository> {
+        AirSendRuntimeRepositoryImpl(
+            ipcClient = get(),
+            androidRuntimeReader = get(),
             appScope = get(named("AppScope"))
         )
     }

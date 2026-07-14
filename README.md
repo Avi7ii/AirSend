@@ -302,7 +302,7 @@ Android 端照片保存在 `~/Pictures/AirSend`，其他文件保存在 `~/Downl
 
 <p align="center">
   <a href="https://star-history.com/#Avi7ii/AirSend&Date">
-    <img src="https://api.star-history.com/svg?repos=Avi7ii/AirSend&type=Date" alt="AirSend Star History">
+    <img src="./docs/assets/airsend-star-history.svg" alt="AirSend Star History" width="100%">
   </a>
 </p>
 

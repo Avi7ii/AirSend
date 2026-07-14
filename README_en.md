@@ -306,7 +306,7 @@ No. `HTTPTransferServer` uses streaming I/O — data is written to disk chunk by
 
 <p align="center">
   <a href="https://star-history.com/#Avi7ii/AirSend&Date">
-    <img src="https://api.star-history.com/svg?repos=Avi7ii/AirSend&type=Date" alt="AirSend Star History">
+    <img src="./docs/assets/airsend-star-history.svg" alt="AirSend Star History" width="100%">
   </a>
 </p>
 

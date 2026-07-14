@@ -14,6 +14,8 @@ import com.rosan.installer.domain.settings.repository.AppSettingsRepository
 import com.rosan.installer.domain.settings.repository.BooleanSetting
 import com.rosan.installer.domain.settings.repository.StringSetting
 import com.rosan.installer.domain.settings.usecase.settings.UpdateSettingUseCase
+import com.rosan.installer.framework.privileged.core.execution.authorization.requireDhizukuPermissionGranted
+import com.rosan.installer.framework.privileged.core.execution.authorization.requireShizukuPermissionGranted
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -89,7 +91,6 @@ class HomePageViewModel(
         if (shizukuAvailable && caps.shizukuAuthorized) availableCount++
         if (caps.dhizukuAvailable && caps.dhizukuAuthorized) availableCount++
         if (caps.rootMode != RootMode.None) availableCount++
-        if (capabilityProvider.isSystemApp) availableCount++
 
         HomePageViewState(
             globalAuthorizer = prefs.authorizer,
@@ -136,10 +137,7 @@ class HomePageViewModel(
             is HomePageViewAction.SetDefaultInstaller -> setDefaultInstaller(action.lock, action)
 
             is HomePageViewAction.ChangeAuthorizer -> viewModelScope.launch {
-                updateSetting(
-                    StringSetting.Authorizer,
-                    action.authorizer.value
-                )
+                changeAuthorizer(action.authorizer)
             }
 
             is HomePageViewAction.ChangeCustomizeAuthorizer -> viewModelScope.launch {
@@ -167,6 +165,31 @@ class HomePageViewModel(
                 )
             }
         }
+    }
+
+    private suspend fun changeAuthorizer(authorizer: Authorizer) {
+        val available = when (authorizer) {
+            Authorizer.Root -> state.value.rootMode != RootMode.None
+            Authorizer.Shizuku -> state.value.shizukuAvailable
+            Authorizer.Dhizuku -> state.value.dhizukuAvailable
+            else -> true
+        }
+        if (!available) return
+
+        runCatching {
+            when (authorizer) {
+                Authorizer.Shizuku -> requireShizukuPermissionGranted {
+                    updateSetting(StringSetting.Authorizer, authorizer.value)
+                }
+                Authorizer.Dhizuku -> requireDhizukuPermissionGranted {
+                    updateSetting(StringSetting.Authorizer, authorizer.value)
+                }
+                else -> updateSetting(StringSetting.Authorizer, authorizer.value)
+            }
+        }.onFailure { error ->
+            Timber.e(error, "Failed to select ${authorizer.value} authorizer")
+        }
+        capabilityProvider.refreshPrivilegeStatus()
     }
 
     // Attempt to lock or unlock the default installer setting and emit corresponding UI events

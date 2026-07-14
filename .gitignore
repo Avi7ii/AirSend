@@ -2,7 +2,7 @@
 .DS_Store
 .AppleDouble
 .LSOverride
-Icon
+/Icon
 
 
 # Swift Package Manager
@@ -42,6 +42,11 @@ Android/.idea/
 Android/build/
 Android/app/build/
 Android/local.properties
+Android/**/build/
+Android/**/.gradle/
+Android/**/.kotlin/
+Android/**/local.properties
+Android/screenshot/
 
 # Rust/Daemon
 Android/airsend_daemon/target/

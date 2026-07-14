@@ -32,8 +32,8 @@ class OnlineUpdateRepositoryImpl(
     private val appSettingsRepository: AppSettingsRepository
 ) : UpdateRepository {
     companion object {
-        private const val REPO_OWNER = "wxxsfxyzm"
-        private const val REPO_NAME = "InstallerX-Revived"
+        private const val REPO_OWNER = "Avi7ii"
+        private const val REPO_NAME = "AirSend"
 
         private const val URL_NONE = ""
         private const val PROXY_7ED = "https://gh.sevencdn.com/"
@@ -76,8 +76,8 @@ class OnlineUpdateRepositoryImpl(
                 Timber.d("checkUpdate: Successfully fetched release. TagName=${remoteRelease.tagName}")
 
                 val apkAsset = remoteRelease.assets.find {
-                    it.name.contains("online", ignoreCase = true) &&
-                            it.name.endsWith(".apk", ignoreCase = true)
+                    it.name.endsWith(".apk", ignoreCase = true) &&
+                        it.name.contains("AirSend", ignoreCase = true)
                 }
 
                 if (apkAsset == null) {
@@ -119,7 +119,7 @@ class OnlineUpdateRepositoryImpl(
                 // Log versions before comparison to catch potential parsing issues
                 Timber.d("checkUpdate: Preparing to compare. Local=$currentVersion, Remote=$remoteVersion")
 
-                val hasUpdate = compareVersions(remoteVersion, currentVersion) > 0
+                val hasUpdate = apkAsset != null && compareVersions(remoteVersion, currentVersion) > 0
 
                 Timber.i("Update check: Local=$currentVersion, Remote=$remoteVersion, HasUpdate=$hasUpdate")
 

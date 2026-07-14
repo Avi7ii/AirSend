@@ -37,7 +37,17 @@ class AirSendRuntimeRepositoryTest {
             )
             respond("get_config", configJson())
         }
-        val runtime = FakeAndroidRuntimeReader()
+        val runtime = FakeAndroidRuntimeReader(
+            rootSnapshot = RootDaemonSnapshot(
+                rootAvailable = true,
+                rootProvider = "Magisk",
+                moduleInstalled = true,
+                moduleEnabled = true,
+                moduleVersion = "v3.5.1",
+                moduleVersionCode = 351,
+                daemonProcessRunning = true
+            )
+        )
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val repository = AirSendRuntimeRepositoryImpl(client, runtime, scope)
 
@@ -45,12 +55,18 @@ class AirSendRuntimeRepositoryTest {
 
         val state = repository.state.value
         assertTrue(state.daemonReachable)
+        assertTrue(state.rootAvailable)
+        assertEquals("Magisk", state.rootProvider)
+        assertTrue(state.moduleInstalled)
+        assertTrue(state.daemonProcessRunning)
+        assertTrue(state.versionsMatch)
         assertEquals(1, state.protocolVersion)
         assertEquals("3.5.1", state.daemonVersion)
         assertEquals("https", state.transportProtocol)
         assertEquals(listOf("config_recovered"), state.healthWarnings)
         assertEquals("peer-1", state.preferredTargetId)
         assertEquals(4, state.historyCount)
+        assertEquals(30, state.historyLimitPerDirection)
         assertEquals("Mac", state.peers.single().alias)
         assertTrue(state.peers.single().selected)
         assertFalse(state.isRefreshing)
@@ -80,10 +96,8 @@ class AirSendRuntimeRepositoryTest {
     }
 
     @Test
-    fun selectingPeerPreservesConfigAndUpdatesPreferredTarget() = runBlocking {
-        val client = FakeAirSendIpcClient().apply {
-            respond("get_config", configJson())
-        }
+    fun selectingPeerUsesDedicatedDaemonOperation() = runBlocking {
+        val client = FakeAirSendIpcClient()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val repository = AirSendRuntimeRepositoryImpl(
             client,
@@ -93,11 +107,8 @@ class AirSendRuntimeRepositoryTest {
 
         repository.setPreferredTarget("peer-2")
 
-        val payload = client.payloads.getValue("set_config")
-        assertEquals("peer-2", payload["preferredTarget"]?.toString()?.trim('"'))
-        assertEquals("trusted_only", payload["receivePolicy"]?.toString()?.trim('"'))
-        assertEquals("/sdcard/Download/AirSend", payload["downloadDestination"]?.toString()?.trim('"'))
-        assertEquals(1, (payload["trustedPeerFingerprints"] as kotlinx.serialization.json.JsonArray).size)
+        val payload = client.payloads.getValue("set_preferred_target")
+        assertEquals("peer-2", payload["targetId"]?.toString()?.trim('"'))
         scope.cancel()
     }
 
@@ -130,6 +141,42 @@ class AirSendRuntimeRepositoryTest {
         assertEquals("transferring", transfers.first().status)
         assertTrue(transfers.first().retryable)
         assertFalse(transfers.last().retryable)
+        assertEquals("60", client.payloads.getValue("get_history")["limit"].toString())
+        scope.cancel()
+    }
+
+    @Test
+    fun historyLimitUpdatePersistsThroughDaemonConfig() = runBlocking {
+        val client = FakeAirSendIpcClient().apply {
+            respond("get_config", configJson())
+        }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val repository = AirSendRuntimeRepositoryImpl(client, FakeAndroidRuntimeReader(), scope)
+
+        repository.setHistoryLimitPerDirection(50)
+
+        assertEquals(
+            "50",
+            client.payloads.getValue("patch_config")["historyLimitPerDirection"].toString()
+        )
+        assertFalse(client.payloads.containsKey("get_config"))
+        scope.cancel()
+    }
+
+    @Test
+    fun screenshotSyncUpdateUsesAtomicFieldPatch() = runBlocking {
+        val client = FakeAirSendIpcClient()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val repository = AirSendRuntimeRepositoryImpl(client, FakeAndroidRuntimeReader(), scope)
+
+        repository.setScreenshotSyncEnabled(true)
+
+        assertEquals(
+            setOf("screenshotSyncEnabled"),
+            client.payloads.getValue("patch_config").keys
+        )
+        assertFalse(client.payloads.containsKey("get_config"))
+        assertFalse(client.payloads.containsKey("set_config"))
         scope.cancel()
     }
 
@@ -141,15 +188,48 @@ class AirSendRuntimeRepositoryTest {
 
         repository.cancelTransfer("transfer-1")
         repository.retryTransfer("transfer-1")
+        repository.acceptTransfer("transfer-2")
+        repository.declineTransfer("transfer-3")
 
         assertEquals("transfer-1", client.payloads.getValue("cancel_transfer")["id"].toString().trim('"'))
         assertEquals("transfer-1", client.payloads.getValue("retry_transfer")["id"].toString().trim('"'))
+        assertEquals("transfer-2", client.payloads.getValue("accept_transfer")["id"].toString().trim('"'))
+        assertEquals("transfer-3", client.payloads.getValue("decline_transfer")["id"].toString().trim('"'))
+        scope.cancel()
+    }
+
+    @Test
+    fun clearHistoryUsesTheRequestedActivityDirection() = runBlocking {
+        val client = FakeAirSendIpcClient()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val repository = AirSendRuntimeRepositoryImpl(client, FakeAndroidRuntimeReader(), scope)
+
+        repository.clearHistory("incoming")
+
+        assertEquals(
+            "incoming",
+            client.payloads.getValue("clear_history_direction")["direction"]
+                .toString()
+                .trim('"')
+        )
+        scope.cancel()
+    }
+
+    @Test
+    fun restartStartsRootDaemonWhenIpcIsUnavailable() = runBlocking {
+        val runtime = FakeAndroidRuntimeReader()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val repository = AirSendRuntimeRepositoryImpl(FakeAirSendIpcClient(), runtime, scope)
+
+        repository.restartDaemon()
+
+        assertEquals(1, runtime.rootStartCount)
         scope.cancel()
     }
 
     companion object {
         private fun configJson(): String =
-            """{"version":1,"preferredTarget":"peer-1","manualPeers":[],"trustedPeerFingerprints":["aa11"],"receivePolicy":"trusted_only","clipboardSyncEnabled":false,"screenshotSyncEnabled":false,"startupEnabled":true,"downloadDestination":"/sdcard/Download/AirSend","mediaDestination":"/sdcard/Pictures/AirSend","transportPreference":"https"}"""
+            """{"version":1,"preferredTarget":"peer-1","manualPeers":[],"trustedPeerFingerprints":["aa11"],"receivePolicy":"trusted_only","clipboardSyncEnabled":false,"screenshotSyncEnabled":false,"startupEnabled":true,"downloadDestination":"/sdcard/Download/AirSend","mediaDestination":"/sdcard/Pictures/AirSend","transportPreference":"https","historyLimitPerDirection":30}"""
 
         private fun transferJson(
             id: String,
@@ -183,7 +263,11 @@ private class FakeAirSendIpcClient : AirSendIpcClient {
     override fun events(): Flow<AirSendIpcEvent> = emptyFlow()
 }
 
-private class FakeAndroidRuntimeReader : AndroidRuntimeReader {
+private class FakeAndroidRuntimeReader(
+    private val rootSnapshot: RootDaemonSnapshot = RootDaemonSnapshot()
+) : AndroidRuntimeReader {
+    var rootStartCount = 0
+
     override fun snapshot(): AndroidRuntimeSnapshot = AndroidRuntimeSnapshot(
         serviceRunning = true,
         bootStartEnabled = true,
@@ -191,9 +275,22 @@ private class FakeAndroidRuntimeReader : AndroidRuntimeReader {
         storagePermissionGranted = true
     )
 
+    override suspend fun rootDaemonSnapshot(): RootDaemonSnapshot = rootSnapshot
+    override suspend fun startRootDaemon() {
+        rootStartCount += 1
+    }
+    override suspend fun repairRootDaemon() {
+        rootStartCount += 1
+    }
+    override suspend fun stopRootDaemon() = Unit
+
     override fun startService() = Unit
     override fun stopService() = Unit
     override fun setBootStartEnabled(enabled: Boolean) = Unit
     override fun clipboardText(): String? = "clipboard"
     override fun resolvePath(uri: Uri): String? = uri.path
+    override fun resolveDirectory(uri: Uri): String? = uri.path
+    override fun openFile(path: String, mimeType: String) = Unit
+    override fun shareFile(path: String, mimeType: String) = Unit
+    override fun writeDocument(uri: Uri, content: String) = Unit
 }

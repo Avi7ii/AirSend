@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="760"
+    android:viewportHeight="760">
+
+    <group
+        android:scaleX="0.72"
+        android:scaleY="0.72"
+        android:translateX="380"
+        android:translateY="380">
+        <path
+            android:fillAlpha="0.32"
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M130,-380Q220,-380 220,-290L220,10Q220,100 130,100Q40,100 40,10L40,-290Q40,-380 130,-380ZM380,130Q380,220 290,220L-10,220Q-100,220 -100,130Q-100,40 -10,40L290,40Q380,40 380,130ZM-130,380Q-220,380 -220,290L-220,-10Q-220,-100 -130,-100Q-40,-100 -40,-10L-40,290Q-40,380 -130,380ZM-380,-130Q-380,-220 -290,-220L10,-220Q100,-220 100,-130Q100,-40 10,-40L-290,-40Q-380,-40 -380,-130Z" />
+
+        <group android:rotation="45">
+            <path
+                android:fillAlpha="0.64"
+                android:fillColor="#FFFFFFFF"
+                android:pathData="M-90,-280Q-20,-280 -20,-210L-20,50Q-20,120 -90,120Q-160,120 -160,50L-160,-210Q-160,-280 -90,-280ZM280,-90Q280,-20 210,-20L-50,-20Q-120,-20 -120,-90Q-120,-160 -50,-160L210,-160Q280,-160 280,-90ZM90,280Q20,280 20,210L20,-50Q20,-120 90,-120Q160,-120 160,-50L160,210Q160,280 90,280ZM-280,90Q-280,20 -210,20L50,20Q120,20 120,90Q120,160 50,160L-210,160Q-280,160 -280,90Z" />
+            <path
+                android:fillAlpha="0.8"
+                android:fillColor="#FFFFFFFF"
+                android:pathData="M-40,-100L40,-100Q100,-100 100,-40L100,40Q100,100 40,100L-40,100Q-100,100 -100,40L-100,-40Q-100,-100 -40,-100Z" />
+            <path
+                android:fillAlpha="1.0"
+                android:fillColor="#FFFFFFFF"
+                android:pathData="M-8,-40L8,-40Q40,-40 40,-8L40,8Q40,40 8,40L-8,40Q-40,40 -40,8L-40,-8Q-40,-40 -8,-40Z" />
+        </group>
+    </group>
+</vector>

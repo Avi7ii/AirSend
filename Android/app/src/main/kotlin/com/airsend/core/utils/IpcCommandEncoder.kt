@@ -9,7 +9,11 @@ object IpcCommandEncoder {
             .toString()
     }
 
-    fun sendText(text: String, targetId: String? = null): String {
+    fun sendText(
+        text: String,
+        targetId: String? = null,
+        source: String? = null
+    ): String {
         val command = JSONObject()
             .put("op", "send_text")
             .put("text", text)
@@ -17,17 +21,27 @@ object IpcCommandEncoder {
         if (!targetId.isNullOrEmpty()) {
             command.put("targetId", targetId)
         }
+        if (!source.isNullOrEmpty()) {
+            command.put("source", source)
+        }
 
         return command.toString()
     }
 
-    fun sendFile(path: String, targetId: String? = null): String {
+    fun sendFile(
+        path: String,
+        targetId: String? = null,
+        source: String? = null
+    ): String {
         val command = JSONObject()
             .put("op", "send_file")
             .put("path", path)
 
         if (!targetId.isNullOrEmpty()) {
             command.put("targetId", targetId)
+        }
+        if (!source.isNullOrEmpty()) {
+            command.put("source", source)
         }
 
         return command.toString()

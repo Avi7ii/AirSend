@@ -1,23 +1,24 @@
-use crate::domain::{HistoryFile, HistoryRecord};
+use crate::domain::{HistoryFile, HistoryRecord, TransferDirection};
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 #[derive(Debug)]
 pub struct HistoryStore {
     connection: Mutex<Connection>,
-    retention_limit: usize,
+    retention_limit_per_direction: AtomicUsize,
 }
 
 impl HistoryStore {
-    pub fn open(path: impl AsRef<Path>, retention_limit: usize) -> Result<Self> {
-        if retention_limit == 0 {
+    pub fn open(path: impl AsRef<Path>, retention_limit_per_direction: usize) -> Result<Self> {
+        if retention_limit_per_direction == 0 {
             return Err(anyhow!("history retention limit must be greater than zero"));
         }
         let path = path.as_ref();
@@ -51,19 +52,31 @@ impl HistoryStore {
                  saved_paths_json TEXT NOT NULL,
                  error_code TEXT,
                  error_message TEXT,
-                 retryable INTEGER NOT NULL
+                 retryable INTEGER NOT NULL,
+                 preview_paths_json TEXT NOT NULL DEFAULT '[]',
+                 preview_text TEXT
              );
              CREATE INDEX IF NOT EXISTS transfer_history_started_idx
                  ON transfer_history(started_at_ms DESC);",
         )?;
+        ensure_column(
+            &connection,
+            "transfer_history",
+            "preview_paths_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )?;
+        ensure_column(&connection, "transfer_history", "preview_text", "TEXT")?;
         connection.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
         set_sidecar_permissions(path);
 
-        Ok(Self {
+        let store = Self {
             connection: Mutex::new(connection),
-            retention_limit,
-        })
+            retention_limit_per_direction: AtomicUsize::new(retention_limit_per_direction),
+        };
+        store.remove_invalid_empty_clipboard_records()?;
+        store.prune_to_limit(retention_limit_per_direction)?;
+        Ok(store)
     }
 
     pub fn insert(&self, record: &HistoryRecord) -> Result<()> {
@@ -81,10 +94,10 @@ impl HistoryStore {
                  id, direction, source, peer_id, peer_alias, peer_fingerprint,
                  files_json, total_bytes, transferred_bytes, status,
                  started_at_ms, ended_at_ms, saved_paths_json, error_code,
-                 error_message, retryable
+                 error_message, retryable, preview_paths_json, preview_text
              ) VALUES (
                  ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                 ?14, ?15, ?16
+                 ?14, ?15, ?16, ?17, ?18
              )
              ON CONFLICT(id) DO UPDATE SET
                  direction = excluded.direction,
@@ -101,7 +114,9 @@ impl HistoryStore {
                  saved_paths_json = excluded.saved_paths_json,
                  error_code = excluded.error_code,
                  error_message = excluded.error_message,
-                 retryable = excluded.retryable",
+                 retryable = excluded.retryable,
+                 preview_paths_json = excluded.preview_paths_json,
+                 preview_text = excluded.preview_text",
             params![
                 record.id,
                 encode(&record.direction)?,
@@ -119,16 +134,13 @@ impl HistoryStore {
                 record.error_code,
                 record.error_message,
                 i64::from(record.retryable),
+                encode(&record.preview_paths)?,
+                record.preview_text,
             ],
         )?;
-        transaction.execute(
-            "DELETE FROM transfer_history
-             WHERE id IN (
-                 SELECT id FROM transfer_history
-                 ORDER BY started_at_ms DESC, id DESC
-                 LIMIT -1 OFFSET ?1
-             )",
-            [self.retention_limit as i64],
+        prune_transaction(
+            &transaction,
+            self.retention_limit_per_direction.load(Ordering::Relaxed),
         )?;
         transaction.commit()?;
         Ok(())
@@ -146,14 +158,19 @@ impl HistoryStore {
             "SELECT id, direction, source, peer_id, peer_alias,
                     peer_fingerprint, files_json, total_bytes,
                     transferred_bytes, status, started_at_ms, ended_at_ms,
-                    saved_paths_json, error_code, error_message, retryable
+                    saved_paths_json, error_code, error_message, retryable,
+                    preview_paths_json, preview_text
              FROM transfer_history
              ORDER BY started_at_ms DESC, id DESC
              LIMIT ?1",
         )?;
         let rows = statement
             .query_map(
-                [limit.min(self.retention_limit) as i64],
+                [limit.min(
+                    self.retention_limit_per_direction
+                        .load(Ordering::Relaxed)
+                        .saturating_mul(2),
+                ) as i64],
                 RawHistoryRecord::from_row,
             )?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -175,6 +192,83 @@ impl HistoryStore {
             .map_err(|_| anyhow!("history database lock poisoned"))?;
         Ok(connection.execute("DELETE FROM transfer_history", [])?)
     }
+
+    pub fn clear_direction(&self, direction: &TransferDirection) -> Result<usize> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| anyhow!("history database lock poisoned"))?;
+        Ok(connection.execute(
+            "DELETE FROM transfer_history WHERE direction = ?1",
+            [encode(direction)?],
+        )?)
+    }
+
+    pub fn set_retention_limit_per_direction(&self, limit: usize) -> Result<usize> {
+        if limit == 0 {
+            return Err(anyhow!("history retention limit must be greater than zero"));
+        }
+        let deleted = self.prune_to_limit(limit)?;
+        self.retention_limit_per_direction
+            .store(limit, Ordering::Relaxed);
+        Ok(deleted)
+    }
+
+    fn prune_to_limit(&self, limit: usize) -> Result<usize> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| anyhow!("history database lock poisoned"))?;
+        let transaction = connection.transaction()?;
+        let deleted = prune_transaction(&transaction, limit)?;
+        transaction.commit()?;
+        Ok(deleted)
+    }
+
+    fn remove_invalid_empty_clipboard_records(&self) -> Result<usize> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| anyhow!("history database lock poisoned"))?;
+        let candidates = {
+            let mut statement = connection.prepare(
+                "SELECT id, files_json
+                 FROM transfer_history
+                 WHERE total_bytes = 0",
+            )?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
+        let invalid_ids = candidates
+            .into_iter()
+            .filter_map(|(id, files_json)| {
+                let files = decode::<Vec<HistoryFile>>(&files_json).ok()?;
+                is_invalid_empty_clipboard_history(&files).then_some(id)
+            })
+            .collect::<Vec<_>>();
+        if invalid_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let transaction = connection.transaction()?;
+        let mut deleted = 0;
+        for id in invalid_ids {
+            deleted += transaction.execute("DELETE FROM transfer_history WHERE id = ?1", [id])?;
+        }
+        transaction.commit()?;
+        Ok(deleted)
+    }
+}
+
+fn is_invalid_empty_clipboard_history(files: &[HistoryFile]) -> bool {
+    files.len() == 1
+        && files[0].size == 0
+        && files[0].name.eq_ignore_ascii_case("clipboard.txt")
+        && files[0].mime_type.eq_ignore_ascii_case("text/plain")
 }
 
 struct RawHistoryRecord {
@@ -194,6 +288,8 @@ struct RawHistoryRecord {
     error_code: Option<String>,
     error_message: Option<String>,
     retryable: bool,
+    preview_paths: String,
+    preview_text: Option<String>,
 }
 
 impl RawHistoryRecord {
@@ -215,6 +311,8 @@ impl RawHistoryRecord {
             error_code: row.get(13)?,
             error_message: row.get(14)?,
             retryable: row.get(15)?,
+            preview_paths: row.get(16)?,
+            preview_text: row.get(17)?,
         })
     }
 
@@ -233,11 +331,49 @@ impl RawHistoryRecord {
             started_at_ms: self.started_at_ms,
             ended_at_ms: self.ended_at_ms,
             saved_paths: decode::<Vec<String>>(&self.saved_paths)?,
+            preview_paths: decode::<Vec<String>>(&self.preview_paths)?,
+            preview_text: self.preview_text,
             error_code: self.error_code,
             error_message: self.error_message,
             retryable: self.retryable,
         })
     }
+}
+
+fn ensure_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    declaration: &str,
+) -> Result<()> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    if !columns.iter().any(|value| value == column) {
+        connection.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN {column} {declaration}"
+        ))?;
+    }
+    Ok(())
+}
+
+fn prune_transaction(transaction: &rusqlite::Transaction<'_>, limit: usize) -> Result<usize> {
+    let limit = i64::try_from(limit).context("history retention limit is too large")?;
+    let mut deleted = 0;
+    for direction in [TransferDirection::Outgoing, TransferDirection::Incoming] {
+        deleted += transaction.execute(
+            "DELETE FROM transfer_history
+             WHERE id IN (
+                 SELECT id FROM transfer_history
+                 WHERE direction = ?1
+                 ORDER BY started_at_ms DESC, id DESC
+                 LIMIT -1 OFFSET ?2
+             )",
+            params![encode(&direction)?, limit],
+        )?;
+    }
+    Ok(deleted)
 }
 
 fn encode<T: serde::Serialize>(value: &T) -> Result<String> {
@@ -268,7 +404,7 @@ fn set_sidecar_permissions(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{HistoryRecord, TransferStatus};
+    use crate::domain::{FileTransferStatus, HistoryRecord, TransferSource, TransferStatus};
 
     #[test]
     fn inserts_queries_deletes_and_caps_history() {
@@ -317,5 +453,94 @@ mod tests {
         let records = HistoryStore::open(path, 10).unwrap().list(10).unwrap();
 
         assert_eq!(records, vec![record]);
+    }
+
+    #[test]
+    fn removes_only_invalid_empty_clipboard_records_when_reopening() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("history.db");
+        let store = HistoryStore::open(&path, 10).unwrap();
+
+        let mut empty_clipboard = HistoryRecord::completed_for_test(1);
+        empty_clipboard.id = "empty-clipboard".to_string();
+        empty_clipboard.direction = TransferDirection::Incoming;
+        empty_clipboard.source = TransferSource::RemotePeer;
+        empty_clipboard.files = vec![HistoryFile {
+            id: "clipboard".to_string(),
+            name: "clipboard.txt".to_string(),
+            mime_type: "text/plain".to_string(),
+            size: 0,
+            transferred_bytes: 0,
+            status: FileTransferStatus::Completed,
+        }];
+        empty_clipboard.total_bytes = 0;
+        empty_clipboard.transferred_bytes = 0;
+        empty_clipboard.preview_text = Some(String::new());
+        store.insert(&empty_clipboard).unwrap();
+
+        let mut empty_file = empty_clipboard.clone();
+        empty_file.id = "empty-file".to_string();
+        empty_file.files[0].name = "empty.txt".to_string();
+        empty_file.preview_text = None;
+        store.insert(&empty_file).unwrap();
+        drop(store);
+
+        let records = HistoryStore::open(path, 10).unwrap().list(10).unwrap();
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, "empty-file");
+    }
+
+    #[test]
+    fn caps_incoming_and_outgoing_history_independently() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = HistoryStore::open(temp.path().join("history.db"), 3).unwrap();
+        for index in 0..5 {
+            store
+                .insert(&HistoryRecord::completed_for_test(index))
+                .unwrap();
+            let mut incoming = HistoryRecord::completed_for_test(index + 10);
+            incoming.id = format!("incoming-{index}");
+            incoming.direction = TransferDirection::Incoming;
+            store.insert(&incoming).unwrap();
+        }
+
+        let records = store.list(20).unwrap();
+
+        assert_eq!(records.len(), 6);
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| record.direction == TransferDirection::Outgoing)
+                .count(),
+            3
+        );
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| record.direction == TransferDirection::Incoming)
+                .count(),
+            3
+        );
+        assert_eq!(store.set_retention_limit_per_direction(2).unwrap(), 2);
+        assert_eq!(store.list(20).unwrap().len(), 4);
+    }
+
+    #[test]
+    fn clears_only_the_requested_history_direction() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = HistoryStore::open(temp.path().join("history.db"), 10).unwrap();
+        let outgoing = HistoryRecord::completed_for_test(1);
+        let mut incoming = HistoryRecord::completed_for_test(2);
+        incoming.id = "incoming".to_string();
+        incoming.direction = TransferDirection::Incoming;
+        store.insert(&outgoing).unwrap();
+        store.insert(&incoming).unwrap();
+
+        assert_eq!(
+            store.clear_direction(&TransferDirection::Outgoing).unwrap(),
+            1
+        );
+        assert_eq!(store.list(10).unwrap(), vec![incoming]);
     }
 }

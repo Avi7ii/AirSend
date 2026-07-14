@@ -78,10 +78,12 @@ pub enum LegacyCommand {
     SendText {
         target_id: Option<String>,
         text: String,
+        source: Option<String>,
     },
     SendFile {
         target_id: Option<String>,
         path: String,
+        source: Option<String>,
     },
 }
 
@@ -100,6 +102,8 @@ struct LegacyJsonCommand {
     text: Option<String>,
     #[serde(default)]
     path: Option<String>,
+    #[serde(default)]
+    source: Option<String>,
 }
 
 impl ParsedLine {
@@ -121,12 +125,14 @@ fn parse_legacy_json(command: LegacyJsonCommand) -> Result<LegacyCommand> {
         "get_peers" => Ok(LegacyCommand::GetPeers),
         "send_text" => Ok(LegacyCommand::SendText {
             target_id: command.target_id,
+            source: command.source,
             text: command
                 .text
                 .ok_or_else(|| anyhow!("Missing text payload"))?,
         }),
         "send_file" => Ok(LegacyCommand::SendFile {
             target_id: command.target_id,
+            source: command.source,
             path: command
                 .path
                 .ok_or_else(|| anyhow!("Missing path payload"))?,
@@ -144,6 +150,7 @@ fn parse_legacy_text(raw: &str) -> Result<LegacyCommand> {
         return Ok(LegacyCommand::SendText {
             target_id: None,
             text: text.to_string(),
+            source: None,
         });
     }
 
@@ -154,6 +161,7 @@ fn parse_legacy_text(raw: &str) -> Result<LegacyCommand> {
         return Ok(LegacyCommand::SendText {
             target_id: Some(target_id.to_string()),
             text: text.to_string(),
+            source: None,
         });
     }
 
@@ -161,6 +169,7 @@ fn parse_legacy_text(raw: &str) -> Result<LegacyCommand> {
         return Ok(LegacyCommand::SendFile {
             target_id: None,
             path: path.to_string(),
+            source: None,
         });
     }
 
@@ -171,6 +180,7 @@ fn parse_legacy_text(raw: &str) -> Result<LegacyCommand> {
         return Ok(LegacyCommand::SendFile {
             target_id: Some(target_id.to_string()),
             path: path.to_string(),
+            source: None,
         });
     }
 
@@ -229,6 +239,7 @@ mod tests {
             ParsedLine::Legacy(LegacyCommand::SendText {
                 target_id: Some(id),
                 text,
+                ..
             }) if id == "peer-1" && text == "  https://a:b  "
         ));
     }
@@ -244,6 +255,7 @@ mod tests {
             ParsedLine::Legacy(LegacyCommand::SendFile {
                 target_id: Some(id),
                 path,
+                ..
             }) if id == "peer-2" && path == "/sdcard/a:b.txt"
         ));
     }
@@ -259,6 +271,24 @@ mod tests {
             ParsedLine::Legacy(LegacyCommand::SendText {
                 target_id: Some("peer-1".to_string()),
                 text: "line1\nline2\n ".to_string(),
+                source: None,
+            })
+        );
+    }
+
+    #[test]
+    fn legacy_json_keeps_transfer_source() {
+        let parsed = ParsedLine::parse(
+            r#"{"op":"send_file","path":"/sdcard/Pictures/a.jpg","source":"screenshot"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            parsed,
+            ParsedLine::Legacy(LegacyCommand::SendFile {
+                target_id: None,
+                path: "/sdcard/Pictures/a.jpg".to_string(),
+                source: Some("screenshot".to_string()),
             })
         );
     }

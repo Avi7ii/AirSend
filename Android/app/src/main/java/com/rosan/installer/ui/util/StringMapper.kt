@@ -51,6 +51,7 @@ fun RawColor.getDisplayName() = when (key) {
     "blue_grey" -> stringResource(R.string.color_blue_grey)
     "brown" -> stringResource(R.string.color_brown)
     "grey" -> stringResource(R.string.color_grey)
+    "sakura" -> stringResource(R.string.color_sakura)
     else -> key
 }
 

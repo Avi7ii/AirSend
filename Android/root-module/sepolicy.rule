@@ -1,0 +1,10 @@
+# system_server hosts the LSPosed clipboard bridge; apps host the UI IPC client.
+allow system_server su unix_stream_socket connectto
+allow system_server magisk unix_stream_socket connectto
+allow system_server default_android_service service_manager find
+allow system_server init unix_stream_socket connectto
+allow system_server kernel unix_stream_socket connectto
+allow untrusted_app su unix_stream_socket connectto
+allow untrusted_app magisk unix_stream_socket connectto
+allow untrusted_app_all su unix_stream_socket connectto
+allow untrusted_app_all magisk unix_stream_socket connectto

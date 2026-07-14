@@ -28,6 +28,7 @@ name = "airsend_daemon"
 version = "3.5.1"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bytes",
  "futures-util",
  "localsend",
@@ -981,6 +982,7 @@ checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
 name = "localsend"
 version = "0.2.2"
 dependencies = [
+ "async-trait",
  "axum",
  "axum-macros",
  "base64",

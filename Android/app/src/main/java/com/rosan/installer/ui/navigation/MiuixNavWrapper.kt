@@ -5,7 +5,6 @@ package com.rosan.installer.ui.navigation
 import android.os.Build
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.RoomPreferences
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -17,7 +16,6 @@ import androidx.compose.ui.res.vectorResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.rosan.installer.R
 import com.rosan.installer.domain.settings.model.preferences.ThemeState
-import com.rosan.installer.domain.settings.repository.ConfigRepository
 import com.rosan.installer.ui.icons.AppIcons
 import com.rosan.installer.ui.library.FloatingBottomBarMode
 import com.rosan.installer.ui.page.main.settings.SettingsSharedViewModel
@@ -26,8 +24,6 @@ import com.rosan.installer.ui.page.miuix.settings.SettingsWideScreenLayout
 import com.rosan.installer.ui.theme.LocalWindowLayoutInfo
 import com.rosan.installer.ui.theme.WindowLayoutType
 import com.rosan.installer.ui.theme.rememberMiuixBlurBackdrop
-import kotlinx.coroutines.flow.map
-import org.koin.compose.koinInject
 import top.yukonga.miuix.kmp.basic.NavigationItem
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
@@ -48,31 +44,28 @@ fun MiuixMainPageWrapper(
         else -> FloatingBottomBarMode.None
     }
 
-    val configRepo = koinInject<ConfigRepository>()
-    val configCountFlow = remember { configRepo.flowAll().map { it.size } }
-    val configCount by configCountFlow.collectAsStateWithLifecycle(initialValue = 0)
-    val homeLabel = stringResource(R.string.home)
-    val homeIcon = ImageVector.vectorResource(R.drawable.ic_tile_icon)
-    val configLabel = stringResource(R.string.config)
-    val historyLabel = stringResource(R.string.history)
-    val preferredLabel = stringResource(R.string.preferred)
+    val homeLabel = stringResource(R.string.airsend_nav_home)
+    val homeIcon = ImageVector.vectorResource(R.drawable.ic_airsend_monochrome)
+    val devicesLabel = stringResource(R.string.airsend_nav_devices)
+    val activityLabel = stringResource(R.string.airsend_nav_activity)
+    val settingsLabel = stringResource(R.string.airsend_nav_settings)
 
-    val navigationItems = remember(homeLabel, configLabel, historyLabel, preferredLabel) {
+    val navigationItems = remember(homeIcon, homeLabel, devicesLabel, activityLabel, settingsLabel) {
         listOf(
             NavigationItem(
                 label = homeLabel,
                 icon = homeIcon
             ),
             NavigationItem(
-                label = configLabel,
-                icon = Icons.Rounded.RoomPreferences
+                label = devicesLabel,
+                icon = AppIcons.Android
             ),
             NavigationItem(
-                label = historyLabel,
+                label = activityLabel,
                 icon = AppIcons.History
             ),
             NavigationItem(
-                label = preferredLabel,
+                label = settingsLabel,
                 icon = Icons.Rounded.Settings
             )
         )
@@ -107,7 +100,7 @@ fun MiuixMainPageWrapper(
     // Branch statically without layout delay traps
     if (layoutInfo.type == WindowLayoutType.EXPANDED || layoutInfo.showNavigationRail) {
         SettingsWideScreenLayout(
-            configCount = configCount,
+            configCount = 0,
             mainPagerState = mainPagerState,
             navigationItems = navigationItems,
             snackbarHostState = snackbarHostState,
@@ -118,7 +111,7 @@ fun MiuixMainPageWrapper(
         )
     } else {
         SettingsCompactLayout(
-            configCount = configCount,
+            configCount = 0,
             mainPagerState = mainPagerState,
             navigationItems = navigationItems,
             snackbarHostState = snackbarHostState,

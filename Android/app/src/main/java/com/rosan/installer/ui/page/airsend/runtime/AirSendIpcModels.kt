@@ -60,7 +60,13 @@ data class AirSendDaemonStateSnapshot(
     val activeTransferCount: Int = 0,
     val healthWarnings: List<String> = emptyList(),
     val tlsFingerprint: String,
-    val transportProtocol: String
+    val tlsReady: Boolean = false,
+    val transportProtocol: String,
+    val reverseClipboardIpcReady: Boolean = false,
+    val storageReady: Boolean = false,
+    val networkBinding: String? = null,
+    val transferPort: Int? = null,
+    val discoveryPort: Int? = null
 )
 
 @Serializable
@@ -88,6 +94,8 @@ data class AirSendTransferSnapshot(
     val startedAtMs: Long,
     val endedAtMs: Long? = null,
     val savedPaths: List<String> = emptyList(),
+    val previewPaths: List<String> = emptyList(),
+    val previewText: String? = null,
     val errorCode: String? = null,
     val errorMessage: String? = null,
     val retryable: Boolean = false
@@ -114,7 +122,8 @@ data class AirSendPeerSnapshot(
     val address: String,
     val protocol: String,
     val selected: Boolean = false,
-    val manual: Boolean = false
+    val manual: Boolean = false,
+    val online: Boolean = true
 )
 
 @Serializable
@@ -138,7 +147,17 @@ data class AirSendConfigSnapshot(
     val startupEnabled: Boolean,
     val downloadDestination: String,
     val mediaDestination: String,
-    val transportPreference: String
+    val transportPreference: String,
+    val historyLimitPerDirection: Int = 30
+)
+
+@Serializable
+data class AirSendSnapshotPayload(
+    val daemon: AirSendDaemonStateSnapshot,
+    val config: AirSendConfigSnapshot,
+    val peers: List<AirSendPeerSnapshot> = emptyList(),
+    val transfers: List<AirSendTransferSnapshot> = emptyList(),
+    val history: List<AirSendTransferSnapshot> = emptyList()
 )
 
 class AirSendIpcException(

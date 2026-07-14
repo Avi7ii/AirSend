@@ -153,6 +153,7 @@ fun AirSendShareTargetDialog(
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .padding(horizontal = 16.dp)
                                     .clip(RoundedCornerShape(20.dp))
                                     .clickable(enabled = !isSending) {
                                         selectedTargetId = peer.id

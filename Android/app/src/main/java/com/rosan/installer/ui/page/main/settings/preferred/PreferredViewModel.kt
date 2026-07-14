@@ -230,6 +230,6 @@ class PreferredViewModel(
 
     private fun buildBackupFileName(): String {
         val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-        return "InstallerX-Revived-backup-$timestamp.installerx-backup.json"
+        return "AirSend-backup-$timestamp.airsend-backup.json"
     }
 }

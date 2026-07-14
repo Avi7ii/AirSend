@@ -6,11 +6,15 @@ import android.app.Activity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import com.rosan.installer.domain.session.repository.InstallerSessionRepository
 import com.rosan.installer.domain.settings.model.preferences.ThemeState
 import com.rosan.installer.domain.settings.provider.ThemeStateProvider
@@ -35,20 +39,27 @@ fun InstallerActivityContent(
         (context as? Activity)?.requestPortraitOrientationOnPhoneSafely(isPhone)
     }
 
-    InstallerTheme(
-        useMiuix = uiState.useMiuix,
-        themeMode = uiState.themeMode,
-        paletteStyle = uiState.paletteStyle,
-        colorSpec = uiState.colorSpec,
-        useDynamicColor = uiState.useDynamicColor,
-        useMiuixMonet = uiState.useMiuixMonet,
-        seedColor = androidx.compose.ui.graphics.Color(uiState.seedColor)
-    ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            if (uiState.useMiuix) {
-                MiuixInstallerPage(session)
-            } else {
-                InstallerPage(session)
+    val systemDensity = LocalDensity.current
+    val density = remember(systemDensity, uiState.pageScale) {
+        Density(systemDensity.density * uiState.pageScale, systemDensity.fontScale)
+    }
+
+    CompositionLocalProvider(LocalDensity provides density) {
+        InstallerTheme(
+            useMiuix = uiState.useMiuix,
+            themeMode = uiState.themeMode,
+            paletteStyle = uiState.paletteStyle,
+            colorSpec = uiState.colorSpec,
+            useDynamicColor = uiState.useDynamicColor,
+            useMiuixMonet = uiState.useMiuixMonet,
+            seedColor = androidx.compose.ui.graphics.Color(uiState.seedColor)
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                if (uiState.useMiuix) {
+                    MiuixInstallerPage(session)
+                } else {
+                    InstallerPage(session)
+                }
             }
         }
     }

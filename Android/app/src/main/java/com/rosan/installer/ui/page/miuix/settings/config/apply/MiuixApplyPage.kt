@@ -67,6 +67,7 @@ import com.rosan.installer.ui.page.main.settings.config.apply.ApplyViewState
 import com.rosan.installer.ui.page.main.settings.config.apply.ViewContent
 import com.rosan.installer.ui.page.miuix.widgets.MiuixBackButton
 import com.rosan.installer.ui.page.miuix.widgets.MiuixDropdown
+import com.rosan.installer.ui.page.miuix.widgets.MiuixLiquidSwitch
 import com.rosan.installer.ui.theme.getMiuixAppBarColor
 import com.rosan.installer.ui.theme.installerMiuixBlurEffect
 import com.rosan.installer.ui.theme.rememberMiuixBlurBackdrop
@@ -86,7 +87,6 @@ import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.PopupPositionProvider
 import top.yukonga.miuix.kmp.basic.PullToRefresh
 import top.yukonga.miuix.kmp.basic.Scaffold
-import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
@@ -409,7 +409,7 @@ private fun MiuixItemWidget(
                     )
                 }
             }
-            Switch(
+            MiuixLiquidSwitch(
                 modifier = Modifier.align(Alignment.CenterVertically),
                 checked = isApplied,
                 onCheckedChange = onToggle

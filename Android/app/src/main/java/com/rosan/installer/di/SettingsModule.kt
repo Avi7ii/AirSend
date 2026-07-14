@@ -105,7 +105,8 @@ val settingsModule = module {
         AirSendRuntimeRepositoryImpl(
             ipcClient = get(),
             androidRuntimeReader = get(),
-            appScope = get(named("AppScope"))
+            appScope = get(named("AppScope")),
+            appSettingsRepository = get()
         )
     }
 

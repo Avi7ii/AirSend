@@ -14,15 +14,12 @@ import androidx.compose.ui.res.vectorResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.rosan.installer.R
 import com.rosan.installer.domain.settings.model.preferences.ThemeState
-import com.rosan.installer.domain.settings.repository.ConfigRepository
 import com.rosan.installer.ui.icons.AppIcons
 import com.rosan.installer.ui.page.main.settings.Material3SettingsCompactLayout
 import com.rosan.installer.ui.page.main.settings.Material3SettingsWideScreenLayout
 import com.rosan.installer.ui.page.main.settings.SettingsSharedViewModel
 import com.rosan.installer.ui.theme.LocalWindowLayoutInfo
 import com.rosan.installer.ui.theme.rememberMaterial3BlurBackdrop
-import kotlinx.coroutines.flow.map
-import org.koin.compose.koinInject
 
 @Immutable
 data class NavigationTab(
@@ -40,32 +37,29 @@ fun Material3MainPageWrapper(
     val useFloatingBottomBar = uiState.useAppleFloatingBar
     val backdrop = rememberMaterial3BlurBackdrop(useBlur)
 
-    val configRepo = koinInject<ConfigRepository>()
-    val configCountFlow = remember { configRepo.flowAll().map { it.size } }
-    val configCount by configCountFlow.collectAsStateWithLifecycle(initialValue = 0)
-    val homeLabel = stringResource(id = R.string.home)
-    val homeIcon = ImageVector.vectorResource(R.drawable.ic_tile_icon)
-    val configLabel = stringResource(R.string.config)
-    val historyLabel = stringResource(R.string.history)
-    val preferredLabel = stringResource(R.string.preferred)
+    val homeLabel = stringResource(id = R.string.airsend_nav_home)
+    val homeIcon = ImageVector.vectorResource(R.drawable.ic_airsend_monochrome)
+    val devicesLabel = stringResource(R.string.airsend_nav_devices)
+    val activityLabel = stringResource(R.string.airsend_nav_activity)
+    val settingsLabel = stringResource(R.string.airsend_nav_settings)
 
-    val tabs = remember(homeLabel, configLabel, historyLabel, preferredLabel) {
+    val tabs = remember(homeIcon, homeLabel, devicesLabel, activityLabel, settingsLabel) {
         listOf(
             NavigationTab(
                 icon = homeIcon,
                 label = homeLabel
             ),
             NavigationTab(
-                icon = AppIcons.RoomPreferences,
-                label = configLabel
+                icon = AppIcons.Android,
+                label = devicesLabel
             ),
             NavigationTab(
                 icon = AppIcons.History,
-                label = historyLabel
+                label = activityLabel
             ),
             NavigationTab(
-                icon = AppIcons.SettingsSuggest,
-                label = preferredLabel
+                icon = AppIcons.Settings,
+                label = settingsLabel
             )
         )
     }
@@ -97,7 +91,7 @@ fun Material3MainPageWrapper(
     // Branch statically without layout delay traps
     if (showRail) {
         Material3SettingsWideScreenLayout(
-            configCount = configCount,
+            configCount = 0,
             mainPagerState = mainPagerState,
             tabs = tabs,
             useBlur = useBlur,
@@ -106,7 +100,7 @@ fun Material3MainPageWrapper(
         )
     } else {
         Material3SettingsCompactLayout(
-            configCount = configCount,
+            configCount = 0,
             mainPagerState = mainPagerState,
             tabs = tabs,
             useBlur = useBlur,

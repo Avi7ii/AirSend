@@ -47,7 +47,10 @@ class LocalSocketAirSendIpcClient : AirSendIpcClient {
         while (currentCoroutineContext().isActive) {
             try {
                 LocalSocket().use { socket ->
-                    connect(socket, EVENT_READ_TIMEOUT_MS)
+                    // A subscription is intentionally idle until the daemon emits an event.
+                    // Cancellation closes the socket; a read timeout would create a fake
+                    // heartbeat/reconnect loop and waste background power.
+                    connect(socket, 0)
                     val request = AirSendIpcRequest(
                         id = UUID.randomUUID().toString(),
                         op = "subscribe"
@@ -115,7 +118,7 @@ class LocalSocketAirSendIpcClient : AirSendIpcClient {
     }
 
     private fun timeoutFor(op: String): Int = when (op) {
-        "send_file" -> FILE_SEND_TIMEOUT_MS
+        "send_file", "send_files" -> FILE_SEND_TIMEOUT_MS
         "send_text" -> TEXT_SEND_TIMEOUT_MS
         else -> REQUEST_TIMEOUT_MS
     }
@@ -126,7 +129,6 @@ class LocalSocketAirSendIpcClient : AirSendIpcClient {
         private const val REQUEST_TIMEOUT_MS = 5_000
         private const val TEXT_SEND_TIMEOUT_MS = 60_000
         private const val FILE_SEND_TIMEOUT_MS = 240_000
-        private const val EVENT_READ_TIMEOUT_MS = 15_000
         private const val INITIAL_RECONNECT_DELAY_MS = 500L
         private const val MAX_RECONNECT_DELAY_MS = 8_000L
     }

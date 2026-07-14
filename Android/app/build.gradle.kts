@@ -11,6 +11,13 @@ plugins {
     alias(libs.plugins.aboutLibraries)
 }
 
+val airSendDaemonJniDir = layout.buildDirectory.dir("generated/airsend-jni")
+val prepareAirSendDaemonJni = tasks.register<Copy>("prepareAirSendDaemonJni") {
+    from(layout.projectDirectory.file("src/main/assets/airsend_daemon"))
+    into(airSendDaemonJniDir.map { it.dir("arm64-v8a") })
+    rename { "libairsend_daemon.so" }
+}
+
 android {
     namespace = "com.rosan.installer"
 
@@ -90,8 +97,11 @@ android {
         aidl = true
     }
 
+    sourceSets.getByName("main").jniLibs.srcDir(file("build/generated/airsend-jni"))
+
     packaging {
         jniLibs {
+            useLegacyPackaging = true
             // Module-specific exclusions
             excludes += setOf(
                 "lib/*/libandroidx.graphics.path.so",
@@ -102,6 +112,14 @@ android {
 
     androidResources {
         generateLocaleConfig = true
+    }
+}
+
+tasks.configureEach {
+    if (name.contains("NativeLibs", ignoreCase = true) ||
+        name.contains("JniLibFolders", ignoreCase = true)
+    ) {
+        dependsOn(prepareAirSendDaemonJni)
     }
 }
 

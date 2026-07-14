@@ -164,7 +164,6 @@ fun MiuixHomePage(
                             ?.let { stringResource(R.string.config_authorizer_command_desc, it) }
                             ?: stringResource(R.string.config_authorizer_customize)
 
-                        uiState.isSystemApp -> stringResource(R.string.working_status_system_installer)
                         uiState.globalAuthorizer == Authorizer.Shizuku -> {
                             stringResource(R.string.config_authorizer_shizuku) + " " + when {
                                 uiState.shizukuAuthorized -> "(${uiState.shizukuMode.desc})"
@@ -203,15 +202,15 @@ fun MiuixHomePage(
             item {
                 Card(modifier = Modifier.padding(bottom = 12.dp)) {
                     BasicComponent(
-                        title = stringResource(R.string.home_learn_more_installerx_title),
-                        summary = stringResource(R.string.home_learn_more_installerx_desc),
+                        title = stringResource(R.string.home_learn_more_airsend_title),
+                        summary = stringResource(R.string.home_learn_more_airsend_desc),
                         endActions = {
                             Icon(
                                 painter = painterResource(id = R.drawable.ic_link_icon),
                                 contentDescription = null
                             )
                         },
-                        onClick = { uriHandler.openUri("https://wxxsfxyzm.github.io/InstallerX-Revived-Website/") }
+                        onClick = { uriHandler.openUri("https://github.com/Avi7ii/AirSend") }
                     )
                 }
             }
@@ -230,7 +229,6 @@ private fun MiuixStatusGrid(
     onProfilesClick: () -> Unit
 ) {
     val isActive = uiState.isDefaultInstaller || uiState.isSystemApp
-    val isSystemInstallerActive = uiState.isSystemApp && uiState.globalAuthorizer == Authorizer.None
 
     // 1. Calculate container background color based on state and theme
     val containerColor = if (isActive) {
@@ -328,16 +326,13 @@ private fun MiuixStatusGrid(
                     Spacer(Modifier.height(36.dp))
 
                     // Slot 3: Current Authorizer Type
-                    if (!isSystemInstallerActive)
-                        Text(
-                            modifier = Modifier.fillMaxWidth(),
-                            text = stringResource(uiState.globalAuthorizer.displayNameRes),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = descTextColor
-                        )
-                    else
-                        Spacer(Modifier.height(16.dp))
+                    Text(
+                        modifier = Modifier.fillMaxWidth(),
+                        text = stringResource(uiState.globalAuthorizer.displayNameRes),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = descTextColor
+                    )
                 }
             }
         }

@@ -10,9 +10,12 @@ import androidx.compose.material.icons.automirrored.twotone.ArrowRight
 import androidx.compose.material.icons.automirrored.twotone.Article
 import androidx.compose.material.icons.automirrored.twotone.CompareArrows
 import androidx.compose.material.icons.automirrored.twotone.FactCheck
+import androidx.compose.material.icons.automirrored.twotone.InsertDriveFile
 import androidx.compose.material.icons.automirrored.twotone.MenuOpen
+import androidx.compose.material.icons.automirrored.twotone.Notes
 import androidx.compose.material.icons.automirrored.twotone.PlaylistAdd
 import androidx.compose.material.icons.automirrored.twotone.Rule
+import androidx.compose.material.icons.automirrored.twotone.TextSnippet
 import androidx.compose.material.icons.automirrored.twotone.TrendingDown
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Menu
@@ -22,6 +25,7 @@ import androidx.compose.material.icons.twotone.Add
 import androidx.compose.material.icons.twotone.AdminPanelSettings
 import androidx.compose.material.icons.twotone.Android
 import androidx.compose.material.icons.twotone.Animation
+import androidx.compose.material.icons.twotone.Archive
 import androidx.compose.material.icons.twotone.ArrowDropDown
 import androidx.compose.material.icons.twotone.ArrowUpward
 import androidx.compose.material.icons.twotone.AutoAwesome
@@ -36,10 +40,13 @@ import androidx.compose.material.icons.twotone.Close
 import androidx.compose.material.icons.twotone.Code
 import androidx.compose.material.icons.twotone.ColorLens
 import androidx.compose.material.icons.twotone.Compress
+import androidx.compose.material.icons.twotone.CoPresent
 import androidx.compose.material.icons.twotone.Copyright
 import androidx.compose.material.icons.twotone.Delete
 import androidx.compose.material.icons.twotone.DeveloperMode
 import androidx.compose.material.icons.twotone.DesktopWindows
+import androidx.compose.material.icons.twotone.DataObject
+import androidx.compose.material.icons.twotone.Description
 import androidx.compose.material.icons.twotone.DoNotDisturbOn
 import androidx.compose.material.icons.twotone.Download
 import androidx.compose.material.icons.twotone.Downloading
@@ -50,20 +57,26 @@ import androidx.compose.material.icons.twotone.Face
 import androidx.compose.material.icons.twotone.Favorite
 import androidx.compose.material.icons.twotone.FavoriteBorder
 import androidx.compose.material.icons.twotone.FindInPage
+import androidx.compose.material.icons.twotone.FileOpen
+import androidx.compose.material.icons.twotone.Folder
 import androidx.compose.material.icons.twotone.Flare
 import androidx.compose.material.icons.twotone.GppBad
 import androidx.compose.material.icons.twotone.GppMaybe
 import androidx.compose.material.icons.twotone.Healing
 import androidx.compose.material.icons.twotone.History
+import androidx.compose.material.icons.twotone.Html
 import androidx.compose.material.icons.twotone.HourglassDisabled
 import androidx.compose.material.icons.twotone.HourglassEmpty
 import androidx.compose.material.icons.twotone.Info
+import androidx.compose.material.icons.twotone.IntegrationInstructions
+import androidx.compose.material.icons.twotone.Image
 import androidx.compose.material.icons.twotone.InstallMobile
 import androidx.compose.material.icons.twotone.KeyboardArrowDown
 import androidx.compose.material.icons.twotone.LibraryAddCheck
 import androidx.compose.material.icons.twotone.LaptopMac
 import androidx.compose.material.icons.twotone.LocalPolice
 import androidx.compose.material.icons.twotone.Memory
+import androidx.compose.material.icons.twotone.MusicNote
 import androidx.compose.material.icons.twotone.NoEncryption
 import androidx.compose.material.icons.twotone.Notifications
 import androidx.compose.material.icons.twotone.NotificationsActive
@@ -71,6 +84,7 @@ import androidx.compose.material.icons.twotone.NotificationsOff
 import androidx.compose.material.icons.twotone.People
 import androidx.compose.material.icons.twotone.PermDeviceInformation
 import androidx.compose.material.icons.twotone.PhoneAndroid
+import androidx.compose.material.icons.twotone.PictureAsPdf
 import androidx.compose.material.icons.twotone.Refresh
 import androidx.compose.material.icons.twotone.RocketLaunch
 import androidx.compose.material.icons.twotone.RoomPreferences
@@ -88,6 +102,7 @@ import androidx.compose.material.icons.twotone.Style
 import androidx.compose.material.icons.twotone.SwapHoriz
 import androidx.compose.material.icons.twotone.SystemUpdate
 import androidx.compose.material.icons.twotone.Tag
+import androidx.compose.material.icons.twotone.TableChart
 import androidx.compose.material.icons.twotone.TabletMac
 import androidx.compose.material.icons.twotone.TaskAlt
 import androidx.compose.material.icons.twotone.Terminal
@@ -95,6 +110,7 @@ import androidx.compose.material.icons.twotone.Timer
 import androidx.compose.material.icons.twotone.TouchApp
 import androidx.compose.material.icons.twotone.Tv
 import androidx.compose.material.icons.twotone.VerifiedUser
+import androidx.compose.material.icons.twotone.VideoFile
 import androidx.compose.material.icons.twotone.WebAsset
 import androidx.compose.material.icons.twotone.Watch
 import androidx.compose.material.icons.twotone.Widgets
@@ -123,6 +139,23 @@ object AppIcons {
     val Retry = Icons.TwoTone.Refresh
     val Save = Icons.TwoTone.Save
     val Share = Icons.TwoTone.Share
+    val OpenFile = Icons.TwoTone.FileOpen
+    val FileMultiple = Icons.TwoTone.Folder
+    val FileImage = Icons.TwoTone.Image
+    val FileVideo = Icons.TwoTone.VideoFile
+    val FileAudio = Icons.TwoTone.MusicNote
+    val FilePdf = Icons.TwoTone.PictureAsPdf
+    val FileText = Icons.AutoMirrored.TwoTone.TextSnippet
+    val FileDocument = Icons.TwoTone.Description
+    val FileWordProcessing = Icons.AutoMirrored.TwoTone.Article
+    val FilePresentation = Icons.TwoTone.CoPresent
+    val FileSpreadsheet = Icons.TwoTone.TableChart
+    val FileHtml = Icons.TwoTone.Html
+    val FileMarkdown = Icons.AutoMirrored.TwoTone.Notes
+    val FileStructuredData = Icons.TwoTone.DataObject
+    val FileSourceCode = Icons.TwoTone.IntegrationInstructions
+    val FileArchive = Icons.TwoTone.Archive
+    val FileGeneric = Icons.AutoMirrored.TwoTone.InsertDriveFile
     val BugReport = Icons.TwoTone.BugReport
     val Terminal = Icons.TwoTone.Terminal
     val Launcher = Icons.TwoTone.RocketLaunch

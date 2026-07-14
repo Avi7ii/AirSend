@@ -247,36 +247,34 @@ class DeviceCapabilityProviderImpl(
     }
 
     private suspend fun detectRootMode(): RootMode = withContext(Dispatchers.IO) {
-        if (checkBinaryViaSu("ksud -V")) return@withContext RootMode.KernelSU
-        if (checkBinaryViaSu("magisk -v")) return@withContext RootMode.Magisk
-        if (checkBinaryViaSu("apd -V")) return@withContext RootMode.APatch
-
-        RootMode.None
+        detectRootModeViaSu()
     }
 
-    private fun checkBinaryViaSu(command: String) =
-        try {
-            val shellCommand = $$"export PATH=$PATH:$$ROOT_DETECTION_EXTRA_PATH && $$command"
-            // Execute the specific binary check within the su environment
+    private fun detectRootModeViaSu(): RootMode = try {
+            val shellCommand = $$"""
+                export PATH=$PATH:$$ROOT_DETECTION_EXTRA_PATH
+                if command -v ksud >/dev/null 2>&1; then echo KernelSU
+                elif command -v magisk >/dev/null 2>&1; then echo Magisk
+                elif command -v apd >/dev/null 2>&1; then echo APatch
+                else echo None
+                fi
+            """.trimIndent()
             val process = ProcessBuilder("su", "-c", shellCommand)
                 .redirectErrorStream(true)
                 .start()
-
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             val exitCode = process.waitFor()
-            if (exitCode == 0) {
-                Timber.d("RootDetection: Successfully executed -> su -c '$shellCommand'")
-                true
-            } else {
-                Timber.d("RootDetection: Command 'su -c '$shellCommand'' failed with exit code: $exitCode")
-                false
-            }
+            val rootMode = if (exitCode == 0) {
+                RootMode.entries.firstOrNull { it.name == output.lineSequence().lastOrNull() }
+                    ?: RootMode.None
+            } else RootMode.None
+            Timber.d("RootDetection: provider=$rootMode, exitCode=$exitCode")
+            rootMode
         } catch (e: CancellationException) {
-            // Rethrow to maintain structured concurrency
             throw e
         } catch (e: Exception) {
-            // Catch IOExceptions or other runtime errors
-            Timber.d("RootDetection: Execution failed for 'su -c '$command'': ${e.message}")
-            false
+            Timber.d("RootDetection: Execution failed: ${e.message}")
+            RootMode.None
         }
 
     private fun calculateSessionInstallSupport(): Boolean {

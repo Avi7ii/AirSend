@@ -35,23 +35,25 @@ enum class AirSendContentId {
     LspModule,
     Daemon,
     ClipboardSync,
+    ScreenshotSync,
+    ServiceNotification,
+    HistoryRetention,
     ClipboardPush,
     ReceiveSwitch,
     RestartService,
+    RestartWholeService,
     PermissionCheck,
     EmptyRecent,
-    BroadcastMode,
+    NoTarget,
     NoDevices,
     SavedDevices,
     DiscoverAgain,
     AddManual,
-    SendFile,
     SendClipboard,
     PairTrust,
     SameNetwork,
     SelectedFiles,
     NearbyTargets,
-    SendMode,
     SentHistory,
     ReceiveRequests,
     QuickSave,
@@ -61,6 +63,8 @@ enum class AirSendContentId {
     Startup,
     NetworkDiscovery,
     TrustedDevices,
+    Transport,
+    RuntimeDiagnostics,
     OpenPermissions,
     ExportLogs,
     About
@@ -150,6 +154,12 @@ object AirSendPageContent {
                     AirSendContentIcon.Share,
                     R.string.airsend_clipboard_sync,
                     R.string.airsend_clipboard_sync_desc
+                ),
+                item(
+                    AirSendContentId.ScreenshotSync,
+                    AirSendContentIcon.Share,
+                    R.string.airsend_screenshot_sync,
+                    R.string.airsend_screenshot_sync_desc
                 )
             ),
             section(
@@ -160,6 +170,12 @@ object AirSendPageContent {
                     AirSendContentIcon.Retry,
                     R.string.airsend_restart_service,
                     R.string.airsend_restart_service_desc
+                ),
+                item(
+                    AirSendContentId.RestartWholeService,
+                    AirSendContentIcon.Retry,
+                    R.string.airsend_restart_whole_service,
+                    R.string.airsend_restart_whole_service_desc
                 ),
                 item(
                     AirSendContentId.PermissionCheck,
@@ -178,11 +194,10 @@ object AirSendPageContent {
                 AirSendSectionId.CurrentTarget,
                 R.string.airsend_current_target,
                 item(
-                    AirSendContentId.BroadcastMode,
-                    AirSendContentIcon.Share,
-                    R.string.airsend_broadcast_mode,
-                    R.string.airsend_broadcast_mode_desc,
-                    selected = true
+                    AirSendContentId.NoTarget,
+                    AirSendContentIcon.Android,
+                    R.string.airsend_no_target,
+                    R.string.airsend_no_target_desc
                 )
             ),
             section(
@@ -251,22 +266,10 @@ object AirSendPageContent {
                 AirSendSectionId.SendOptions,
                 R.string.airsend_send_options,
                 item(
-                    AirSendContentId.SendFile,
-                    AirSendContentIcon.Share,
-                    R.string.airsend_send_file,
-                    R.string.airsend_send_file_desc
-                ),
-                item(
                     AirSendContentId.SendClipboard,
                     AirSendContentIcon.Share,
                     R.string.airsend_send_clipboard,
                     R.string.airsend_send_clipboard_desc
-                ),
-                item(
-                    AirSendContentId.SendMode,
-                    AirSendContentIcon.Share,
-                    R.string.airsend_send_mode,
-                    R.string.airsend_send_mode_desc
                 )
             )
         )
@@ -333,11 +336,35 @@ object AirSendPageContent {
                     AirSendContentIcon.Share,
                     R.string.airsend_clipboard_sync,
                     R.string.airsend_clipboard_sync_desc
+                ),
+                item(
+                    AirSendContentId.ScreenshotSync,
+                    AirSendContentIcon.Share,
+                    R.string.airsend_screenshot_sync,
+                    R.string.airsend_screenshot_sync_desc
+                ),
+                item(
+                    AirSendContentId.ServiceNotification,
+                    AirSendContentIcon.Info,
+                    R.string.airsend_service_notification,
+                    R.string.airsend_service_notification_desc
+                ),
+                item(
+                    AirSendContentId.HistoryRetention,
+                    AirSendContentIcon.History,
+                    R.string.airsend_history_limit,
+                    R.string.airsend_history_limit_desc
                 )
             ),
             section(
                 AirSendSectionId.Receive,
                 R.string.airsend_settings_receive,
+                item(
+                    AirSendContentId.ReceiveSwitch,
+                    AirSendContentIcon.Download,
+                    R.string.airsend_receive_switch,
+                    R.string.airsend_receive_switch_desc
+                ),
                 item(
                     AirSendContentId.QuickSave,
                     AirSendContentIcon.Save,
@@ -365,6 +392,12 @@ object AirSendPageContent {
                     AirSendContentIcon.Security,
                     R.string.airsend_trusted_devices,
                     R.string.airsend_trusted_devices_desc
+                ),
+                item(
+                    AirSendContentId.Transport,
+                    AirSendContentIcon.Security,
+                    R.string.airsend_transport_preference,
+                    R.string.airsend_transport_preference_desc
                 )
             ),
             section(
@@ -381,6 +414,12 @@ object AirSendPageContent {
             section(
                 AirSendSectionId.Diagnostics,
                 R.string.airsend_settings_diagnostics,
+                item(
+                    AirSendContentId.RuntimeDiagnostics,
+                    AirSendContentIcon.Info,
+                    R.string.airsend_runtime_diagnostics,
+                    R.string.airsend_runtime_diagnostics_desc
+                ),
                 item(
                     AirSendContentId.ExportLogs,
                     AirSendContentIcon.BugReport,

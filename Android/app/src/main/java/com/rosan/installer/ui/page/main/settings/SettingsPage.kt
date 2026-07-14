@@ -63,10 +63,10 @@ import com.rosan.installer.ui.library.FloatingBottomBarItem
 import com.rosan.installer.ui.library.FloatingBottomBarMode
 import com.rosan.installer.ui.navigation.MainPagerState
 import com.rosan.installer.ui.navigation.NavigationTab
-import com.rosan.installer.ui.page.main.settings.config.all.AllPage
-import com.rosan.installer.ui.page.main.settings.history.HistoryPage
-import com.rosan.installer.ui.page.main.settings.home.HomePage
-import com.rosan.installer.ui.page.main.settings.preferred.PreferredPage
+import com.rosan.installer.ui.page.main.airsend.AirSendActivityPage
+import com.rosan.installer.ui.page.main.airsend.AirSendDevicesPage
+import com.rosan.installer.ui.page.main.airsend.AirSendHomePage
+import com.rosan.installer.ui.page.main.airsend.AirSendSettingsPage
 import com.rosan.installer.ui.theme.installerMaterial3BlurEffect
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
@@ -281,32 +281,30 @@ private fun Material3SettingsPagerContent(
 ) {
     HorizontalPager(
         state = mainPagerState.pagerState,
-        userScrollEnabled = true,
+        userScrollEnabled = false,
         modifier = modifier
     ) { page ->
         // Delegate page content rendering based on the current page index
         when (page) {
-            0 -> HomePage(
-                useBlur = useBlur,
-                title = tabs[page].label,
-                outerPadding = outerPadding,
-                configCount = configCount,
-                onNavigateToProfiles = { mainPagerState.animateToPage(1) }
-            )
-
-            1 -> AllPage(
+            0 -> AirSendHomePage(
                 useBlur = useBlur,
                 title = tabs[page].label,
                 outerPadding = outerPadding
             )
 
-            2 -> HistoryPage(
+            1 -> AirSendDevicesPage(
                 useBlur = useBlur,
                 title = tabs[page].label,
                 outerPadding = outerPadding
             )
 
-            3 -> PreferredPage(
+            2 -> AirSendActivityPage(
+                useBlur = useBlur,
+                title = tabs[page].label,
+                outerPadding = outerPadding
+            )
+
+            3 -> AirSendSettingsPage(
                 useBlur = useBlur,
                 title = tabs[page].label,
                 outerPadding = outerPadding

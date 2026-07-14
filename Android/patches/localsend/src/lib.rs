@@ -8,6 +8,7 @@ pub mod transfer;
 
 use crate::models::device::DeviceInfo;
 use crate::ports::{DISCOVERY_PORT, TRANSFER_PORT};
+use futures_util::{stream, StreamExt};
 use socket2::SockRef;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket as StdUdpSocket};
@@ -18,6 +19,7 @@ use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use transfer::session::Session;
+use transfer::upload::IncomingTransferHandler;
 
 pub type PeerMap = Arc<Mutex<HashMap<String, (SocketAddr, DeviceInfo)>>>;
 
@@ -43,6 +45,7 @@ pub struct Client {
     pub tls_identity: Option<TlsIdentity>,
     pub pinned_neighbors: Arc<Mutex<HashMap<String, String>>>,
     pub campus_fallback: Arc<Mutex<campus_fallback::CampusFallbackState>>,
+    pub incoming_handler: Option<Arc<dyn IncomingTransferHandler>>,
 }
 
 #[derive(Default)]
@@ -138,37 +141,12 @@ fn interface_priority(interface: &str, ipv4: Ipv4Addr) -> u8 {
     40
 }
 
-fn detect_network_binding_from_ip(ipv4: Ipv4Addr) -> Option<NetworkBinding> {
-    let output = Command::new("ip")
-        .args(["-o", "-4", "addr", "show", "up", "scope", "global"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+fn ip_command() -> Command {
+    if cfg!(target_os = "android") {
+        Command::new("/system/bin/ip")
+    } else {
+        Command::new("ip")
     }
-
-    let stdout = String::from_utf8(output.stdout).ok()?;
-    for line in stdout.lines() {
-        let mut parts = line.split_whitespace();
-        let _index = parts.next()?;
-        let interface = parts.next()?.trim_end_matches(':');
-        if parts.next()? != "inet" {
-            continue;
-        }
-
-        let candidate = parts
-            .next()
-            .and_then(|value| value.split('/').next())
-            .and_then(|value| value.parse::<Ipv4Addr>().ok())?;
-        if candidate == ipv4 && is_viable_lan_binding(interface, candidate) {
-            return Some(NetworkBinding {
-                interface: Some(interface.to_string()),
-                ipv4: Some(candidate),
-            });
-        }
-    }
-
-    None
 }
 
 pub(crate) fn remember_peer_entry(
@@ -201,7 +179,7 @@ pub(crate) fn remember_peer_entry(
 }
 
 fn hardware_address_for_interface(interface: &str) -> Option<String> {
-    let output = Command::new("ip")
+    let output = ip_command()
         .args(["link", "show", "dev", interface])
         .output()
         .ok()?;
@@ -222,7 +200,7 @@ fn hardware_address_for_interface(interface: &str) -> Option<String> {
 }
 
 fn detect_network_binding_from_addrs() -> Option<NetworkBinding> {
-    let output = Command::new("ip")
+    let output = ip_command()
         .args(["-o", "-4", "addr", "show", "up", "scope", "global"])
         .output()
         .ok()?;
@@ -264,7 +242,7 @@ fn detect_network_binding_from_addrs() -> Option<NetworkBinding> {
 }
 
 fn detect_network_binding_from_route() -> Option<NetworkBinding> {
-    let output = Command::new("ip")
+    let output = ip_command()
         .args(["-4", "route", "get", "1.1.1.1"])
         .output()
         .ok()?;
@@ -311,14 +289,49 @@ fn detect_network_binding_from_udp_probe() -> Option<NetworkBinding> {
         IpAddr::V6(_) => None,
     };
 
-    ipv4.and_then(detect_network_binding_from_ip)
+    ipv4
+        .filter(|address| is_private_lan_ipv4(*address))
+        .map(|address| NetworkBinding {
+            interface: Some("system_route".to_string()),
+            ipv4: Some(address),
+        })
 }
 
 fn detect_network_binding() -> NetworkBinding {
+    if std::env::var_os("AIRSEND_DATA_DIR").is_some() {
+        return detect_network_binding_from_udp_probe().unwrap_or_default();
+    }
     detect_network_binding_from_addrs()
         .or_else(detect_network_binding_from_route)
         .or_else(detect_network_binding_from_udp_probe)
         .unwrap_or_default()
+}
+
+fn subnet_probe_addresses(local: Ipv4Addr) -> Vec<SocketAddr> {
+    let [a, b, c, local_host] = local.octets();
+    let mut addresses = (1u8..=254)
+        .filter(|host| *host != local_host)
+        .flat_map(|host| {
+            let ip = Ipv4Addr::new(a, b, c, host);
+            [53318, TRANSFER_PORT]
+                .into_iter()
+                .map(move |port| SocketAddr::new(IpAddr::V4(ip), port))
+        })
+        .collect::<Vec<_>>();
+
+    // Android Emulator exposes the development host at 10.0.2.2. Include it
+    // explicitly because the Mac is not another guest on the emulator subnet.
+    if [a, b, c] == [10, 0, 2] {
+        let emulator_host = Ipv4Addr::new(10, 0, 2, 2);
+        for port in [53318, TRANSFER_PORT] {
+            let address = SocketAddr::new(IpAddr::V4(emulator_host), port);
+            if !addresses.contains(&address) {
+                addresses.push(address);
+            }
+        }
+    }
+
+    addresses
 }
 
 pub fn current_network_binding() -> Option<(String, Ipv4Addr)> {
@@ -382,7 +395,6 @@ impl Client {
                 device.mac_address = hardware_address_for_interface(interface);
             }
         }
-
         Ok(Self {
             device,
             socket: socket.into(),
@@ -398,6 +410,7 @@ impl Client {
             tls_identity: None,
             pinned_neighbors,
             campus_fallback,
+            incoming_handler: None,
         })
     }
 
@@ -426,6 +439,7 @@ impl Client {
             let client = self.clone();
             tokio::spawn(async move {
                 let mut log_gate = AnnouncementLogGate::new(Duration::from_secs(30));
+                let mut last_subnet_probe = Instant::now() - Duration::from_secs(30);
                 loop {
                     if let Err(e) = client.announce(None).await {
                         match log_gate.record(Instant::now()) {
@@ -442,7 +456,12 @@ impl Client {
                             AnnouncementLogDecision::Suppress => {}
                         }
                     }
-                    let has_peers = !client.peers.lock().await.is_empty();
+                    let mut has_peers = !client.peers.lock().await.is_empty();
+                    if !has_peers && last_subnet_probe.elapsed() >= Duration::from_secs(30) {
+                        last_subnet_probe = Instant::now();
+                        let discovered = client.discover_subnet_peers().await;
+                        has_peers = discovered > 0;
+                    }
                     let next_interval_secs = if has_peers { 30 } else { 5 };
                     tokio::time::sleep(std::time::Duration::from_secs(next_interval_secs)).await;
                 }
@@ -455,6 +474,55 @@ impl Client {
     pub async fn refresh_peers(&self) {
         let mut peers = self.peers.lock().await;
         peers.clear();
+    }
+
+    pub async fn discover_subnet_peers(&self) -> usize {
+        if self.multicast_interface.is_unspecified()
+            || !is_private_lan_ipv4(self.multicast_interface)
+        {
+            return 0;
+        }
+
+        let local_fingerprint = self.device.fingerprint.clone();
+        let client = self.http_client.clone();
+        let mut probes = stream::iter(subnet_probe_addresses(self.multicast_interface))
+            .map(move |address| {
+                let client = client.clone();
+                async move {
+                    let url = format!("https://{address}/api/localsend/v2/info");
+                    let response = client
+                        .get(&url)
+                        .header("Connection", "close")
+                        .timeout(Duration::from_millis(450))
+                        .send()
+                        .await
+                        .ok()?
+                        .error_for_status()
+                        .ok()?;
+                    let info = response.json::<DeviceInfo>().await.ok()?;
+                    Some((address, info))
+                }
+            })
+            .buffer_unordered(48);
+
+        let mut discovered = 0usize;
+        while let Some(result) = probes.next().await {
+            let Some((candidate, info)) = result else {
+                continue;
+            };
+            if info.fingerprint.eq_ignore_ascii_case(&local_fingerprint) {
+                continue;
+            }
+            let mut address = candidate;
+            address.set_port(info.port);
+            let mut peers = self.peers.lock().await;
+            remember_peer_entry(&mut peers, address, info);
+            discovered = discovered.saturating_add(1);
+        }
+        if discovered > 0 {
+            tracing::info!("Active subnet discovery found {} peer(s)", discovered);
+        }
+        discovered
     }
 
     pub async fn maybe_pin_peer_neighbor(&self, peer_ip: IpAddr, peer_mac: Option<&str>) {
@@ -530,7 +598,8 @@ fn is_valid_mac_address(value: &str) -> bool {
 
 #[cfg(test)]
 mod announcement_log_tests {
-    use super::{AnnouncementLogDecision, AnnouncementLogGate};
+    use super::{subnet_probe_addresses, AnnouncementLogDecision, AnnouncementLogGate};
+    use std::net::Ipv4Addr;
     use std::time::{Duration, Instant};
 
     #[test]
@@ -547,5 +616,32 @@ mod announcement_log_tests {
             gate.record(now + Duration::from_secs(31)),
             AnnouncementLogDecision::EmitSummary { suppressed: 1 }
         );
+    }
+
+    #[test]
+    fn subnet_probe_covers_both_transfer_ports_and_skips_self() {
+        let addresses = subnet_probe_addresses(Ipv4Addr::new(10, 90, 97, 52));
+        assert_eq!(addresses.len(), 506);
+        assert!(!addresses
+            .iter()
+            .any(|address| address.ip().to_string() == "10.90.97.52"));
+        assert!(addresses
+            .iter()
+            .any(|address| address.to_string() == "10.90.97.254:53318"));
+        assert!(addresses
+            .iter()
+            .any(|address| address.to_string() == "10.90.97.254:53319"));
+    }
+
+    #[test]
+    fn subnet_probe_includes_android_emulator_host() {
+        let addresses = subnet_probe_addresses(Ipv4Addr::new(10, 0, 2, 16));
+
+        assert!(addresses
+            .iter()
+            .any(|address| address.to_string() == "10.0.2.2:53318"));
+        assert!(addresses
+            .iter()
+            .any(|address| address.to_string() == "10.0.2.2:53319"));
     }
 }

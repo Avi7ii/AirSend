@@ -2,9 +2,6 @@
 // Copyright (C) 2025-2026 InstallerX Revived contributors
 package com.rosan.installer.ui.page.miuix.settings
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -36,23 +33,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.rosan.installer.R
-import com.rosan.installer.ui.icons.AppIcons
 import com.rosan.installer.ui.library.FloatingBottomBar
 import com.rosan.installer.ui.library.FloatingBottomBarItem
 import com.rosan.installer.ui.library.FloatingBottomBarMode
-import com.rosan.installer.ui.navigation.LocalNavigator
 import com.rosan.installer.ui.navigation.MainPagerState
-import com.rosan.installer.ui.navigation.Route
-import com.rosan.installer.ui.page.miuix.settings.config.all.MiuixAllPage
-import com.rosan.installer.ui.page.miuix.settings.history.MiuixHistoryPage
-import com.rosan.installer.ui.page.miuix.settings.home.MiuixHomePage
-import com.rosan.installer.ui.page.miuix.settings.preferred.MiuixPreferredPage
-import top.yukonga.miuix.kmp.basic.FloatingActionButton
+import com.rosan.installer.ui.page.airsend.runtime.AirSendRuntimeViewModel
+import com.rosan.installer.ui.page.miuix.airsend.MiuixAirSendActivityPage
+import com.rosan.installer.ui.page.miuix.airsend.MiuixAirSendDevicesPage
+import com.rosan.installer.ui.page.miuix.airsend.MiuixAirSendHomePage
+import com.rosan.installer.ui.page.miuix.airsend.MiuixAirSendRuntimeEvents
+import com.rosan.installer.ui.page.miuix.airsend.MiuixAirSendSettingsPage
+import org.koin.androidx.compose.koinViewModel
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.NavigationBar
 import top.yukonga.miuix.kmp.basic.NavigationBarItem
@@ -144,8 +138,6 @@ fun SettingsCompactLayout(
     floatingBackdrop: MiuixLayerBackdrop?,
     miuixBackdrop: MiuixLayerBackdrop?
 ) {
-    val navigator = LocalNavigator.current
-
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         bottomBar = {
@@ -197,27 +189,6 @@ fun SettingsCompactLayout(
             }
         },
         snackbarHost = { SnackbarHost(state = snackbarHostState) },
-        floatingActionButton = {
-            AnimatedVisibility(
-                visible = mainPagerState.selectedPage == 1,
-                enter = scaleIn(),
-                exit = scaleOut()
-            ) {
-                FloatingActionButton(
-                    modifier = Modifier.padding(end = 16.dp),
-                    containerColor = if (MiuixTheme.isDynamicColor) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.background,
-                    shadowElevation = 2.dp,
-                    onClick = { navigator.push(Route.EditConfig(-1)) }
-                ) {
-                    Icon(
-                        imageVector = AppIcons.Add,
-                        modifier = Modifier.size(40.dp),
-                        contentDescription = stringResource(id = R.string.add),
-                        tint = if (MiuixTheme.isDynamicColor) MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.primary
-                    )
-                }
-            }
-        }
     ) { paddingValues ->
         SettingsPagerContent(
             configCount = configCount,
@@ -227,6 +198,7 @@ fun SettingsCompactLayout(
             modifier = Modifier.fillMaxSize(),
             outerPadding = paddingValues,
             useFloatingBottomBar = useFloatingBottomBar,
+            floatingBottomBarMode = floatingBottomBarMode,
             floatingBackdrop = floatingBackdrop,
             miuixBackdrop = miuixBackdrop
         )
@@ -332,7 +304,6 @@ private fun SettingsWideContent(
     miuixBackdrop: MiuixLayerBackdrop?,
     contentWindowInsets: WindowInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
 ) {
-    val navigator = LocalNavigator.current
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         contentWindowInsets = contentWindowInsets,
@@ -347,27 +318,6 @@ private fun SettingsWideContent(
             }
         },
         snackbarHost = { SnackbarHost(state = snackbarHostState) },
-        floatingActionButton = {
-            AnimatedVisibility(
-                visible = mainPagerState.selectedPage == 1,
-                enter = scaleIn(),
-                exit = scaleOut()
-            ) {
-                FloatingActionButton(
-                    modifier = Modifier.padding(end = 16.dp),
-                    containerColor = if (MiuixTheme.isDynamicColor) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.background,
-                    shadowElevation = 2.dp,
-                    onClick = { navigator.push(Route.EditConfig(-1)) }
-                ) {
-                    Icon(
-                        imageVector = AppIcons.Add,
-                        modifier = Modifier.size(40.dp),
-                        contentDescription = stringResource(id = R.string.add),
-                        tint = if (MiuixTheme.isDynamicColor) MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.primary
-                    )
-                }
-            }
-        }
     ) { paddingValues ->
         SettingsPagerContent(
             configCount = configCount,
@@ -377,6 +327,7 @@ private fun SettingsWideContent(
             modifier = Modifier.fillMaxSize(),
             outerPadding = paddingValues,
             useFloatingBottomBar = useFloatingBottomBar,
+            floatingBottomBarMode = floatingBottomBarMode,
             floatingBackdrop = floatingBackdrop,
             miuixBackdrop = miuixBackdrop
         )
@@ -401,12 +352,16 @@ private fun SettingsPagerContent(
     snackbarHostState: SnackbarHostState,
     outerPadding: PaddingValues,
     useFloatingBottomBar: Boolean,
+    floatingBottomBarMode: FloatingBottomBarMode,
     floatingBackdrop: MiuixLayerBackdrop?,
     miuixBackdrop: MiuixLayerBackdrop?
 ) {
+    val airSendRuntimeViewModel: AirSendRuntimeViewModel = koinViewModel()
+    MiuixAirSendRuntimeEvents(airSendRuntimeViewModel, snackbarHostState)
+
     HorizontalPager(
         state = mainPagerState.pagerState,
-        userScrollEnabled = true,
+        userScrollEnabled = false,
         overscrollEffect = null,
         beyondViewportPageCount = 1,
         modifier = modifier
@@ -415,33 +370,29 @@ private fun SettingsPagerContent(
     ) { page ->
         val useBlur = floatingBackdrop != null && miuixBackdrop != null
         when (page) {
-            0 -> MiuixHomePage(
-                enableBlur = useBlur,
-                title = navigationItems[page].label,
-                configCount = configCount,
-                outerPadding = outerPadding,
-                snackbarHostState = snackbarHostState,
-                onNavigateToProfiles = { mainPagerState.animateToPage(1) }
-            )
-
-            1 -> MiuixAllPage(
-                enableBlur = useBlur,
-                title = navigationItems[page].label,
-                outerPadding = outerPadding,
-                snackbarHostState = snackbarHostState
-            )
-
-            2 -> MiuixHistoryPage(
+            0 -> MiuixAirSendHomePage(
                 enableBlur = useBlur,
                 title = navigationItems[page].label,
                 outerPadding = outerPadding
             )
 
-            3 -> MiuixPreferredPage(
+            1 -> MiuixAirSendDevicesPage(
+                enableBlur = useBlur,
+                title = navigationItems[page].label,
+                outerPadding = outerPadding
+            )
+
+            2 -> MiuixAirSendActivityPage(
                 enableBlur = useBlur,
                 title = navigationItems[page].label,
                 outerPadding = outerPadding,
-                snackbarHostState = snackbarHostState
+                floatingBottomBarMode = floatingBottomBarMode
+            )
+
+            3 -> MiuixAirSendSettingsPage(
+                enableBlur = useBlur,
+                title = navigationItems[page].label,
+                outerPadding = outerPadding
             )
         }
     }

@@ -69,6 +69,8 @@ class AppDataStore(
 
         // Show Live Activity
         val SHOW_LIVE_ACTIVITY = register(booleanPreferencesKey("show_live_activity"), PreferenceValueType.BOOLEAN)
+        val AIRSEND_SHOW_SERVICE_NOTIFICATION =
+            register(booleanPreferencesKey("airsend_show_service_notification"), PreferenceValueType.BOOLEAN)
 
         // Show Mi Island
         val SHOW_MI_ISLAND = register(booleanPreferencesKey("show_mi_island"), PreferenceValueType.BOOLEAN)

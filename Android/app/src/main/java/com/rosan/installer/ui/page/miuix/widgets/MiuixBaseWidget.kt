@@ -16,10 +16,11 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.rosan.installer.ui.library.LiquidToggle
+import com.rosan.installer.ui.library.liquid.rememberCanvasBackdrop
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.CheckboxDefaults
-import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -44,12 +45,32 @@ fun MiuixSwitchWidget(
         enabled = enabled,
         onClick = toggleAction,
         endActions = {
-            Switch(
+            MiuixLiquidSwitch(
                 checked = checked,
-                onCheckedChange = onCheckedChange,
-                enabled = enabled
+                enabled = enabled,
+                onCheckedChange = onCheckedChange
             )
         }
+    )
+}
+
+@Composable
+fun MiuixLiquidSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    val surfaceColor = MiuixTheme.colorScheme.surfaceContainer
+    val backdrop = rememberCanvasBackdrop { drawRect(surfaceColor) }
+    LiquidToggle(
+        selected = { checked },
+        onSelect = onCheckedChange,
+        backdrop = backdrop,
+        modifier = modifier,
+        enabled = enabled,
+        checkedTrackColor = MiuixTheme.colorScheme.primary,
+        uncheckedTrackColor = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.18f)
     )
 }
 

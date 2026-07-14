@@ -23,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -51,19 +52,8 @@ fun StatusWidget(
         Level.UNSTABLE -> MaterialTheme.colorScheme.onTertiaryContainer
     }
 
-    val internetAccessHint = if (AppConfig.isInternetAccessEnabled) stringResource(R.string.internet_access_enabled)
-    else stringResource(R.string.internet_access_disabled)
-
-    val level = when (AppConfig.LEVEL) {
-        Level.STABLE -> stringResource(id = R.string.stable)
-        Level.PREVIEW -> stringResource(id = R.string.preview)
-        Level.UNSTABLE -> stringResource(id = R.string.unstable)
-    }
-
     val versionInfoText = stringResource(
-        id = R.string.app_version_info_format,
-        internetAccessHint,
-        level,
+        id = R.string.airsend_version_info_format,
         AppConfig.VERSION_NAME,
         AppConfig.VERSION_CODE
     )
@@ -73,16 +63,11 @@ fun StatusWidget(
         contentColor = onContainerColor,
         useBlur = useBlur,
         icon = {
-            if (uiState.appIcon != null) {
-                Image(
-                    bitmap = uiState.appIcon!!,
-                    modifier = Modifier.size(56.dp),
-                    contentDescription = stringResource(id = R.string.app_name)
-                )
-            } else {
-                // Placeholder
-                Box(modifier = Modifier.size(56.dp))
-            }
+            Image(
+                painter = painterResource(id = R.drawable.ic_airsend_monochrome),
+                modifier = Modifier.size(56.dp),
+                contentDescription = stringResource(id = R.string.app_name)
+            )
         },
         title = {
             Text(

@@ -145,22 +145,9 @@ fun MiuixUpdateDialog(
                     )
                 ) {
                     BasicComponent(
-                        title = "GitHub",
+                        title = "GitHub Releases",
                         onClick = {
-                            uriHandler.openUri("https://github.com/wxxsfxyzm/InstallerX-Revived/releases")
-                            onDismiss()
-                        },
-                        endActions = {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_link_icon),
-                                contentDescription = null
-                            )
-                        }
-                    )
-                    BasicComponent(
-                        title = "Telegram",
-                        onClick = {
-                            uriHandler.openUri("https://t.me/installerx_revived")
+                            uriHandler.openUri("https://github.com/Avi7ii/AirSend/releases/latest")
                             onDismiss()
                         },
                         endActions = {

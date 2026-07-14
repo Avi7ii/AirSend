@@ -8,11 +8,8 @@ use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use anyhow::{Context, Result};
-use bytes::Bytes;
 use localsend::models::device::DeviceInfo;
-use localsend::models::file::FileMetadata;
 use localsend::{
-    campus_fallback::MAX_FALLBACK_BYTES,
     current_network_binding,
     ports::{DISCOVERY_PORT, TRANSFER_PORT},
     Client, TlsIdentity,
@@ -32,15 +29,14 @@ use openssl::{
         X509NameBuilder, X509,
     },
 };
-use std::collections::HashMap;
 use std::fs;
 use std::net::Ipv4Addr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 
 mod config;
 mod domain;
@@ -52,6 +48,7 @@ mod protocol;
 mod transfers;
 
 use config::ConfigStore;
+use domain::TransferSource;
 use history::HistoryStore;
 use ipc::DaemonServices;
 use logging::{LogDecision, RepeatedErrorLimiter, SizeRotatingWriter};
@@ -59,16 +56,13 @@ use protocol::LegacyCommand;
 
 const UDS_PATH: &str = "\0airsend_ipc";
 
-const LOG_PATH: &str = "/data/local/tmp";
 const LOG_FILE: &str = "airsend_daemon.log";
-const TLS_DIR: &str = "/data/adb/airsend";
-const TLS_CERT_PATH: &str = "/data/adb/airsend/server-cert.pem";
-const TLS_KEY_PATH: &str = "/data/adb/airsend/server-key.pem";
-const CONFIG_PATH: &str = "/data/adb/airsend/config.json";
-const HISTORY_PATH: &str = "/data/adb/airsend/history.db";
-const HISTORY_RETENTION: usize = 500;
+const DEFAULT_DATA_DIR: &str = "/data/adb/airsend";
+const DEFAULT_LOG_DIR: &str = "/data/local/tmp";
 const LOG_MAX_BYTES: u64 = 4 * 1024 * 1024;
 const LOG_BACKUP_COUNT: usize = 3;
+const CLIPBOARD_PUSH_DEDUP_WINDOW: Duration = Duration::from_secs(3);
+static LAST_CLIPBOARD_PUSH: OnceLock<Mutex<Option<(String, Instant)>>> = OnceLock::new();
 #[derive(Clone)]
 struct PreparedTlsIdentity {
     cert_pem: Vec<u8>,
@@ -81,18 +75,32 @@ fn fingerprint_for_cert(cert: &X509) -> Result<String> {
     Ok(digest.iter().map(|byte| format!("{:02x}", byte)).collect())
 }
 
-fn write_private_file(path: &str, bytes: &[u8], mode: u32) -> Result<()> {
-    fs::write(path, bytes).with_context(|| format!("Failed to write {}", path))?;
+fn data_dir() -> PathBuf {
+    std::env::var_os("AIRSEND_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_DATA_DIR))
+}
+
+fn log_dir() -> PathBuf {
+    std::env::var_os("AIRSEND_LOG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_LOG_DIR))
+}
+
+fn write_private_file(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
+    fs::write(path, bytes).with_context(|| format!("Failed to write {}", path.display()))?;
     fs::set_permissions(path, fs::Permissions::from_mode(mode))
-        .with_context(|| format!("Failed to chmod {}", path))?;
+        .with_context(|| format!("Failed to chmod {}", path.display()))?;
     Ok(())
 }
 
 fn load_tls_identity() -> Result<PreparedTlsIdentity> {
+    let cert_path = data_dir().join("server-cert.pem");
+    let key_path = data_dir().join("server-key.pem");
     let cert_pem =
-        fs::read(TLS_CERT_PATH).with_context(|| format!("Failed to read {}", TLS_CERT_PATH))?;
+        fs::read(&cert_path).with_context(|| format!("Failed to read {}", cert_path.display()))?;
     let key_pem =
-        fs::read(TLS_KEY_PATH).with_context(|| format!("Failed to read {}", TLS_KEY_PATH))?;
+        fs::read(&key_path).with_context(|| format!("Failed to read {}", key_path.display()))?;
     let cert = X509::from_pem(&cert_pem).context("Failed to parse TLS certificate PEM")?;
     let fingerprint = fingerprint_for_cert(&cert)?;
 
@@ -104,9 +112,11 @@ fn load_tls_identity() -> Result<PreparedTlsIdentity> {
 }
 
 fn generate_tls_identity() -> Result<PreparedTlsIdentity> {
-    fs::create_dir_all(TLS_DIR).with_context(|| format!("Failed to create {}", TLS_DIR))?;
-    fs::set_permissions(TLS_DIR, fs::Permissions::from_mode(0o700))
-        .with_context(|| format!("Failed to chmod {}", TLS_DIR))?;
+    let data_dir = data_dir();
+    fs::create_dir_all(&data_dir)
+        .with_context(|| format!("Failed to create {}", data_dir.display()))?;
+    fs::set_permissions(&data_dir, fs::Permissions::from_mode(0o700))
+        .with_context(|| format!("Failed to chmod {}", data_dir.display()))?;
 
     let rsa = Rsa::generate(2048).context("Failed to generate RSA key")?;
     let pkey = PKey::from_rsa(rsa).context("Failed to wrap RSA key")?;
@@ -211,8 +221,8 @@ fn generate_tls_identity() -> Result<PreparedTlsIdentity> {
         .context("Failed to encode private key PEM")?;
     let fingerprint = fingerprint_for_cert(&cert)?;
 
-    write_private_file(TLS_CERT_PATH, &cert_pem, 0o644)?;
-    write_private_file(TLS_KEY_PATH, &key_pem, 0o600)?;
+    write_private_file(&data_dir.join("server-cert.pem"), &cert_pem, 0o644)?;
+    write_private_file(&data_dir.join("server-key.pem"), &key_pem, 0o600)?;
 
     Ok(PreparedTlsIdentity {
         cert_pem,
@@ -246,7 +256,10 @@ async fn main() -> Result<()> {
     let (_log_guard, log_writer) = init_logging()?;
     info!("AirSend Daemon 启动 (LocalSend v0.2.2 兼容模式)");
 
-    let config_store = ConfigStore::new(CONFIG_PATH);
+    let data_dir = data_dir();
+    fs::create_dir_all(&data_dir)
+        .with_context(|| format!("Failed to create {}", data_dir.display()))?;
+    let config_store = ConfigStore::new(data_dir.join("config.json"));
     let config_outcome = config_store
         .load_with_recovery()
         .context("Failed to load AirSend configuration")?;
@@ -259,8 +272,11 @@ async fn main() -> Result<()> {
     let runtime_config = config_outcome.config;
     let health_warnings = config_outcome.warning.into_iter().collect::<Vec<_>>();
     let history_store = Arc::new(
-        HistoryStore::open(HISTORY_PATH, HISTORY_RETENTION)
-            .context("Failed to open AirSend transfer history")?,
+        HistoryStore::open(
+            data_dir.join("history.db"),
+            runtime_config.history_limit_per_direction,
+        )
+        .context("Failed to open AirSend transfer history")?,
     );
 
     // 1. 强制前置：优先向内核注册 UDS，建立 IPC 物理接收端点
@@ -346,11 +362,16 @@ async fn main() -> Result<()> {
         cert_pem: tls_identity.cert_pem,
         key_pem: tls_identity.key_pem,
     });
+    client.incoming_handler = Some(services.clone());
 
     let state = Arc::new(AppState { client, services });
 
     // 🚀 点火：启动底层物理监控协程
-    spawn_physical_watcher(state.clone());
+    if std::env::var_os("AIRSEND_DATA_DIR").is_none() {
+        spawn_physical_watcher(state.clone());
+    } else {
+        info!("应用沙箱模式使用 Android MediaStore 截图观察器");
+    }
 
     // 3. 启动协议栈：必须扔进 tokio 的并发调度池，决不能阻塞主任务！
 
@@ -389,45 +410,85 @@ struct AppState {
 
 fn spawn_network_rebind_watcher(initial_binding: (Option<String>, Ipv4Addr)) {
     tokio::spawn(async move {
+        let mut pending_binding: Option<((String, Ipv4Addr), u8)> = None;
         loop {
             tokio::time::sleep(Duration::from_secs(3)).await;
 
             let Some((interface, ipv4)) = current_network_binding() else {
                 continue;
             };
+            if interface == "system_route" {
+                continue;
+            }
 
             let binding_changed = initial_binding.0.as_deref() != Some(interface.as_str())
                 || initial_binding.1 != ipv4;
             if !binding_changed {
+                pending_binding = None;
+                continue;
+            }
+
+            let candidate = (interface.clone(), ipv4);
+            let confirmations = match pending_binding.as_mut() {
+                Some((pending, confirmations)) if *pending == candidate => {
+                    *confirmations = confirmations.saturating_add(1);
+                    *confirmations
+                }
+                _ => {
+                    pending_binding = Some((candidate, 1));
+                    1
+                }
+            };
+            if confirmations < 3 {
+                tracing::debug!(
+                    "等待网络绑定稳定: {}/{}（{}/3）",
+                    interface,
+                    ipv4,
+                    confirmations
+                );
                 continue;
             }
 
             warn!(
-                "🔄 检测到网络绑定变化: {:?}/{:?} -> {}/{}. 准备重启 daemon 以重绑局域网 socket",
+                "🔄 网络绑定已连续稳定确认: {:?}/{:?} -> {}/{}. 准备重启 daemon 以重绑局域网 socket",
                 initial_binding.0, initial_binding.1, interface, ipv4
             );
 
-            if let Err(err) = schedule_self_restart() {
+            if supervisor_owns_lifecycle() {
+                warn!("♻️ root supervisor 将接管 daemon 重启");
+            } else if let Err(err) = schedule_self_restart() {
                 error!("❌ 计划重启 daemon 失败: {err:#}");
                 continue;
             }
 
-            warn!("♻️ 旧 daemon 退出，等待新进程接管");
+            warn!("♻️ 旧 daemon 退出，等待生命周期管理者接管");
             std::process::exit(0);
         }
     });
 }
 
-fn schedule_self_restart() -> Result<()> {
+pub(crate) fn supervisor_owns_lifecycle() -> bool {
+    std::env::var_os("AIRSEND_DATA_DIR").is_none()
+}
+
+pub(crate) fn schedule_self_restart() -> Result<()> {
+    if supervisor_owns_lifecycle() {
+        return Ok(());
+    }
     let daemon_bin = std::env::current_exe().context("failed to resolve current daemon path")?;
-    let log_file = format!("{}/{}", LOG_PATH, LOG_FILE);
+    let log_file = log_dir().join(LOG_FILE);
     let script = format!(
         "sleep 1; nohup '{}' >> '{}' 2>&1 &",
         daemon_bin.display(),
-        log_file
+        log_file.display()
     );
 
-    Command::new("sh")
+    let shell = if cfg!(target_os = "android") {
+        "/system/bin/sh"
+    } else {
+        "sh"
+    };
+    Command::new(shell)
         .args(["-c", &script])
         .spawn()
         .context("failed to spawn daemon restart helper")?;
@@ -502,16 +563,30 @@ fn spawn_physical_watcher(state: Arc<AppState>) {
                                 // 🔋 灵魂延时：等待 EXT4 Page Cache 刷盘，彻底消灭 0 字节鬼影文件
                                 tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
 
-                                tracing::info!(
-                                    "🚀 正在绕过 App 层，直接向 Mac 发射物理路径: {}",
-                                    path_str
-                                );
+                                let config = state_clone.services.config().await;
+                                if !config.screenshot_sync_enabled {
+                                    tracing::debug!("截图同步已关闭，忽略 {}", path_str);
+                                    return;
+                                }
+                                let Some(target_id) =
+                                    trusted_automatic_target(&state_clone, config.preferred_target)
+                                        .await
+                                else {
+                                    tracing::warn!("截图同步未发送：没有可信的默认目标");
+                                    return;
+                                };
 
-                                // 直接调用 Daemon 内部的 HTTPS 发送引擎
-                                if let Err(e) =
-                                    send_data(&state_clone, None, &path_str, false).await
+                                tracing::info!("🚀 正在向可信默认目标发送截图: {}", path_str);
+
+                                if let Err(error) = ipc::queue_background_file(
+                                    &state_clone,
+                                    target_id,
+                                    PathBuf::from(&path_str),
+                                    TransferSource::Screenshot,
+                                )
+                                .await
                                 {
-                                    tracing::error!("❌ 截图底层直发失败: {:?}", e);
+                                    tracing::error!("❌ 截图发送入队失败: {error:#}");
                                 }
                             });
                         }
@@ -527,7 +602,7 @@ fn init_logging() -> Result<(
     tracing_appender::non_blocking::WorkerGuard,
     SizeRotatingWriter,
 )> {
-    let log_path = Path::new(LOG_PATH).join(LOG_FILE);
+    let log_path = log_dir().join(LOG_FILE);
     let writer = SizeRotatingWriter::new(log_path, LOG_MAX_BYTES, LOG_BACKUP_COUNT)?;
     let (non_blocking, guard) = tracing_appender::non_blocking(writer.clone());
 
@@ -548,146 +623,92 @@ fn init_logging() -> Result<(
     Ok((guard, writer))
 }
 
-pub(crate) async fn process_command(command: LegacyCommand, state: &AppState) -> Result<()> {
+pub(crate) async fn process_command(command: LegacyCommand, state: &Arc<AppState>) -> Result<()> {
     match command {
         LegacyCommand::GetPeers => {}
-        LegacyCommand::SendText { target_id, text } => {
-            send_data(state, target_id, &text, true).await?;
+        LegacyCommand::SendText {
+            target_id,
+            text,
+            source,
+        } => {
+            if text.trim().is_empty() {
+                tracing::debug!("Ignoring an empty text transfer");
+                return Ok(());
+            }
+            let source = legacy_transfer_source(source.as_deref(), TransferSource::Clipboard);
+            let target_id = if target_id.is_some() {
+                target_id
+            } else {
+                let config = state.services.config().await;
+                if source == TransferSource::Clipboard && !config.clipboard_sync_enabled {
+                    tracing::debug!("剪贴板自动同步已关闭");
+                    return Ok(());
+                }
+                trusted_automatic_target(state, config.preferred_target).await
+            };
+            let Some(target_id) = target_id else {
+                tracing::warn!("剪贴板同步未发送：没有可信的默认目标");
+                return Ok(());
+            };
+            ipc::queue_background_text(state, target_id, text, source).await?;
         }
-        LegacyCommand::SendFile { target_id, path } => {
-            send_data(state, target_id, &path, false).await?;
+        LegacyCommand::SendFile {
+            target_id,
+            path,
+            source,
+        } => {
+            let source = legacy_transfer_source(source.as_deref(), TransferSource::Screenshot);
+            let target_id = if target_id.is_some() {
+                target_id
+            } else {
+                let config = state.services.config().await;
+                if source == TransferSource::Screenshot && !config.screenshot_sync_enabled {
+                    tracing::debug!("截图自动同步已关闭");
+                    return Ok(());
+                }
+                trusted_automatic_target(state, config.preferred_target).await
+            };
+            let Some(target_id) = target_id else {
+                tracing::warn!("自动文件同步未发送：没有可信的默认目标");
+                return Ok(());
+            };
+            ipc::queue_background_file(state, target_id, PathBuf::from(path), source).await?;
         }
     }
     Ok(())
 }
 
-pub(crate) async fn send_data(
-    state: &AppState,
-    target_id_opt: Option<String>,
-    data: &str,
-    is_text: bool,
-) -> Result<String> {
-    let target_id_opt = match target_id_opt {
-        Some(target_id) => Some(target_id),
-        None => state.services.config().await.preferred_target,
-    };
-    if let Some(tid) = target_id_opt {
-        let mut retries = 0;
-        let (target_id, target_addr) = loop {
-            {
-                let peers = state.client.peers.lock().await;
-                if let Some((addr, _)) = peers.get(&tid) {
-                    tracing::info!("🔍 指定发送: [{}] {}", tid, addr);
-                    break (tid.clone(), addr.to_string());
-                }
-            }
-            if retries >= 10 {
-                anyhow::bail!("Target not found: {}", tid);
-            }
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            retries += 1;
-        };
-        send_to_target(state, &target_id, &target_addr, data, is_text).await?;
-        return Ok(target_id);
-    }
-
-    // 自动模式：遍历所有候选 peer，避免卡死在陈旧 IP 上。
-    let mut rounds = 0;
-    let mut last_error: Option<anyhow::Error> = None;
-    loop {
-        let candidates: Vec<(String, String)> = {
-            let peers = state.client.peers.lock().await;
-            peers
-                .iter()
-                .map(|(id, (addr, _))| (id.clone(), addr.to_string()))
-                .collect()
-        };
-
-        if candidates.is_empty() {
-            if rounds >= 10 {
-                anyhow::bail!("No target found");
-            }
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            rounds += 1;
-            continue;
-        }
-
-        tracing::info!("🔎 自动发送候选数量: {}", candidates.len());
-        for (target_id, target_addr) in candidates {
-            tracing::info!(
-                "🔍 UDP 缓存命中! 自动尝试目标: [{}] {}",
-                target_id,
-                target_addr
-            );
-            match send_to_target(state, &target_id, &target_addr, data, is_text).await {
-                Ok(_) => return Ok(target_id),
-                Err(err) => {
-                    tracing::warn!("⚠️ 目标 [{}] 发送失败: {}", target_id, err);
-                    last_error = Some(err);
-                    // 清理失效目标，避免后续继续命中老 IP。
-                    let mut peers = state.client.peers.lock().await;
-                    peers.remove(&target_id);
-                }
-            }
-        }
-
-        if rounds >= 2 {
-            return Err(last_error.unwrap_or_else(|| anyhow::anyhow!("No reachable target found")));
-        }
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        rounds += 1;
+fn legacy_transfer_source(source: Option<&str>, fallback: TransferSource) -> TransferSource {
+    match source {
+        Some("app_picker") => TransferSource::AppPicker,
+        Some("clipboard") => TransferSource::Clipboard,
+        Some("share_sheet") => TransferSource::ShareSheet,
+        Some("screenshot") => TransferSource::Screenshot,
+        _ => fallback,
     }
 }
 
-async fn send_to_target(
-    state: &AppState,
-    target_id: &str,
-    target_addr: &str,
-    data: &str,
-    is_text: bool,
-) -> Result<()> {
-    if is_text {
-        tracing::info!("🚀 正在向 [{}] {} 发起直连握手...", target_id, target_addr);
-        if let Err(e) = send_text_protocol(&state.client, target_id, data).await {
-            tracing::warn!("⚠️ 直连文本发送失败，切换 Campus 组播 fallback: {:#?}", e);
-            if let Err(fallback_err) = state.client.send_campus_text(target_id, data).await {
-                tracing::error!("❌ Campus 组播文本 fallback 也失败了:\n{:#?}", fallback_err);
-                return Err(fallback_err.into());
-            }
-        }
-    } else {
-        let path = PathBuf::from(data);
-        if let Err(e) = state
-            .client
-            .send_file(target_id.to_string(), path.clone())
-            .await
-        {
-            tracing::warn!("⚠️ 直连文件发送失败，切换 Campus 组播 fallback: {:#?}", e);
-            let metadata = tokio::fs::metadata(&path).await?;
-            if metadata.len() > MAX_FALLBACK_BYTES as u64 {
-                return Err(anyhow::anyhow!(
-                    "Direct file send failed and campus fallback only supports files up to {} bytes",
-                    MAX_FALLBACK_BYTES
-                ));
-            }
-            let bytes = tokio::fs::read(&path).await?;
-            let file_name = path
-                .file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or("CampusTransfer.bin");
-            let file_type = infer_campus_mime_type(&path);
-            if let Err(fallback_err) = state
-                .client
-                .send_campus_file(target_id, file_name, &file_type, &bytes)
-                .await
-            {
-                tracing::error!("❌ Campus 组播文件 fallback 也失败了:\n{:#?}", fallback_err);
-                return Err(fallback_err.into());
-            }
-        }
+async fn trusted_automatic_target(state: &AppState, target_id: Option<String>) -> Option<String> {
+    let target_id = target_id?.trim().to_string();
+    if target_id.is_empty() {
+        return None;
     }
-    tracing::info!("✅ 发送成功！");
-    Ok(())
+    let peer_fingerprint = state
+        .client
+        .peers
+        .lock()
+        .await
+        .get(&target_id)
+        .map(|(_, peer)| peer.fingerprint.clone())
+        .unwrap_or_else(|| target_id.clone());
+    let trusted = state
+        .services
+        .config()
+        .await
+        .trusted_peer_fingerprints
+        .iter()
+        .any(|fingerprint| fingerprint.eq_ignore_ascii_case(&peer_fingerprint));
+    trusted.then_some(target_id)
 }
 
 fn infer_campus_mime_type(path: &Path) -> String {
@@ -712,44 +733,18 @@ fn infer_campus_mime_type(path: &Path) -> String {
     .to_string()
 }
 
-// 🚨 关键修复 3：参数名改为 peer_id，并在方法内准确传递给 prepare_upload
-async fn send_text_protocol(client: &Client, peer_id: &str, text: &str) -> Result<()> {
-    let text_bytes = text.as_bytes();
-    let file_id = format!("sync_{}", uuid::Uuid::new_v4());
-    let mut files = HashMap::new();
-    files.insert(
-        file_id.clone(),
-        FileMetadata {
-            id: file_id.clone(),
-            file_name: "clipboard.txt".to_string(),
-            size: text_bytes.len() as u64,
-            file_type: "text/plain".to_string(),
-            sha256: None,
-            preview: None,
-            metadata: None,
-        },
-    );
-
-    tracing::info!("🔄 正在执行 prepare_upload 握手...");
-    // 🚨 关键修复 4：把正确的设备指纹 (peer_id) 传给底层 API
-    let response = client.prepare_upload(peer_id.to_string(), files).await?;
-    tracing::info!("✅ 握手通过，拿到 Session ID: {}", response.session_id);
-
-    if let Some(token) = response.files.get(&file_id) {
-        client
-            .upload(
-                response.session_id,
-                file_id,
-                token.clone(),
-                Bytes::copy_from_slice(text_bytes).into(),
-            )
-            .await?;
-    }
-    Ok(())
-}
-
 // 逆向推送管道：将接收到的文本击穿回 Android App 层
 pub async fn push_text_to_app(text: &str) -> anyhow::Result<()> {
+    let last_push = LAST_CLIPBOARD_PUSH.get_or_init(|| Mutex::new(None));
+    let mut last_push = last_push.lock().await;
+    let now = Instant::now();
+    if last_push.as_ref().is_some_and(|(previous, pushed_at)| {
+        previous == text && now.duration_since(*pushed_at) < CLIPBOARD_PUSH_DEDUP_WINDOW
+    }) {
+        tracing::debug!("忽略短时间内重复的剪贴板推送");
+        return Ok(());
+    }
+
     tracing::info!("🔄 准备向 Android App 推送剪贴板数据...");
 
     // 连接到 App 侧建立的抽象命名空间 Socket
@@ -759,6 +754,7 @@ pub async fn push_text_to_app(text: &str) -> anyhow::Result<()> {
 
     stream.write_all(text.as_bytes()).await?;
     stream.shutdown().await?; // 显式关闭发送端，触发 App 侧的 readText() 结束
+    *last_push = Some((text.to_string(), now));
 
     tracing::info!("✅ 成功将文本推送到 Android App");
     Ok(())

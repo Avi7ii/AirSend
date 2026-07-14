@@ -34,6 +34,8 @@ import com.rosan.installer.ui.navigation.LocalNavigator
 import com.rosan.installer.ui.page.main.settings.home.HomePageViewAction
 import com.rosan.installer.ui.page.main.settings.home.HomePageViewModel
 import com.rosan.installer.ui.page.main.widget.util.OnLifecycleEvent
+import com.rosan.installer.ui.page.airsend.runtime.AirSendRuntimeAction
+import com.rosan.installer.ui.page.airsend.runtime.AirSendRuntimeViewModel
 import com.rosan.installer.ui.page.miuix.widgets.MiuixBackButton
 import com.rosan.installer.ui.page.miuix.widgets.MiuixCustomAuthorizerDialog
 import com.rosan.installer.ui.page.miuix.widgets.MiuixSettingsTipCard
@@ -42,6 +44,7 @@ import com.rosan.installer.ui.theme.installerMiuixBlurEffect
 import com.rosan.installer.ui.theme.rememberMiuixBlurBackdrop
 import org.koin.androidx.compose.koinViewModel
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
@@ -59,6 +62,8 @@ fun MiuixPrivPage(
 ) {
     val navigator = LocalNavigator.current
     val uiState by viewModel.state.collectAsStateWithLifecycle()
+    val runtimeViewModel: AirSendRuntimeViewModel = koinViewModel()
+    val runtimeState by runtimeViewModel.state.collectAsStateWithLifecycle()
     val scrollBehavior = MiuixScrollBehavior()
     val showCustomizeAuthorizerDialog = remember { mutableStateOf(false) }
     var selectCustomizeOnConfirm by remember { mutableStateOf(false) }
@@ -68,6 +73,7 @@ fun MiuixPrivPage(
 
     OnLifecycleEvent(event = Lifecycle.Event.ON_RESUME) {
         viewModel.dispatch(HomePageViewAction.RefreshActivateStatus)
+        runtimeViewModel.dispatch(AirSendRuntimeAction.Refresh)
     }
 
     MiuixCustomAuthorizerDialog(
@@ -121,11 +127,33 @@ fun MiuixPrivPage(
             overscrollEffect = null
         ) {
             item {
-                MiuixSettingsTipCard(text = stringResource(R.string.priv_page_what_is_this_desc))
+                MiuixSettingsTipCard(text = stringResource(R.string.airsend_privilege_summary))
             }
 
             item {
-                MiuixSettingsTipCard(text = stringResource(R.string.priv_page_notice_desc))
+                SmallTitle(text = stringResource(R.string.airsend_current_runtime_mode))
+                Card(
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp)
+                        .padding(bottom = 12.dp)
+                ) {
+                    val modeTitle = if (runtimeState.rootAvailable) {
+                        stringResource(
+                            R.string.airsend_runtime_mode_root,
+                            runtimeState.rootProvider ?: stringResource(R.string.config_authorizer_root)
+                        )
+                    } else {
+                        stringResource(R.string.airsend_runtime_mode_no_root)
+                    }
+                    val modeSummary = stringResource(
+                        if (runtimeState.daemonReachable) {
+                            R.string.airsend_runtime_mode_ready
+                        } else {
+                            R.string.airsend_runtime_mode_unavailable
+                        }
+                    )
+                    BasicComponent(title = modeTitle, summary = modeSummary)
+                }
             }
 
             item {
@@ -135,16 +163,6 @@ fun MiuixPrivPage(
                         .padding(horizontal = 12.dp)
                         .padding(bottom = 12.dp)
                 ) {
-                    // None / System App
-                    CheckboxPreference(
-                        checkboxLocation = CheckboxLocation.End,
-                        title = if (uiState.isSystemApp) stringResource(R.string.working_status_system_installer) else stringResource(R.string.config_authorizer_none),
-                        summary = if (uiState.isSystemApp) stringResource(R.string.working_status_system_installer_desc)
-                        else stringResource(R.string.working_status_none_authorizer_desc),
-                        checked = uiState.globalAuthorizer == Authorizer.None,
-                        onCheckedChange = { viewModel.dispatch(HomePageViewAction.ChangeAuthorizer(Authorizer.None)) }
-                    )
-
                     // Root
                     val isRootAvailable = uiState.rootMode != RootMode.None
                     CheckboxPreference(
@@ -153,6 +171,7 @@ fun MiuixPrivPage(
                         summary = if (isRootAvailable) stringResource(R.string.available) + " (${uiState.rootMode.name})"
                         else stringResource(R.string.unavailable),
                         checked = uiState.globalAuthorizer == Authorizer.Root,
+                        enabled = isRootAvailable,
                         onCheckedChange = { viewModel.dispatch(HomePageViewAction.ChangeAuthorizer(Authorizer.Root)) }
                     )
 
@@ -162,10 +181,13 @@ fun MiuixPrivPage(
                         title = stringResource(R.string.config_authorizer_shizuku),
                         summary = when {
                             uiState.shizukuAuthorized -> stringResource(R.string.running) + " (${uiState.shizukuMode.desc})"
+                            uiState.globalAuthorizer == Authorizer.Shizuku && !uiState.shizukuAvailable ->
+                                stringResource(R.string.airsend_authorizer_configured_unavailable)
                             uiState.shizukuAvailable -> stringResource(R.string.shizuku_not_authorized)
                             else -> stringResource(R.string.shizuku_not_available)
                         },
                         checked = uiState.globalAuthorizer == Authorizer.Shizuku,
+                        enabled = uiState.shizukuAvailable,
                         onCheckedChange = { viewModel.dispatch(HomePageViewAction.ChangeAuthorizer(Authorizer.Shizuku)) }
                     )
 
@@ -175,10 +197,13 @@ fun MiuixPrivPage(
                         title = stringResource(R.string.config_authorizer_dhizuku),
                         summary = when {
                             uiState.dhizukuAuthorized -> stringResource(R.string.running)
+                            uiState.globalAuthorizer == Authorizer.Dhizuku && !uiState.dhizukuAvailable ->
+                                stringResource(R.string.airsend_authorizer_configured_unavailable)
                             uiState.dhizukuAvailable -> stringResource(R.string.dhizuku_not_authorized)
                             else -> stringResource(R.string.dhizuku_not_available)
                         },
                         checked = uiState.globalAuthorizer == Authorizer.Dhizuku,
+                        enabled = uiState.dhizukuAvailable,
                         onCheckedChange = { viewModel.dispatch(HomePageViewAction.ChangeAuthorizer(Authorizer.Dhizuku)) }
                     )
 

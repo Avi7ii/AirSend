@@ -4,13 +4,17 @@ package com.rosan.installer.ui.animation.predictiveback
 
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.scene.Scene
-import androidx.navigation3.ui.defaultPopTransitionSpec
 import androidx.navigation3.ui.defaultPredictivePopTransitionSpec
-import androidx.navigation3.ui.defaultTransitionSpec
 import androidx.navigationevent.NavigationEventTransitionState
 
 class MiuixPredictiveBackAnimation : PredictiveBackAnimationHandler {
@@ -39,8 +43,28 @@ class MiuixPredictiveBackAnimation : PredictiveBackAnimationHandler {
     ): ContentTransform = defaultPredictivePopTransitionSpec<NavKey>().invoke(this, swipeEdge)
 
     override fun AnimatedContentTransitionScope<Scene<NavKey>>.onPopTransitionSpec(): ContentTransform =
-        defaultPopTransitionSpec<NavKey>().invoke(this)
+        ContentTransform(
+            targetContentEnter = slideInHorizontally(
+                animationSpec = tween(240, easing = FastOutSlowInEasing),
+                initialOffsetX = { -it / 12 }
+            ) + fadeIn(animationSpec = tween(180)),
+            initialContentExit = slideOutHorizontally(
+                animationSpec = tween(240, easing = FastOutSlowInEasing),
+                targetOffsetX = { it / 24 }
+            ) + fadeOut(animationSpec = tween(140)),
+            sizeTransform = null
+        )
 
     override fun AnimatedContentTransitionScope<Scene<NavKey>>.onTransitionSpec(): ContentTransform =
-        defaultTransitionSpec<NavKey>().invoke(this)
+        ContentTransform(
+            targetContentEnter = slideInHorizontally(
+                animationSpec = tween(240, easing = FastOutSlowInEasing),
+                initialOffsetX = { it / 12 }
+            ) + fadeIn(animationSpec = tween(180)),
+            initialContentExit = slideOutHorizontally(
+                animationSpec = tween(240, easing = FastOutSlowInEasing),
+                targetOffsetX = { -it / 24 }
+            ) + fadeOut(animationSpec = tween(140)),
+            sizeTransform = null
+        )
 }

@@ -155,6 +155,7 @@ impl Client {
             .layer(Extension(self.device.clone()))
             .layer(Extension(self.sessions.clone()))
             .layer(Extension(self.download_dir.clone()))
+            .layer(Extension(self.incoming_handler.clone()))
             .with_state(peers)
     }
 }

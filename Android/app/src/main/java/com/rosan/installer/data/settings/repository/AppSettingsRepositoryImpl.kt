@@ -139,8 +139,8 @@ class AppSettingsRepositoryImpl(
             paletteStyle = PaletteStyle.fromValueOrDefault(prefs[AppDataStore.THEME_PALETTE_STYLE] ?: PaletteStyle.TonalSpot.name),
             colorSpec = ThemeColorSpec.fromValueOrDefault(prefs[AppDataStore.THEME_COLOR_SPEC] ?: ThemeColorSpec.SPEC_2025.name),
             useDynamicColor = prefs[AppDataStore.THEME_USE_DYNAMIC_COLOR] ?: true,
-            useMiuixMonet = prefs[AppDataStore.UI_USE_MIUIX_MONET] ?: false,
-            useAppleFloatingBar = prefs[AppDataStore.UI_USE_APPLE_FLOATING_BAR] ?: false,
+            useMiuixMonet = prefs[AppDataStore.UI_USE_MIUIX_MONET] ?: true,
+            useAppleFloatingBar = prefs[AppDataStore.UI_USE_APPLE_FLOATING_BAR] ?: true,
             pageScale = (prefs[AppDataStore.UI_PAGE_SCALE] ?: 1.0f).coerceIn(0.8f, 1.1f),
             seedColorInt = prefs[AppDataStore.THEME_SEED_COLOR] ?: DEFAULT_SEED_COLOR,
             useDynColorFollowPkgIcon = prefs[AppDataStore.UI_DYN_COLOR_FOLLOW_PKG_ICON] ?: false,
@@ -252,6 +252,7 @@ class AppSettingsRepositoryImpl(
             BooleanSetting.UiDynColorFollowPkgIcon -> AppDataStore.UI_DYN_COLOR_FOLLOW_PKG_ICON
             BooleanSetting.LiveActivityDynColorFollowPkgIcon -> AppDataStore.LIVE_ACTIVITY_DYN_COLOR_FOLLOW_PKG_ICON
             BooleanSetting.ShowLiveActivity -> AppDataStore.SHOW_LIVE_ACTIVITY
+            BooleanSetting.AirSendShowServiceNotification -> AppDataStore.AIRSEND_SHOW_SERVICE_NOTIFICATION
             BooleanSetting.ShowMiIsland -> AppDataStore.SHOW_MI_ISLAND
             BooleanSetting.ShowMiIslandBypassRestriction -> AppDataStore.SHOW_MI_ISLAND_BYPASS_RESTRICTION
             BooleanSetting.ShowMiIslandOuterGlow -> AppDataStore.SHOW_MI_ISLAND_OUTER_GLOW

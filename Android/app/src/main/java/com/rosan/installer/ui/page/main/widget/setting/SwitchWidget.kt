@@ -21,6 +21,8 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
+import com.rosan.installer.ui.library.LiquidToggle
+import com.rosan.installer.ui.library.liquid.rememberCanvasBackdrop
 
 /**
  * A setting widget with a [Switch] trailing content.
@@ -41,10 +43,13 @@ fun SwitchWidget(
     description: String? = null,
     enabled: Boolean = true,
     isError: Boolean = false,
+    liquidGlass: Boolean = false,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
+    val liquidSurfaceColor = MaterialTheme.colorScheme.surfaceBright
+    val liquidBackdrop = rememberCanvasBackdrop { drawRect(liquidSurfaceColor) }
 
     val handleCheckedChange: (Boolean) -> Unit = { newValue ->
         if (newValue) {
@@ -75,24 +80,35 @@ fun SwitchWidget(
         clickHaptic = null,
         description = description
     ) { interactionSource ->
-        Switch(
-            modifier = Modifier.clearAndSetSemantics {},
-            enabled = enabled,
-            checked = checked,
-            interactionSource = interactionSource,
-            colors = SwitchDefaults.colors(
-                checkedIconColor = MaterialTheme.colorScheme.primary,
-                uncheckedIconColor = MaterialTheme.colorScheme.surfaceContainerHighest
-            ),
-            thumbContent = {
-                Icon(
-                    imageVector = if (checked) Icons.Filled.Check else Icons.Filled.Close,
-                    contentDescription = null,
-                    modifier = Modifier.size(SwitchDefaults.IconSize)
-                )
-            },
-            // Pass null to disable internal touch handling and let BaseWidget calculate the exact ripple coordinates
-            onCheckedChange = null
-        )
+        if (liquidGlass) {
+            LiquidToggle(
+                selected = { checked },
+                onSelect = handleCheckedChange,
+                backdrop = liquidBackdrop,
+                enabled = enabled,
+                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                uncheckedTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f)
+            )
+        } else {
+            Switch(
+                modifier = Modifier.clearAndSetSemantics {},
+                enabled = enabled,
+                checked = checked,
+                interactionSource = interactionSource,
+                colors = SwitchDefaults.colors(
+                    checkedIconColor = MaterialTheme.colorScheme.primary,
+                    uncheckedIconColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                ),
+                thumbContent = {
+                    Icon(
+                        imageVector = if (checked) Icons.Filled.Check else Icons.Filled.Close,
+                        contentDescription = null,
+                        modifier = Modifier.size(SwitchDefaults.IconSize)
+                    )
+                },
+                // Pass null to disable internal touch handling and let BaseWidget calculate the exact ripple coordinates
+                onCheckedChange = null
+            )
+        }
     }
 }

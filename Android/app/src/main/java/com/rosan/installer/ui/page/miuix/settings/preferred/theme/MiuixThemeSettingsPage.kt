@@ -537,9 +537,9 @@ private fun KsuMiuixThemeModeTabs(
     onThemeModeChange: (ThemeMode) -> Unit
 ) {
     val items = listOf(
-        stringResource(id = R.string.theme_settings_theme_mode_system),
-        stringResource(id = R.string.theme_settings_theme_mode_light),
-        stringResource(id = R.string.theme_settings_theme_mode_dark),
+        stringResource(id = R.string.theme_settings_theme_mode_system_short),
+        stringResource(id = R.string.theme_settings_theme_mode_light_short),
+        stringResource(id = R.string.theme_settings_theme_mode_dark_short),
     )
     val selectedIndex = when (currentThemeMode) {
         ThemeMode.SYSTEM -> 0

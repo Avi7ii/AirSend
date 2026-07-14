@@ -129,25 +129,6 @@ fun PrivPage(
             item {
                 SegmentedColumn {
                     item {
-                        val selected = uiState.globalAuthorizer == Authorizer.None
-                        RadioButtonWidget(
-                            icon = AppIcons.None,
-                            title = if (uiState.isSystemApp) stringResource(R.string.working_status_system_installer) else stringResource(
-                                R.string.config_authorizer_none
-                            ),
-                            description = if (uiState.isSystemApp) stringResource(R.string.working_status_system_installer_desc)
-                            else stringResource(R.string.working_status_none_authorizer_desc),
-                            selected = selected,
-                            onClick = {
-                                viewModel.dispatch(
-                                    HomePageViewAction.ChangeAuthorizer(
-                                        Authorizer.None
-                                    )
-                                )
-                            }
-                        )
-                    }
-                    item {
                         val isAvailable = uiState.rootMode != RootMode.None
                         val selected = uiState.globalAuthorizer == Authorizer.Root
                         RadioButtonWidget(
@@ -155,6 +136,7 @@ fun PrivPage(
                             title = stringResource(R.string.config_authorizer_root),
                             description = if (isAvailable) stringResource(R.string.available) + " (${uiState.rootMode.name})"
                             else stringResource(R.string.unavailable),
+                            enabled = isAvailable,
                             selected = selected,
                             onClick = {
                                 viewModel.dispatch(
@@ -175,6 +157,7 @@ fun PrivPage(
                                 uiState.shizukuAvailable -> stringResource(R.string.shizuku_not_authorized)
                                 else -> stringResource(R.string.shizuku_not_available)
                             },
+                            enabled = uiState.shizukuAvailable,
                             selected = selected,
                             onClick = {
                                 viewModel.dispatch(
@@ -195,6 +178,7 @@ fun PrivPage(
                                 uiState.dhizukuAvailable -> stringResource(R.string.dhizuku_not_authorized)
                                 else -> stringResource(R.string.dhizuku_not_available)
                             },
+                            enabled = uiState.dhizukuAvailable,
                             selected = selected,
                             onClick = {
                                 viewModel.dispatch(

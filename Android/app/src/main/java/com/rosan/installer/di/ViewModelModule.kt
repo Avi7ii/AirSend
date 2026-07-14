@@ -19,6 +19,7 @@ import com.rosan.installer.ui.page.main.settings.preferred.installer.notificatio
 import com.rosan.installer.ui.page.main.settings.preferred.lab.LabSettingsViewModel
 import com.rosan.installer.ui.page.main.settings.preferred.theme.ThemeSettingsViewModel
 import com.rosan.installer.ui.page.main.settings.preferred.uninstaller.UninstallerSettingsViewModel
+import com.rosan.installer.ui.page.airsend.runtime.AirSendRuntimeViewModel
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
@@ -37,6 +38,7 @@ val viewModelModule = module {
     viewModelOf(::UninstallerSettingsViewModel)
     viewModelOf(::LabSettingsViewModel)
     viewModelOf(::AboutViewModel)
+    viewModelOf(::AirSendRuntimeViewModel)
 
     viewModel { (session: InstallerSessionRepository) ->
         InstallerViewModel(

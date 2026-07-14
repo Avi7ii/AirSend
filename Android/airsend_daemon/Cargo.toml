@@ -8,6 +8,7 @@ edition = "2021"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "fs", "time", "sync", "macros"] }
 localsend = "0.2.2"
 anyhow = "1"
+async-trait = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"

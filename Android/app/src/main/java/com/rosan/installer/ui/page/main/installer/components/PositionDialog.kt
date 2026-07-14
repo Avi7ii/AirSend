@@ -1,6 +1,7 @@
 package com.rosan.installer.ui.page.main.installer.components
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
@@ -31,6 +32,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -48,6 +50,10 @@ fun PositionDialog(
     titleContentColor: Color = AlertDialogDefaults.titleContentColor,
     textContentColor: Color = AlertDialogDefaults.textContentColor,
     tonalElevation: Dp = AlertDialogDefaults.TonalElevation,
+    contentAnimationSpec: FiniteAnimationSpec<IntSize> = spring(
+        dampingRatio = Spring.DampingRatioMediumBouncy,
+        stiffness = Spring.StiffnessLow
+    ),
     leftIcon: @Composable (() -> Unit)? = null,
     centerIcon: @Composable (() -> Unit)? = null,
     rightIcon: @Composable (() -> Unit)? = null,
@@ -134,12 +140,7 @@ fun PositionDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = animatedButtonHeight.coerceAtLeast(0.dp))
-                                .animateContentSize(
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessLow
-                                    )
-                                )
+                                .animateContentSize(animationSpec = contentAnimationSpec)
                         ) {
                             PositionChildWidget(
                                 leftIcon, centerIcon, rightIcon

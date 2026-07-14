@@ -5,9 +5,14 @@ use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const CONFIG_VERSION: u32 = 1;
+pub const DEFAULT_HISTORY_LIMIT_PER_DIRECTION: usize = 30;
+pub const MAX_HISTORY_LIMIT_PER_DIRECTION: usize = 500;
+
+static NEXT_TEMP_FILE_ID: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -48,6 +53,7 @@ pub struct AirSendConfig {
     pub download_destination: String,
     pub media_destination: String,
     pub transport_preference: TransportPreference,
+    pub history_limit_per_direction: usize,
 }
 
 impl Default for AirSendConfig {
@@ -58,12 +64,15 @@ impl Default for AirSendConfig {
             manual_peers: Vec::new(),
             trusted_peer_fingerprints: Vec::new(),
             receive_policy: ReceivePolicy::Ask,
-            clipboard_sync_enabled: false,
-            screenshot_sync_enabled: false,
+            clipboard_sync_enabled: true,
+            screenshot_sync_enabled: true,
             startup_enabled: true,
-            download_destination: "/sdcard/Download/AirSend".to_string(),
-            media_destination: "/sdcard/Pictures/AirSend".to_string(),
+            download_destination: std::env::var("AIRSEND_DOWNLOAD_DESTINATION")
+                .unwrap_or_else(|_| "/sdcard/Download/AirSend".to_string()),
+            media_destination: std::env::var("AIRSEND_MEDIA_DESTINATION")
+                .unwrap_or_else(|_| "/sdcard/Pictures/AirSend".to_string()),
             transport_preference: TransportPreference::Https,
+            history_limit_per_direction: DEFAULT_HISTORY_LIMIT_PER_DIRECTION,
         }
     }
 }
@@ -80,6 +89,12 @@ impl AirSendConfig {
 
         validate_shared_storage_path("download_destination", &self.download_destination)?;
         validate_shared_storage_path("media_destination", &self.media_destination)?;
+        if !(1..=MAX_HISTORY_LIMIT_PER_DIRECTION).contains(&self.history_limit_per_direction) {
+            return Err(anyhow!(
+                "history_limit_per_direction must be between 1 and {}",
+                MAX_HISTORY_LIMIT_PER_DIRECTION
+            ));
+        }
 
         let mut peers = BTreeMap::new();
         for peer in &self.manual_peers {
@@ -130,6 +145,7 @@ impl AirSendConfig {
             download_destination: self.download_destination.trim().to_string(),
             media_destination: self.media_destination.trim().to_string(),
             transport_preference: self.transport_preference.clone(),
+            history_limit_per_direction: self.history_limit_per_direction,
         })
     }
 }
@@ -199,28 +215,58 @@ impl ConfigStore {
         fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
             .with_context(|| format!("failed to chmod {}", parent.display()))?;
 
-        let temp_path = self.path.with_extension("json.tmp");
+        let temp_path = self.unique_temp_path();
         let bytes = serde_json::to_vec_pretty(&normalized)?;
-        let mut temp = OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .mode(0o600)
-            .open(&temp_path)
-            .with_context(|| format!("failed to open {}", temp_path.display()))?;
-        temp.write_all(&bytes)?;
-        temp.write_all(b"\n")?;
-        temp.sync_all()?;
-        fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o600))?;
-        fs::rename(&temp_path, &self.path).with_context(|| {
-            format!(
-                "failed to atomically replace {} with {}",
-                self.path.display(),
-                temp_path.display()
-            )
-        })?;
-        File::open(parent)?.sync_all()?;
-        Ok(())
+        let result = (|| -> Result<()> {
+            let mut temp = OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .mode(0o600)
+                .open(&temp_path)
+                .with_context(|| format!("failed to create {}", temp_path.display()))?;
+            temp.write_all(&bytes)
+                .with_context(|| format!("failed to write {}", temp_path.display()))?;
+            temp.write_all(b"\n")
+                .with_context(|| format!("failed to finish {}", temp_path.display()))?;
+            temp.sync_all()
+                .with_context(|| format!("failed to sync {}", temp_path.display()))?;
+            fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o600))
+                .with_context(|| format!("failed to chmod {}", temp_path.display()))?;
+            fs::rename(&temp_path, &self.path).with_context(|| {
+                format!(
+                    "failed to atomically replace {} using {}",
+                    self.path.display(),
+                    temp_path.display()
+                )
+            })?;
+            File::open(parent)
+                .and_then(|directory| directory.sync_all())
+                .with_context(|| format!("failed to sync {}", parent.display()))?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temp_path);
+        }
+        result
+    }
+
+    fn unique_temp_path(&self) -> PathBuf {
+        let sequence = NEXT_TEMP_FILE_ID.fetch_add(1, Ordering::Relaxed);
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let file_name = self
+            .path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("config.json");
+        self.path.with_file_name(format!(
+            ".{file_name}.tmp.{}.{}.{}",
+            std::process::id(),
+            timestamp,
+            sequence
+        ))
     }
 
     fn corrupt_backup_path(&self) -> PathBuf {
@@ -273,6 +319,18 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
+    fn enables_automatic_sync_by_default() {
+        let config = AirSendConfig::default();
+
+        assert!(config.clipboard_sync_enabled);
+        assert!(config.screenshot_sync_enabled);
+        assert_eq!(
+            config.history_limit_per_direction,
+            DEFAULT_HISTORY_LIMIT_PER_DIRECTION
+        );
+    }
+
+    #[test]
     fn round_trips_valid_config_atomically() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("config.json");
@@ -293,11 +351,46 @@ mod tests {
         store.save(&config).unwrap();
 
         assert_eq!(store.load().unwrap(), config.normalized().unwrap());
-        assert!(!path.with_extension("json.tmp").exists());
+        assert!(!temp.path().read_dir().unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".tmp.")));
         assert_eq!(
             std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
             0o600
         );
+    }
+
+    #[test]
+    fn concurrent_saves_never_share_or_leak_temp_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.json");
+        let store = ConfigStore::new(path.clone());
+        let workers = (0..32)
+            .map(|index| {
+                let store = store.clone();
+                std::thread::spawn(move || {
+                    let config = AirSendConfig {
+                        clipboard_sync_enabled: index % 2 == 0,
+                        screenshot_sync_enabled: index % 3 == 0,
+                        ..AirSendConfig::default()
+                    };
+                    store.save(&config)
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for worker in workers {
+            worker.join().unwrap().unwrap();
+        }
+
+        ConfigStore::new(path).load().unwrap();
+        assert!(!temp.path().read_dir().unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".tmp.")));
     }
 
     #[test]
@@ -366,5 +459,17 @@ mod tests {
         let error = config.normalized().unwrap_err();
 
         assert!(error.to_string().contains("download_destination"));
+    }
+
+    #[test]
+    fn rejects_history_limit_outside_supported_range() {
+        let config = AirSendConfig {
+            history_limit_per_direction: MAX_HISTORY_LIMIT_PER_DIRECTION + 1,
+            ..AirSendConfig::default()
+        };
+
+        let error = config.normalized().unwrap_err();
+
+        assert!(error.to_string().contains("history_limit_per_direction"));
     }
 }

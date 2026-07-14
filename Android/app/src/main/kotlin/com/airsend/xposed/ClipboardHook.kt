@@ -59,7 +59,11 @@ class ClipboardHook : IXposedHookLoadPackage {
                         if (isWritingFromSync) return // 是我们自己写入的，直接丢弃，不发给Mac
                         
                         val clipData = param.args.firstOrNull { it is ClipData } as? ClipData ?: return
-                        val text = clipData.getItemAt(0)?.text?.toString() ?: return
+                        val text = clipData.getItemAt(0)
+                            ?.text
+                            ?.toString()
+                            ?.takeIf(String::isNotBlank)
+                            ?: return
                         
                         Log.d(TAG, "📤 Intercepted clipboard: $text")
                         sendToDaemonViaUDS(text)
@@ -83,6 +87,7 @@ class ClipboardHook : IXposedHookLoadPackage {
                     thread {
                         try {
                             val text = socket.inputStream.reader().readText()
+                            if (text.isBlank()) return@thread
                             Log.d(TAG, "📥 [Xposed] 收到 Mac 下发的文本, 长度: ${text.length}")
                             
                             // 切换到主线程调用系统 API
@@ -135,7 +140,10 @@ class ClipboardHook : IXposedHookLoadPackage {
                 socket.connect(LocalSocketAddress(SOCKET_NAME, LocalSocketAddress.Namespace.ABSTRACT))
                 socket.soTimeout = 2000 
                 socket.outputStream.use { out ->
-                    out.write((IpcCommandEncoder.sendText(text) + "\n").toByteArray())
+                    out.write(
+                        (IpcCommandEncoder.sendText(text, source = "clipboard") + "\n")
+                            .toByteArray()
+                    )
                     out.flush()
                 }
             } catch (e: Exception) {

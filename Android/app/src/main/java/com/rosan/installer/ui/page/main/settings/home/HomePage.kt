@@ -167,7 +167,6 @@ fun HomePage(
                                 ?.let { stringResource(R.string.config_authorizer_command_desc, it) }
                                 ?: stringResource(R.string.config_authorizer_customize)
 
-                            uiState.isSystemApp -> stringResource(R.string.working_status_system_installer)
                             uiState.globalAuthorizer == Authorizer.Shizuku -> {
                                 stringResource(R.string.config_authorizer_shizuku) + " " + when {
                                     uiState.shizukuAuthorized -> "(${uiState.shizukuMode.desc})"
@@ -222,9 +221,9 @@ fun HomePage(
                     item {
                         BaseWidget(
                             iconPlaceholder = false,
-                            title = stringResource(R.string.home_learn_more_installerx_title),
-                            description = stringResource(R.string.home_learn_more_installerx_desc),
-                            onClick = { uriHandler.openUri("https://wxxsfxyzm.github.io/InstallerX-Revived-Website/") }
+                            title = stringResource(R.string.home_learn_more_airsend_title),
+                            description = stringResource(R.string.home_learn_more_airsend_desc),
+                            onClick = { uriHandler.openUri("https://github.com/Avi7ii/AirSend") }
                         )
                     }
                 }

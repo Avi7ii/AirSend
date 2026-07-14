@@ -94,6 +94,7 @@ import com.rosan.installer.ui.page.main.settings.preferred.about.AboutViewModel
 import com.rosan.installer.ui.page.main.widget.util.LogEventCollector
 import com.rosan.installer.ui.page.miuix.widgets.ErrorDisplaySheet
 import com.rosan.installer.ui.page.miuix.widgets.MiuixBackButton
+import com.rosan.installer.ui.page.miuix.widgets.MiuixLiquidSwitch
 import com.rosan.installer.ui.page.miuix.widgets.MiuixNavigationItemWidget
 import com.rosan.installer.ui.page.miuix.widgets.MiuixSwitchWidget
 import com.rosan.installer.ui.page.miuix.widgets.MiuixUpdateDialog
@@ -118,7 +119,6 @@ import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
-import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
@@ -233,19 +233,8 @@ private fun MiuixAboutPageLegacyInternal(
     val uriHandler = LocalUriHandler.current
     val scrollBehavior = MiuixScrollBehavior()
 
-    val internetAccessHint = if (AppConfig.isInternetAccessEnabled) stringResource(R.string.internet_access_enabled)
-    else stringResource(R.string.internet_access_disabled)
-
-    val level = when (AppConfig.LEVEL) {
-        Level.STABLE -> stringResource(id = R.string.stable)
-        Level.PREVIEW -> stringResource(id = R.string.preview)
-        Level.UNSTABLE -> stringResource(id = R.string.unstable)
-    }
-
     val versionInfoText = stringResource(
-        id = R.string.app_version_info_format,
-        internetAccessHint,
-        level,
+        id = R.string.airsend_version_info_format,
         AppConfig.VERSION_NAME,
         AppConfig.VERSION_CODE
     )
@@ -287,15 +276,11 @@ private fun MiuixAboutPageLegacyInternal(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    if (uiState.appIcon != null) {
-                        Image(
-                            bitmap = uiState.appIcon,
-                            modifier = Modifier.size(80.dp),
-                            contentDescription = stringResource(id = R.string.app_name)
-                        )
-                    } else {
-                        Box(modifier = Modifier.size(80.dp))
-                    }
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_airsend_monochrome),
+                        modifier = Modifier.size(80.dp),
+                        contentDescription = stringResource(id = R.string.app_name)
+                    )
                     Text(
                         text = stringResource(id = R.string.app_name),
                         style = MiuixTheme.textStyles.title2,
@@ -325,7 +310,7 @@ private fun MiuixAboutPageLegacyInternal(
                     MiuixNavigationItemWidget(
                         title = stringResource(R.string.get_source_code),
                         description = stringResource(R.string.get_source_code_detail),
-                        onClick = { uriHandler.openUri("https://github.com/wxxsfxyzm/InstallerX-Revived") }
+                        onClick = { uriHandler.openUri("https://github.com/Avi7ii/AirSend") }
                     )
                     MiuixNavigationItemWidget(
                         title = stringResource(R.string.open_source_license),
@@ -390,19 +375,8 @@ private fun MiuixBlendAboutPageInternal(
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
 
-    val internetAccessHint = if (AppConfig.isInternetAccessEnabled) stringResource(R.string.internet_access_enabled)
-    else stringResource(R.string.internet_access_disabled)
-
-    val level = when (AppConfig.LEVEL) {
-        Level.STABLE -> stringResource(id = R.string.stable)
-        Level.PREVIEW -> stringResource(id = R.string.preview)
-        Level.UNSTABLE -> stringResource(id = R.string.unstable)
-    }
-
     val versionInfoText = stringResource(
-        id = R.string.app_version_info_format,
-        internetAccessHint,
-        level,
+        id = R.string.airsend_version_info_format,
         AppConfig.VERSION_NAME,
         AppConfig.VERSION_CODE
     )
@@ -633,9 +607,9 @@ private fun AboutContentBody(
                     },
             ) {
                 Image(
-                    painter = painterResource(id = R.drawable.ic_launcher_monochrome),
+                    painter = painterResource(id = R.drawable.ic_airsend_monochrome),
                     modifier = Modifier
-                        .requiredSize(160.dp)
+                        .requiredSize(120.dp)
                         .textureBlur(
                             backdrop = backdrop,
                             shape = RoundedCornerShape(16.dp),
@@ -782,7 +756,7 @@ private fun AboutContentBody(
                         MiuixNavigationItemWidget(
                             title = stringResource(R.string.get_source_code),
                             description = stringResource(R.string.get_source_code_detail),
-                            onClick = { uriHandler.openUri("https://github.com/wxxsfxyzm/InstallerX-Revived") }
+                            onClick = { uriHandler.openUri("https://github.com/Avi7ii/AirSend") }
                         )
                         MiuixNavigationItemWidget(
                             title = stringResource(R.string.open_source_license),
@@ -937,9 +911,9 @@ private fun AboutContentBody(
                     BasicComponent(
                         title = "Effect Background Enabled",
                         endActions = {
-                            Switch(
-                                effectBackground.value,
-                                {
+                            MiuixLiquidSwitch(
+                                checked = effectBackground.value,
+                                onCheckedChange = {
                                     effectBackground.value = it
                                 },
                             )
@@ -951,9 +925,9 @@ private fun AboutContentBody(
                     BasicComponent(
                         title = "Dynamic Background Enabled",
                         endActions = {
-                            Switch(
-                                dynamicBackground.value,
-                                {
+                            MiuixLiquidSwitch(
+                                checked = dynamicBackground.value,
+                                onCheckedChange = {
                                     dynamicBackground.value = it
                                 },
                             )
@@ -965,9 +939,9 @@ private fun AboutContentBody(
                     BasicComponent(
                         title = "Blur Enable",
                         endActions = {
-                            Switch(
-                                blurEnable,
-                                {
+                            MiuixLiquidSwitch(
+                                checked = blurEnable,
+                                onCheckedChange = {
                                     blurEnable = it
                                 },
                             )

@@ -24,9 +24,11 @@ class AirSendRuntimeIntegrationTest {
         assertTrue(state.contains("val daemonReachable: Boolean"))
         assertTrue(state.contains("val bootStartEnabled: Boolean"))
         assertTrue(state.contains("val notificationPermissionGranted: Boolean"))
+        assertTrue(state.contains("val clipboardSyncEnabled: Boolean = true"))
+        assertTrue(state.contains("val screenshotSyncEnabled: Boolean = true"))
 
         assertTrue(repository.contains("val state: StateFlow<AirSendRuntimeState>"))
-        assertTrue(repository.contains("suspend fun refresh()"))
+        assertTrue(repository.contains("suspend fun refresh(showIndicator: Boolean = false)"))
         assertTrue(repository.contains("fun restartService()"))
         assertTrue(repository.contains("fun setBootStartEnabled(enabled: Boolean)"))
         assertTrue(repository.contains("suspend fun sendText(text: String, targetId: String? = null)"))
@@ -34,6 +36,9 @@ class AirSendRuntimeIntegrationTest {
         assertTrue(androidRuntime.contains("AirSendService::class.java"))
         assertTrue(androidRuntime.contains("BootReceiver::class.java"))
         assertTrue(androidRuntime.contains("PackageManager.COMPONENT_ENABLED_STATE_ENABLED"))
+        assertTrue(androidRuntime.contains("ROOT_STATUS_CACHE_MS"))
+        assertTrue(androidRuntime.contains("if [ -f "))
+        assertFalse(androidRuntime.contains("""if [ -f \""""))
         assertTrue(repositoryImpl.contains("ipcClient.request(\"hello\")"))
         assertTrue(repositoryImpl.contains("ipcClient.request(\"get_state\")"))
         assertTrue(repositoryImpl.contains("ipcClient.request(\"get_peers\")"))
@@ -64,11 +69,16 @@ class AirSendRuntimeIntegrationTest {
             assertTrue(source.contains("collectAsStateWithLifecycle()"))
             assertTrue(source.contains("runtimeState.peers"))
             assertTrue(source.contains("AirSendRuntimeAction.RestartService"))
-            assertTrue(source.contains("AirSendRuntimeAction.Refresh"))
+            assertTrue(
+                source.contains("AirSendRuntimeAction.Refresh") ||
+                    source.contains("AirSendRuntimeAction.DiscoverNow")
+            )
             assertTrue(source.contains("AirSendRuntimeAction.SetBootStartEnabled"))
             assertTrue(source.contains("AirSendRuntimeAction.SendClipboardText"))
             assertTrue(source.contains("SwitchWidget") || source.contains("MiuixSwitchWidget"))
         }
+
+        assertTrue(miuix.contains("AirSendRuntimeAction.RestartDaemon"))
 
         assertTrue(viewModelModule.contains("viewModelOf(::AirSendRuntimeViewModel)"))
         assertTrue(settingsModule.contains("single<AirSendIpcClient>"))

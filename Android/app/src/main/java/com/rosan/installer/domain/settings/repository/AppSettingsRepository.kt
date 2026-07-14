@@ -45,6 +45,7 @@ enum class BooleanSetting {
     UiDynColorFollowPkgIcon,
     LiveActivityDynColorFollowPkgIcon,
     ShowLiveActivity,
+    AirSendShowServiceNotification,
     ShowMiIsland,
     ShowMiIslandBypassRestriction,
     ShowMiIslandOuterGlow,

@@ -50,13 +50,13 @@
             android:value="true" />
         <meta-data
             android:name="xposeddescription"
-            android:value="AirSend 特权模块：实现系统级剪贴板自动同步" />
+            android:value="AirSend 特权模块：实现系统级剪贴板自动同步与 ColorOS 传送门固定入口" />
         <meta-data
             android:name="xposedminversion"
             android:value="93" />
         <meta-data
             android:name="xposedscope"
-            android:value="android" />
+            android:value="android;com.oplus.contentportal" />
 
         <activity
             android:name="com.rosan.installer.ui.activity.SettingsActivity"

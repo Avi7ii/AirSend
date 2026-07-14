@@ -10,4 +10,11 @@
         <item name="windowNoTitle">true</item>
     </style>
 
+    <style name="Theme.AirSend.Share" parent="Theme.Installer">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowDisablePreview">true</item>
+    </style>
+
 </resources>

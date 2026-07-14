@@ -84,6 +84,7 @@
             android:name="com.airsend.ShareTargetActivity"
             android:excludeFromRecents="true"
             android:exported="true"
+            android:launchMode="singleInstance"
             android:noHistory="true"
             android:theme="@android:style/Theme.NoDisplay">
             <intent-filter>
@@ -100,6 +101,15 @@
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
+
+        <activity
+            android:name="com.airsend.AirSendShareDialogActivity"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:resizeableActivity="false"
+            android:taskAffinity="${applicationId}.share_dialog"
+            android:theme="@style/Theme.AirSend.Share" />
 
         <receiver
             android:name="com.airsend.BootReceiver"

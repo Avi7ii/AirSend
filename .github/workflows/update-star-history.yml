@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
@@ -28,9 +28,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh api --paginate --slurp \
-            -H "Accept: application/vnd.github.star+json" \
-            "repos/${GH_REPO}/stargazers?per_page=100" \
+          owner="${GH_REPO%%/*}"
+          name="${GH_REPO#*/}"
+          gh api graphql --paginate --slurp \
+            -f owner="${owner}" \
+            -f name="${name}" \
+            -f query='query($owner: String!, $name: String!, $endCursor: String) { repository(owner: $owner, name: $name) { stargazers(first: 100, after: $endCursor, orderBy: {field: STARRED_AT, direction: ASC}) { edges { starredAt } pageInfo { hasNextPage endCursor } } } }' \
+            > "${RUNNER_TEMP}/stargazer-pages.json"
+          jq '[.[].data.repository.stargazers.edges[] | {starred_at: .starredAt}]' \
+            "${RUNNER_TEMP}/stargazer-pages.json" \
             > "${RUNNER_TEMP}/stargazers.json"
           node scripts/update-star-history.mjs \
             "${RUNNER_TEMP}/stargazers.json" \

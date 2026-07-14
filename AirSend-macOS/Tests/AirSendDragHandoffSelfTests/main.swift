@@ -107,12 +107,101 @@ func testFreshDragPasteboardChangeCountsAsEvidenceBeforePayloadIsReadable() thro
     )
 }
 
+func testReadablePayloadMetadataCountsAsEvidenceWhenChangeCountIsStable() throws {
+    try expect(
+        DragPasteboardEvidence.hasPotentialDragSession(
+            hasFreshChangeCount: false,
+            hasReadablePayloadMetadata: true
+        ),
+        "readable drag metadata should preserve wide activation when drag pasteboard change counts are stable"
+    )
+}
+
+func testMovedWindowUnderPointerIsRecognizedAsWindowDrag() throws {
+    let initialFrames: [CGWindowID: CGRect] = [
+        7: CGRect(x: 100, y: 100, width: 800, height: 600),
+    ]
+    let currentFrames: [CGWindowID: CGRect] = [
+        7: CGRect(x: 130, y: 118, width: 800, height: 600),
+    ]
+
+    try expect(
+        WindowDragEvidence.hasMovedWindowFromDragStart(
+            initialFrames: initialFrames,
+            currentFrames: currentFrames,
+            dragStartPointerLocation: CGPoint(x: 420, y: 180)
+        ),
+        "a top-level window moving with the pointer should be classified as a window drag"
+    )
+}
+
+func testUnrelatedWindowMovementDoesNotSuppressFileDrag() throws {
+    let initialFrames: [CGWindowID: CGRect] = [
+        7: CGRect(x: 100, y: 100, width: 800, height: 600),
+    ]
+    let currentFrames: [CGWindowID: CGRect] = [
+        7: CGRect(x: 130, y: 118, width: 800, height: 600),
+    ]
+
+    try expect(
+        !WindowDragEvidence.hasMovedWindowFromDragStart(
+            initialFrames: initialFrames,
+            currentFrames: currentFrames,
+            dragStartPointerLocation: CGPoint(x: 1100, y: 180)
+        ),
+        "movement from a window away from the pointer should not suppress a file drag"
+    )
+}
+
+func testWindowDragRemainsRecognizedAfterPointerReachesMenuBar() throws {
+    let initialFrames: [CGWindowID: CGRect] = [
+        7: CGRect(x: 100, y: 100, width: 800, height: 600),
+    ]
+    let currentFrames: [CGWindowID: CGRect] = [
+        7: CGRect(x: 130, y: 33, width: 800, height: 600),
+    ]
+
+    try expect(
+        WindowDragEvidence.hasMovedWindowFromDragStart(
+            initialFrames: initialFrames,
+            currentFrames: currentFrames,
+            dragStartPointerLocation: CGPoint(x: 420, y: 120)
+        ),
+        "a moved window should remain classified as a window drag after the pointer leaves it for the menu bar"
+    )
+}
+
+func testPreviewDismissesAfterLeavingDropZoneKeepaliveRegion() throws {
+    try expect(
+        !DragPreviewVisibilityPolicy.shouldKeepPreviewVisible(
+            isWithinDropZoneKeepalive: false,
+            isAcceptingDragSession: false,
+            isHoveringDropTarget: false
+        ),
+        "an active preview should dismiss once the pointer leaves the compact drop-zone keepalive region"
+    )
+
+    try expect(
+        DragPreviewVisibilityPolicy.shouldKeepPreviewVisible(
+            isWithinDropZoneKeepalive: true,
+            isAcceptingDragSession: false,
+            isHoveringDropTarget: false
+        ),
+        "the compact drop-zone keepalive region should prevent edge flicker"
+    )
+}
+
 let tests: [(String, () throws -> Void)] = [
     ("firstRecognizedDragInsideActivationBandActivatesImmediately", testFirstRecognizedDragInsideActivationBandActivatesImmediately),
     ("recognizedDragOutsideActivationBandDoesNotActivate", testRecognizedDragOutsideActivationBandDoesNotActivate),
     ("plainPointerDragInsideActivationBandDoesNotShowCandidateDropZone", testPlainPointerDragInsideActivationBandDoesNotShowCandidateDropZone),
     ("unrecognizedDragPasteboardInsideActivationBandShowsCandidateDropZoneAfterMovement", testUnrecognizedDragPasteboardInsideActivationBandShowsCandidateDropZoneAfterMovement),
     ("freshDragPasteboardChangeCountsAsEvidenceBeforePayloadIsReadable", testFreshDragPasteboardChangeCountsAsEvidenceBeforePayloadIsReadable),
+    ("readablePayloadMetadataCountsAsEvidenceWhenChangeCountIsStable", testReadablePayloadMetadataCountsAsEvidenceWhenChangeCountIsStable),
+    ("movedWindowUnderPointerIsRecognizedAsWindowDrag", testMovedWindowUnderPointerIsRecognizedAsWindowDrag),
+    ("unrelatedWindowMovementDoesNotSuppressFileDrag", testUnrelatedWindowMovementDoesNotSuppressFileDrag),
+    ("windowDragRemainsRecognizedAfterPointerReachesMenuBar", testWindowDragRemainsRecognizedAfterPointerReachesMenuBar),
+    ("previewDismissesAfterLeavingDropZoneKeepaliveRegion", testPreviewDismissesAfterLeavingDropZoneKeepaliveRegion),
 ]
 
 do {

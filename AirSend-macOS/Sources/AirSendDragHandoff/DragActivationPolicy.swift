@@ -19,6 +19,39 @@ public enum DragPasteboardEvidence {
     }
 }
 
+public enum WindowDragEvidence {
+    public static func hasMovedWindowFromDragStart(
+        initialFrames: [CGWindowID: CGRect],
+        currentFrames: [CGWindowID: CGRect],
+        dragStartPointerLocation: CGPoint,
+        minimumOriginTravel: CGFloat = 3
+    ) -> Bool {
+        for (windowID, initialFrame) in initialFrames {
+            guard initialFrame.contains(dragStartPointerLocation),
+                  let currentFrame = currentFrames[windowID] else {
+                continue
+            }
+
+            let dx = currentFrame.origin.x - initialFrame.origin.x
+            let dy = currentFrame.origin.y - initialFrame.origin.y
+            if hypot(dx, dy) >= minimumOriginTravel {
+                return true
+            }
+        }
+        return false
+    }
+}
+
+public enum DragPreviewVisibilityPolicy {
+    public static func shouldKeepPreviewVisible(
+        isWithinDropZoneKeepalive: Bool,
+        isAcceptingDragSession: Bool,
+        isHoveringDropTarget: Bool
+    ) -> Bool {
+        isWithinDropZoneKeepalive || isAcceptingDragSession || isHoveringDropTarget
+    }
+}
+
 public struct DragActivationPolicy {
     public private(set) var observedPasteboardChangeCount: Int?
     public private(set) var observedStartPoint: CGPoint?

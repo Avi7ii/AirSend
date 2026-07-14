@@ -41,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -52,6 +53,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.airbnb.lottie.LottieProperty
+import com.airbnb.lottie.compose.LottieAnimation
+import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.LottieConstants
+import com.airbnb.lottie.compose.rememberLottieComposition
+import com.airbnb.lottie.compose.rememberLottieDynamicProperties
+import com.airbnb.lottie.compose.rememberLottieDynamicProperty
+import com.airbnb.lottie.value.ScaleXY
 import com.rosan.installer.R
 import com.rosan.installer.ui.icons.AppIcons
 import com.rosan.installer.ui.library.FloatingBottomBar
@@ -577,29 +586,38 @@ private fun LazyListScope.airSendMiuixDevices(
         }
         SmallTitle(stringResource(R.string.airsend_current_target))
         Card(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            BasicComponent(
-                title = selectedPeer?.alias ?: stringResource(R.string.airsend_broadcast_mode),
-                summary = selectedPeer?.deviceSubtitle()
-                    ?: stringResource(R.string.airsend_broadcast_mode_desc),
-                startAction = {
-                    Icon(
-                        imageVector = selectedPeer?.deviceKind()?.asMiuixIcon() ?: AppIcons.Share,
-                        contentDescription = null,
-                        modifier = Modifier.size(28.dp),
-                        tint = MiuixTheme.colorScheme.primary
-                    )
-                },
-                endActions = if (selectedPeer == null) null else {
-                    {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                BasicComponent(
+                    title = selectedPeer?.alias ?: stringResource(R.string.airsend_broadcast_mode),
+                    summary = selectedPeer?.deviceSubtitle()
+                        ?: stringResource(R.string.airsend_broadcast_mode_desc),
+                    startAction = {
                         Icon(
-                            imageVector = AppIcons.Active,
-                            contentDescription = stringResource(R.string.airsend_current_target),
-                            modifier = Modifier.size(22.dp),
+                            imageVector = selectedPeer?.deviceKind()?.asMiuixIcon() ?: AppIcons.Share,
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp),
                             tint = MiuixTheme.colorScheme.primary
                         )
+                    },
+                    endActions = if (selectedPeer == null) null else {
+                        {
+                            Icon(
+                                imageVector = AppIcons.Active,
+                                contentDescription = stringResource(R.string.airsend_current_target),
+                                modifier = Modifier.size(22.dp),
+                                tint = MiuixTheme.colorScheme.primary
+                            )
+                        }
                     }
+                )
+                if (selectedPeer != null) {
+                    AirSendQuickShareScanningAnimation(
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .padding(bottom = 12.dp)
+                    )
                 }
-            )
+            }
         }
     }
     item(key = "airsend-online-devices") {
@@ -661,6 +679,67 @@ private fun LazyListScope.airSendMiuixDevices(
             )
         }
     }
+}
+
+@Composable
+private fun AirSendQuickShareScanningAnimation(modifier: Modifier = Modifier) {
+    val composition by rememberLottieComposition(
+        LottieCompositionSpec.RawRes(R.raw.quick_share_pulsing_scanning_icon)
+    )
+    val primary = MiuixTheme.colorScheme.primary.toArgb()
+    val primaryContainer = MiuixTheme.colorScheme.primaryContainer.toArgb()
+    val dynamicProperties = rememberLottieDynamicProperties(
+        rememberLottieDynamicProperty(
+            LottieProperty.COLOR,
+            primary,
+            ".icon_outline",
+            "**",
+            "Fill 1"
+        ),
+        rememberLottieDynamicProperty(
+            LottieProperty.STROKE_COLOR,
+            primary,
+            ".icon_outline",
+            "**",
+            "Stroke 1"
+        ),
+        rememberLottieDynamicProperty(
+            LottieProperty.COLOR,
+            primaryContainer,
+            ".icon_background",
+            "**",
+            "Fill 1"
+        ),
+        rememberLottieDynamicProperty(
+            LottieProperty.COLOR,
+            primary,
+            "506531",
+            "**",
+            "Fill 1"
+        ),
+        rememberLottieDynamicProperty(
+            LottieProperty.TRANSFORM_SCALE,
+            ScaleXY(0.875f, 0.875f),
+            ".icon_outline"
+        ),
+        rememberLottieDynamicProperty(
+            LottieProperty.TRANSFORM_SCALE,
+            ScaleXY(0.875f, 0.875f),
+            ".FFFFFF 2"
+        ),
+        rememberLottieDynamicProperty(
+            LottieProperty.TRANSFORM_SCALE,
+            ScaleXY(0.875f, 0.875f),
+            ".icon_background"
+        )
+    )
+
+    LottieAnimation(
+        composition = composition,
+        iterations = LottieConstants.IterateForever,
+        dynamicProperties = dynamicProperties,
+        modifier = modifier.size(128.dp)
+    )
 }
 
 @Composable

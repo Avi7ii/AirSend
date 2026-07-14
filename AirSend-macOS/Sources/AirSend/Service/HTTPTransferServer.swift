@@ -687,7 +687,8 @@ actor HTTPTransferServer {
         do {
             let dto = try JSONDecoder().decode(RegisterDto.self, from: request.body)
 
-            if remoteIP != "unknown" {
+            if remoteIP != "unknown",
+               !DiscoveryIdentity.fingerprintsMatch(dto.fingerprint, fingerprint) {
                 let device = Device(
                     id: dto.fingerprint,
                     alias: dto.alias,

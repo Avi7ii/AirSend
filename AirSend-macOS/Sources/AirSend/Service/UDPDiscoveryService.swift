@@ -250,7 +250,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
             let dto = try JSONDecoder().decode(MulticastDto.decode, from: content)
             
             // Ignore own messages
-            if dto.fingerprint == self.fingerprint {
+            if DiscoveryIdentity.fingerprintsMatch(dto.fingerprint, self.fingerprint) {
                 return
             }
             
@@ -481,6 +481,9 @@ final class UDPDiscoveryService: @unchecked Sendable {
                 }
 
                 let dto = try JSONDecoder().decode(RegisterDto.self, from: data)
+                guard !DiscoveryIdentity.fingerprintsMatch(dto.fingerprint, fingerprint) else {
+                    return
+                }
                 let device = Device(
                     id: dto.fingerprint,
                     alias: dto.alias,
@@ -513,6 +516,9 @@ final class UDPDiscoveryService: @unchecked Sendable {
                 guard 200..<300 ~= result.statusCode else { continue }
 
                 let dto = try JSONDecoder().decode(RegisterDto.self, from: result.body)
+                guard !DiscoveryIdentity.fingerprintsMatch(dto.fingerprint, fingerprint) else {
+                    return
+                }
                 let device = Device(
                     id: dto.fingerprint,
                     alias: dto.alias,

@@ -564,7 +564,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     
     private func buildDeviceGroups() -> [DeviceGroupViewModel] {
         let now = Date()
-        let grouped = Dictionary(grouping: devices.values, by: { deviceGroupKey(for: $0) })
+        let remoteDevices = devices.values.filter {
+            !DiscoveryIdentity.fingerprintsMatch($0.id, fingerprint)
+        }
+        let grouped = Dictionary(grouping: remoteDevices, by: { deviceGroupKey(for: $0) })
         let groups: [DeviceGroupViewModel] = grouped.compactMap { groupKey, candidates in
             let sorted = sortedCandidates(for: groupKey, devices: candidates)
             guard let primary = sorted.first else { return nil }
@@ -788,6 +791,38 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             self.devices = cleanedDevices
             mergeKnownDiscoveryHosts(cleanedDevices.values.map(\.ip))
         }
+    }
+
+    private func removeLocalDeviceFromDiscoveryState(matching localFingerprint: String) {
+        let matchingEntries = devices.filter { key, device in
+            DiscoveryIdentity.fingerprintsMatch(key, localFingerprint)
+                || DiscoveryIdentity.fingerprintsMatch(device.id, localFingerprint)
+        }
+        guard !matchingEntries.isEmpty else { return }
+
+        let removedIds = Set(matchingEntries.keys)
+        let removedGroupKeys = Set(matchingEntries.values.map(deviceGroupKey(for:)))
+        for id in removedIds {
+            devices.removeValue(forKey: id)
+        }
+
+        let remainingGroupKeys = Set(devices.values.map(deviceGroupKey(for:)))
+        let orphanedGroupKeys = removedGroupKeys.subtracting(remainingGroupKeys)
+        if !orphanedGroupKeys.isEmpty {
+            historyDeviceGroupKeys.subtract(orphanedGroupKeys)
+            for groupKey in orphanedGroupKeys {
+                preferredDeviceIdsByGroup.removeValue(forKey: groupKey)
+            }
+            if orphanedGroupKeys.contains(selectedDeviceGroupKey) {
+                selectedDeviceGroupKey = broadcastSelectionKey
+            }
+        }
+
+        dropStalePreferredDeviceIds()
+        saveDevices()
+        updateMenu()
+        updateWindowStatus()
+        logTransfer("🧹 Discovery: Removed cached local device identity")
     }
 
     @objc func clearDeviceHistory() {
@@ -1263,6 +1298,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 logTransfer("🔐 Security Initialized. Fingerprint: \(realFingerprint)")
                 
                 self.fingerprint = realFingerprint
+                self.removeLocalDeviceFromDiscoveryState(matching: realFingerprint)
                 await self.restartNetworkingStack()
             } catch {
                 logTransfer("❌ Initialization Failed: \(error)")
@@ -1683,6 +1719,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         await transferServer.setOnDeviceRegistered { [weak self] device in
             DispatchQueue.main.async {
                 guard let self = self else { return }
+                guard !DiscoveryIdentity.fingerprintsMatch(device.id, self.fingerprint) else {
+                    self.removeLocalDeviceFromDiscoveryState(matching: self.fingerprint)
+                    return
+                }
                 self.devices[device.id] = device
                 self.recordConsoleActivity(
                     title: "Device reachable",
@@ -1937,6 +1977,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         discoveryService.onDeviceFound = { [weak self] device in
             DispatchQueue.main.async {
                 guard let self = self else { return }
+                guard !DiscoveryIdentity.fingerprintsMatch(device.id, self.fingerprint) else {
+                    self.removeLocalDeviceFromDiscoveryState(matching: self.fingerprint)
+                    return
+                }
                 
                 let previousDevice = self.devices[device.id]
                 let isNewDevice = previousDevice == nil

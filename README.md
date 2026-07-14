@@ -298,6 +298,16 @@ Android 端照片保存在 `~/Pictures/AirSend`，其他文件保存在 `~/Downl
 
 ---
 
+<h2 align="center">📈 Star History</h2>
+
+<p align="center">
+  <a href="https://star-history.com/#Avi7ii/AirSend&Date">
+    <img src="https://api.star-history.com/svg?repos=Avi7ii/AirSend&type=Date" alt="AirSend Star History">
+  </a>
+</p>
+
+---
+
 <h2 align="center">🤝 贡献与反馈 </h2>
 
 欢迎提交 Issue 反馈问题，或通过 PR 贡献代码。如果这个工具对你有帮助，点一个 🌟 是对项目最直接的支持。

@@ -29,6 +29,7 @@ struct AirSendRuntimeCoreSelfTests {
         try await testDirectionalRetention()
         try await testConfigurationRoundTripAndRecovery()
         try await testHistoryPersistenceAndPruning()
+        try await testTransferArtifactLifecycle()
         try await testCompletionMetadataAndDeclineFailure()
         try testCapabilityContract()
         print("AirSendRuntimeCoreSelfTests passed")
@@ -131,6 +132,8 @@ struct AirSendRuntimeCoreSelfTests {
         let fileURL = directory.appendingPathComponent("runtime-config.json")
         let store = RuntimeConfigurationStore(fileURL: fileURL)
         var configuration = AirSendRuntimeConfiguration()
+        try expect(configuration.downloadDestination == "~/Downloads", "files should default to Downloads")
+        try expect(configuration.mediaDestination == "~/Downloads", "media should default to Downloads")
         configuration.preferredTargetID = "peer-1"
         configuration.receivePolicy = .trustedOnly
         configuration.trustedPeerFingerprints = ["AA:BB", "aabb"]
@@ -192,6 +195,55 @@ struct AirSendRuntimeCoreSelfTests {
         try await store.clear(direction: .incoming)
         let clearedIncomingCount = try await store.count(direction: .incoming)
         try expect(clearedIncomingCount == 0, "directional history clear should work")
+    }
+
+    private static func testTransferArtifactLifecycle() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("airsend-artifact-tests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let sourceDirectory = directory.appendingPathComponent("source", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+        let sourceURL = sourceDirectory.appendingPathComponent("clipboard.png")
+        try Data(repeating: 0xAB, count: 32).write(to: sourceURL)
+
+        let storeURL = directory.appendingPathComponent("artifacts", isDirectory: true)
+        let store = TransferArtifactStore(
+            directoryURL: storeURL,
+            maximumFileBytes: 64,
+            maximumTotalBytes: 128
+        )
+        let transferID = UUID()
+        let preserved = try await store.preserve(
+            transferID: transferID,
+            candidates: [
+                TransferArtifactCandidate(
+                    fileID: "clipboard",
+                    fileName: "clipboard.png",
+                    sourceURL: sourceURL
+                )
+            ]
+        )
+        guard let preservedPath = preserved["clipboard"] else {
+            throw TestFailure.assertion("temporary payload should be preserved")
+        }
+        try expect(FileManager.default.fileExists(atPath: preservedPath), "preserved artifact should exist")
+        try expect(URL(fileURLWithPath: preservedPath).lastPathComponent == "clipboard.png", "artifact should retain its file name")
+
+        try await store.prune(keeping: [transferID])
+        try expect(FileManager.default.fileExists(atPath: preservedPath), "retained history should keep its artifact")
+        try await store.prune(keeping: [])
+        try expect(!FileManager.default.fileExists(atPath: preservedPath), "pruned history should remove its artifact")
+
+        let oversizedURL = sourceDirectory.appendingPathComponent("oversized.bin")
+        try Data(repeating: 0xCD, count: 65).write(to: oversizedURL)
+        let oversized = try await store.preserve(
+            transferID: UUID(),
+            candidates: [
+                TransferArtifactCandidate(fileID: "large", fileName: "oversized.bin", sourceURL: oversizedURL)
+            ]
+        )
+        try expect(oversized.isEmpty, "oversized temporary payloads should not be duplicated")
     }
 
     private static func testCompletionMetadataAndDeclineFailure() async throws {

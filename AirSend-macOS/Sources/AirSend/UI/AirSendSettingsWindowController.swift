@@ -45,12 +45,12 @@ struct AirSendTransferSummary: Identifiable, Hashable {
     let peerTitle: String
     let fileTitle: String
     let detail: String
+    let fileKind: AirSendTransferFileKind
     let status: String
     let progress: Double
     let byteProgress: String
     let startedAt: Date
     let savedPaths: [String]
-    let previewPath: String?
     let previewText: String?
     let failureMessage: String?
     let canCancel: Bool
@@ -86,9 +86,8 @@ struct AirSendDiagnosticSummary: Identifiable, Hashable {
 }
 
 struct AirSendSettingsSnapshot {
-    var autoClipboardSyncEnabled: Bool
-    var autoClipboardImageSyncEnabled: Bool
-    var autoScreenshotFileSyncEnabled: Bool
+    var clipboardSyncEnabled: Bool
+    var screenshotSyncEnabled: Bool
     var autoUpdateEnabled: Bool
     var launchAtLoginEnabled: Bool
     var compatibilityModeEnabled: Bool
@@ -99,6 +98,7 @@ struct AirSendSettingsSnapshot {
     var selectedTargetTitle: String
     var selectedTargetSubtitle: String
     var selectedTargetIsBroadcast: Bool
+    var canSendToSelectedTarget: Bool
     var protocolLabel: String
     var fingerprintSuffix: String
     var currentVersion: String
@@ -127,9 +127,8 @@ struct AirSendSettingsSnapshot {
 @MainActor
 final class AirSendSettingsStore: ObservableObject {
     struct Actions {
-        let setAutoClipboardSyncEnabled: (Bool) -> Void
-        let setAutoClipboardImageSyncEnabled: (Bool) -> Void
-        let setAutoScreenshotFileSyncEnabled: (Bool) -> Void
+        let setClipboardSyncEnabled: (Bool) -> Void
+        let setScreenshotSyncEnabled: (Bool) -> Void
         let setAutoUpdateEnabled: (Bool) -> Void
         let setLaunchAtLoginEnabled: (Bool) -> Void
         let setCompatibilityModeEnabled: (Bool) -> Void
@@ -155,6 +154,7 @@ final class AirSendSettingsStore: ObservableObject {
         let retryTransfer: (String) -> Void
         let deleteHistory: (String) -> Void
         let clearHistory: (String) -> Void
+        let previewTransfer: (String, [String]) -> Void
         let revealTransfer: (String) -> Void
         let shareTransfer: (String) -> Void
         let exportLogs: () -> Void
@@ -163,6 +163,7 @@ final class AirSendSettingsStore: ObservableObject {
     }
 
     @Published private(set) var snapshot: AirSendSettingsSnapshot
+    @Published private(set) var quickLookSelectionID: String?
     let actions: Actions
 
     init(snapshot: AirSendSettingsSnapshot, actions: Actions) {
@@ -173,12 +174,16 @@ final class AirSendSettingsStore: ObservableObject {
     func update(snapshot: AirSendSettingsSnapshot) {
         self.snapshot = snapshot
     }
+
+    func selectTransferFromQuickLook(_ id: String) {
+        quickLookSelectionID = id
+    }
 }
 
 @MainActor
 final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegate {
-    private static let defaultSize = NSSize(width: 840, height: 520)
-    private static let minimumSize = NSSize(width: 760, height: 480)
+    private static let defaultSize = NSSize(width: 920, height: 640)
+    private static let minimumSize = NSSize(width: 800, height: 520)
 
     let store: AirSendSettingsStore
     var onWindowVisibilityChanged: ((Bool) -> Void)?

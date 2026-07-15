@@ -33,6 +33,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     lazy var transferHistoryStore: TransferHistoryStore? = try? TransferHistoryStore(
         fileURL: TransferHistoryStore.defaultFileURL()
     )
+    let transferArtifactStore = TransferArtifactStore(
+        directoryURL: TransferArtifactStore.defaultDirectoryURL()
+    )
     private var runtimeConfiguration = AirSendRuntimeConfiguration()
     private var hasBootstrappedRuntimePersistence = false
     private var runtimeEventTask: Task<Void, Never>?
@@ -58,7 +61,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         fingerprint: fingerprint,
         localProtocol: preferredLocalProtocol,
         campusFallback: campusFallback,
-        transferCoordinator: transferCoordinator
+        transferCoordinator: transferCoordinator,
+        artifactStore: transferArtifactStore
     )
     lazy var clipboardSender = ClipboardSender(fileSender: fileSender)
     let clipboardService = ClipboardService()
@@ -76,6 +80,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private var pendingStatusMenuRefresh = false
     private var settingsWindowController: AirSendSettingsWindowController?
     private var sharingServicePicker: NSSharingServicePicker?
+    private let quickLookController = AirSendQuickLookController()
     private var settingsWindowRelativeTimeTimer: Timer?
     private var recentConsoleActivities: [AirSendActivitySummary] = []
     private let maxRecentConsoleActivities = 5
@@ -161,6 +166,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
     private var isScreenshotFileSyncEnabled: Bool {
         runtimeConfiguration.screenshotSyncEnabled
+    }
+
+    private var isUnifiedClipboardSyncEnabled: Bool {
+        isAutoClipboardSyncEnabled && isAutoScreenshotSyncEnabled
     }
 
     private var preferredLocalProtocol: ProtocolType {
@@ -533,6 +542,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         } else {
             fileTitle = "\(record.files.count) items"
         }
+        let firstFile = record.files.first
+        let fileKind = AirSendTransferFileClassifier.classify(
+            name: firstFile?.name ?? "",
+            mimeType: firstFile?.mimeType ?? "",
+            fileCount: record.files.count
+        )
         let transferred = ByteCountFormatter.string(fromByteCount: record.transferredBytes, countStyle: .file)
         let total = ByteCountFormatter.string(fromByteCount: record.totalBytes, countStyle: .file)
         return AirSendTransferSummary(
@@ -542,21 +557,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             peerTitle: record.peer.alias,
             fileTitle: fileTitle,
             detail: record.files.prefix(3).map(\.name).joined(separator: ", "),
+            fileKind: fileKind,
             status: record.status.rawValue,
             progress: record.progress,
             byteProgress: "\(transferred) of \(total)",
             startedAt: record.startedAt,
             savedPaths: record.files.compactMap(\.savedPath),
-            previewPath: record.files.compactMap(\.previewPath).first,
             previewText: record.previewText,
             failureMessage: record.failure?.message,
             canCancel: !record.status.isTerminal,
             canRetry: record.isRetryable,
-            hasAvailableFiles: record.files.contains {
-                [$0.savedPath, $0.sourcePath].compactMap { $0 }.contains {
-                    FileManager.default.fileExists(atPath: $0)
-                }
-            }
+            hasAvailableFiles: !transferURLs(for: record).isEmpty
         )
     }
 
@@ -697,18 +708,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             group.candidates.contains { isDeviceOnline($0) }
         }.count
         let selectedGroup = groups.first(where: { $0.key == selectedDeviceGroupKey })
+        let canSendToSelectedTarget: Bool
         let selectedTitle: String
         let selectedSubtitle: String
 
         if selectedDeviceGroupKey == broadcastSelectionKey {
             selectedTitle = "All Devices"
             selectedSubtitle = "Broadcast to every online device"
+            canSendToSelectedTarget = visibleGroupCount > 0
         } else if let selectedGroup {
             selectedTitle = displayTitle(for: selectedGroup)
             selectedSubtitle = displaySubtitle(for: selectedGroup)
+            canSendToSelectedTarget = selectedGroup.candidates.contains { isDeviceOnline($0) }
         } else {
             selectedTitle = "Target Offline"
             selectedSubtitle = "Choose another device or rescan"
+            canSendToSelectedTarget = false
         }
         let health = consoleHealth(for: visibleGroupCount)
         let activeRecords = runtimeTransfersByID.values
@@ -725,9 +740,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
 
         return AirSendSettingsSnapshot(
-            autoClipboardSyncEnabled: isAutoClipboardSyncEnabled,
-            autoClipboardImageSyncEnabled: isAutoScreenshotSyncEnabled,
-            autoScreenshotFileSyncEnabled: isScreenshotFileSyncEnabled,
+            clipboardSyncEnabled: isUnifiedClipboardSyncEnabled,
+            screenshotSyncEnabled: isScreenshotFileSyncEnabled,
             autoUpdateEnabled: isAutoUpdateEnabled,
             launchAtLoginEnabled: isLaunchAtLoginEnabled,
             compatibilityModeEnabled: preferredLocalProtocol == .http,
@@ -738,6 +752,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             selectedTargetTitle: selectedTitle,
             selectedTargetSubtitle: selectedSubtitle,
             selectedTargetIsBroadcast: selectedDeviceGroupKey == broadcastSelectionKey,
+            canSendToSelectedTarget: canSendToSelectedTarget,
             protocolLabel: preferredLocalProtocol == .http ? "HTTP Compatibility" : "HTTPS Default",
             fingerprintSuffix: shortFingerprint(fingerprint),
             currentVersion: UpdateService.shared.currentVersion,
@@ -780,13 +795,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         let store = AirSendSettingsStore(
             snapshot: makeSettingsSnapshot(),
             actions: .init(
-                setAutoClipboardSyncEnabled: { [weak self] enabled in
-                    self?.setAutoClipboardSyncEnabled(enabled, showInfoIfEnabling: true)
+                setClipboardSyncEnabled: { [weak self] enabled in
+                    self?.setUnifiedClipboardSyncEnabled(enabled, showInfoIfEnabling: true)
                 },
-                setAutoClipboardImageSyncEnabled: { [weak self] enabled in
-                    self?.setAutoScreenshotSyncEnabled(enabled, showInfoIfEnabling: true)
-                },
-                setAutoScreenshotFileSyncEnabled: { [weak self] enabled in
+                setScreenshotSyncEnabled: { [weak self] enabled in
                     self?.setScreenshotFileSyncEnabled(enabled)
                 },
                 setAutoUpdateEnabled: { [weak self] enabled in
@@ -863,6 +875,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 },
                 clearHistory: { [weak self] direction in
                     self?.clearHistory(direction: direction)
+                },
+                previewTransfer: { [weak self] id, orderedIDs in
+                    self?.previewTransfer(id: id, orderedIDs: orderedIDs)
                 },
                 revealTransfer: { [weak self] id in
                     self?.revealTransfer(id: id)
@@ -1250,6 +1265,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private var pendingDragPayloadURLs: [URL] = []
     private var activeDragSessionID: UUID?
     private var resolvedDragSessionID: UUID?
+    private var lastIdleDragPasteboardChangeCount: Int?
     private var dragGestureRejected = false
     private var dragActivationPolicy = DragActivationPolicy()
     private var currentDragAllowsFallbackRecovery = false
@@ -1275,6 +1291,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
     private func startDragProximityMonitoring() {
         guard globalDragEventMonitor == nil, localDragEventMonitor == nil else { return }
+        lastIdleDragPasteboardChangeCount = NSPasteboard(name: .drag).changeCount
 
         globalDragEventMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
@@ -1325,6 +1342,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             dragEvaluationWorkItem?.cancel()
             dragEvaluationWorkItem = nil
             handleDragReleaseIfNeeded(trigger: isLocal ? "local-mouse-up" : "global-mouse-up")
+            lastIdleDragPasteboardChangeCount = NSPasteboard(name: .drag).changeCount
             resetObservedDragGesture()
         default:
             break
@@ -1479,12 +1497,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private func checkForNearbyFileDragTrigger() {
         let dragPasteboard = NSPasteboard(name: .drag)
         guard (NSEvent.pressedMouseButtons & 0x1) != 0 else {
+            lastIdleDragPasteboardChangeCount = dragPasteboard.changeCount
             resetObservedDragGesture()
             return
         }
 
         let mouseLocation = NSEvent.mouseLocation
         beginObservedDragGestureIfNeeded(at: mouseLocation)
+        let hasFreshDragPasteboardPayload = DragPasteboardEvidence.hasFreshChangeCount(
+            idleChangeCount: lastIdleDragPasteboardChangeCount,
+            currentChangeCount: dragPasteboard.changeCount
+        )
 
         if dropZoneWindow.isPreviewActive || activeDragSessionID != nil || !pendingDragPayloadURLs.isEmpty {
             guard !dropZoneWindow.isPerformingDrop,
@@ -1492,6 +1515,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                   !dropZoneWindow.isShowingError else { return }
 
             if pendingDragPayloadURLs.isEmpty,
+               hasFreshDragPasteboardPayload,
                LocalFileDrag.metadataEvidence(from: dragPasteboard).canBeLocalFileDrag {
                 let urls = LocalFileDrag.stageValidLocalFileURLs(from: dragPasteboard)
                 if !urls.isEmpty {
@@ -1509,6 +1533,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
 
         guard !dragGestureRejected else { return }
+        guard hasFreshDragPasteboardPayload else { return }
         let metadata = LocalFileDrag.metadataEvidence(from: dragPasteboard)
         guard metadata.canBeLocalFileDrag else { return }
         captureInitialDragWindowFramesIfNeeded()
@@ -1531,12 +1556,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             changeCount: dragPasteboard.changeCount,
             location: CGPoint(x: mouseLocation.x, y: mouseLocation.y),
             hasRecognizedPayload: true,
+            hasFreshPayloadEvidence: hasFreshDragPasteboardPayload,
             isWithinActivationBand: isWithinActivationBand
         )
 
         guard activationDecision.shouldActivate else { return }
 
-        FileLogger.log("🧲 [DragProximity] Status-bar activation band triggered with \(urls.count) verified file(s). triggerFrame=\(triggerFrame.debugDescription)")
+        let idlePasteboardDescription = lastIdleDragPasteboardChangeCount.map(String.init) ?? "none"
+        FileLogger.log("🧲 [DragProximity] Status-bar activation band triggered with \(urls.count) verified fresh file(s). pasteboard=\(dragPasteboard.changeCount) idle=\(idlePasteboardDescription) triggerFrame=\(triggerFrame.debugDescription)")
         beginDropZonePreview(with: urls, allowFallbackRecovery: activationDecision.allowsFallbackRecovery)
     }
 
@@ -1773,14 +1800,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
 
     private func migratedRuntimeConfiguration() -> AirSendRuntimeConfiguration {
-        AirSendRuntimeConfiguration(
+        let clipboardSyncEnabled = isAutoClipboardSyncEnabled || isAutoScreenshotSyncEnabled
+        let downloadsDirectory = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!.path
+        return AirSendRuntimeConfiguration(
             preferredTargetID: selectedDeviceGroupKey,
-            clipboardSyncEnabled: isAutoClipboardSyncEnabled,
-            clipboardImageSyncEnabled: isAutoScreenshotSyncEnabled,
+            clipboardSyncEnabled: clipboardSyncEnabled,
+            clipboardImageSyncEnabled: clipboardSyncEnabled,
             screenshotSyncEnabled: false,
             launchAtLoginEnabled: isLaunchAtLoginEnabled,
-            downloadDestination: FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!.path,
-            mediaDestination: FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask).first!.path,
+            downloadDestination: downloadsDirectory,
+            mediaDestination: downloadsDirectory,
             transportPreference: preferredLocalProtocol == .http ? .httpCompatibility : .https
         )
     }
@@ -1791,12 +1820,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             let outcome = try await runtimeConfigurationStore.load(defaults: migratedRuntimeConfiguration())
             runtimeConfiguration = outcome.configuration
             selectedDeviceGroupKey = outcome.configuration.preferredTargetID ?? broadcastSelectionKey
+            var configurationNeedsSave = false
+            let unifiedClipboardSyncEnabled = outcome.configuration.clipboardSyncEnabled
+                || outcome.configuration.clipboardImageSyncEnabled
+            if runtimeConfiguration.clipboardSyncEnabled != unifiedClipboardSyncEnabled
+                || runtimeConfiguration.clipboardImageSyncEnabled != unifiedClipboardSyncEnabled {
+                runtimeConfiguration.clipboardSyncEnabled = unifiedClipboardSyncEnabled
+                runtimeConfiguration.clipboardImageSyncEnabled = unifiedClipboardSyncEnabled
+                configurationNeedsSave = true
+            }
             UserDefaults.standard.set(
-                outcome.configuration.clipboardSyncEnabled,
+                unifiedClipboardSyncEnabled,
                 forKey: "auto_clipboard_sync_enabled"
             )
             UserDefaults.standard.set(
-                outcome.configuration.clipboardImageSyncEnabled,
+                unifiedClipboardSyncEnabled,
                 forKey: autoScreenshotSyncStorage
             )
             UserDefaults.standard.set(
@@ -1805,8 +1843,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     : ProtocolType.https.rawValue,
                 forKey: localProtocolPreferenceStorage
             )
+            let downloadsDirectory = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!.path
+            let picturesDirectory = FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask).first!.path
+            let expandedMediaDestination = (runtimeConfiguration.mediaDestination as NSString).expandingTildeInPath
+            if URL(fileURLWithPath: expandedMediaDestination).standardizedFileURL.path
+                == URL(fileURLWithPath: picturesDirectory).standardizedFileURL.path {
+                runtimeConfiguration.mediaDestination = downloadsDirectory
+                configurationNeedsSave = true
+            }
             if runtimeConfiguration.launchAtLoginEnabled != isLaunchAtLoginEnabled {
                 runtimeConfiguration.launchAtLoginEnabled = isLaunchAtLoginEnabled
+                configurationNeedsSave = true
+            }
+            if configurationNeedsSave {
                 try await runtimeConfigurationStore.save(runtimeConfiguration)
             }
             try await transferHistoryStore?.setRetentionLimitPerDirection(
@@ -1911,6 +1960,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         do {
             runtimeHistory = try await transferHistoryStore.list(
                 limit: runtimeConfiguration.historyLimitPerDirection * 2
+            )
+            let activeIDs = runtimeTransfersByID.values
+                .filter { !$0.status.isTerminal }
+                .map(\.id)
+            try? await transferArtifactStore.prune(
+                keeping: Set(runtimeHistory.map(\.id) + activeIDs)
             )
         } catch {
             diagnosticsError = error.localizedDescription
@@ -2838,7 +2893,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             fingerprint: fingerprint,
             localProtocol: targetProtocol,
             campusFallback: campusFallback,
-            transferCoordinator: transferCoordinator
+            transferCoordinator: transferCoordinator,
+            artifactStore: transferArtifactStore
         )
         self.clipboardSender = ClipboardSender(fileSender: fileSender)
 
@@ -3690,6 +3746,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         guard let uuid = UUID(uuidString: id), let transferHistoryStore else { return }
         Task {
             try? await transferHistoryStore.delete(id: uuid)
+            try? await transferArtifactStore.remove(ids: [uuid])
             runtimeTransfersByID.removeValue(forKey: uuid)
             await reloadRuntimeHistory()
         }
@@ -3697,19 +3754,68 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
     private func clearHistory(direction rawValue: String) {
         guard let direction = TransferDirection(rawValue: rawValue), let transferHistoryStore else { return }
+        let artifactIDs = Set(runtimeHistory.filter { $0.direction == direction }.map(\.id))
         Task {
             try? await transferHistoryStore.clear(direction: direction)
+            try? await transferArtifactStore.remove(ids: artifactIDs)
             runtimeTransfersByID = runtimeTransfersByID.filter { !$0.value.status.isTerminal || $0.value.direction != direction }
             await reloadRuntimeHistory()
         }
     }
 
     private func transferURLs(for record: TransferRecord) -> [URL] {
-        record.files.compactMap { file in
-            let path = record.direction == .incoming ? file.savedPath : file.sourcePath
-            guard let path, FileManager.default.fileExists(atPath: path) else { return nil }
+        var urls: [URL] = record.files.compactMap { file -> URL? in
+            let preferredPaths = record.direction == .incoming
+                ? [file.savedPath, file.previewPath, file.sourcePath]
+                : [file.sourcePath, file.savedPath, file.previewPath]
+            guard let path = preferredPaths.compactMap({ $0 }).first(where: {
+                FileManager.default.fileExists(atPath: $0)
+            }) else { return nil }
             return URL(fileURLWithPath: path)
         }
+        for path in record.retrySpec?.sourcePaths ?? [] where FileManager.default.fileExists(atPath: path) {
+            let url = URL(fileURLWithPath: path).standardizedFileURL
+            if !urls.contains(where: { $0.standardizedFileURL == url }) {
+                urls.append(url)
+            }
+        }
+        return urls
+    }
+
+    private func previewTransfer(id: String, orderedIDs: [String]) {
+        let ids = orderedIDs.contains(id) ? orderedIDs : [id] + orderedIDs
+        let groups = ids.compactMap { recordID -> AirSendQuickLookGroup? in
+            guard let record = runtimeRecord(id: recordID) else { return nil }
+            let urls = transferURLs(for: record)
+            let fileName = record.files.first?.name ?? "Transfer"
+            let previewText = record.previewText?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let hasTextPreview = previewText?.isEmpty == false
+            return AirSendQuickLookGroup(
+                id: recordID,
+                urls: urls,
+                fallbackText: hasTextPreview
+                    ? previewText
+                    : (urls.isEmpty ? unavailablePreviewText(fileName: fileName) : nil),
+                fallbackFileName: hasTextPreview
+                    ? fileName
+                    : "\(fileName) - unavailable.txt"
+            )
+        }
+        guard groups.contains(where: { $0.id == id }) else {
+            NSSound.beep()
+            return
+        }
+        quickLookController.show(groups: groups, selectedID: id) { [weak self] selectedID in
+            self?.settingsWindowController?.store.selectTransferFromQuickLook(selectedID)
+        }
+    }
+
+    private func unavailablePreviewText(fileName: String) -> String {
+        """
+        \(fileName)
+
+        The original file is no longer available on this Mac. This transfer was recorded before AirSend retained temporary preview artifacts.
+        """
     }
 
     private func revealTransfer(id: String) {
@@ -3925,10 +4031,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
     }
 
-    private func setAutoClipboardSyncEnabled(_ enabled: Bool, showInfoIfEnabling: Bool) {
-        if isAutoClipboardSyncEnabled != enabled {
-            isAutoClipboardSyncEnabled = enabled
+    private func setUnifiedClipboardSyncEnabled(_ enabled: Bool, showInfoIfEnabling: Bool) {
+        let changed = isAutoClipboardSyncEnabled != enabled || isAutoScreenshotSyncEnabled != enabled
+        guard changed else { return }
+
+        UserDefaults.standard.set(enabled, forKey: "auto_clipboard_sync_enabled")
+        UserDefaults.standard.set(enabled, forKey: autoScreenshotSyncStorage)
+        if hasBootstrappedRuntimePersistence {
+            runtimeConfiguration.clipboardSyncEnabled = enabled
+            runtimeConfiguration.clipboardImageSyncEnabled = enabled
+            persistRuntimeConfiguration()
         }
+        updateMenu()
         updateAutomationServices()
 
         guard enabled, showInfoIfEnabling else {
@@ -3936,24 +4050,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
 
         showAndroidIntegrationAlert(
-            featureName: "Auto Clipboard Sync",
-            description: "New plain text copied on your Mac clipboard will be pushed to the selected Android target."
-        )
-    }
-
-    private func setAutoScreenshotSyncEnabled(_ enabled: Bool, showInfoIfEnabling: Bool) {
-        if isAutoScreenshotSyncEnabled != enabled {
-            isAutoScreenshotSyncEnabled = enabled
-        }
-        updateAutomationServices()
-
-        guard enabled, showInfoIfEnabling else {
-            return
-        }
-
-        showAndroidIntegrationAlert(
-            featureName: "Auto Clipboard Image Sync",
-            description: "Copied images on your Mac are converted to PNG and pushed to the selected Android target."
+            featureName: "Clipboard Sync",
+            description: "New text and images copied on your Mac will be pushed to the selected Android target."
         )
     }
 

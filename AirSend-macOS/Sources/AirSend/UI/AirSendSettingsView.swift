@@ -1,27 +1,36 @@
 import AppKit
+import AirSendConsoleSupport
 import QuartzCore
-import QuickLookThumbnailing
 import SwiftUI
 
+private enum AirSendSettingsMetrics {
+    static let cardCornerRadius: CGFloat = 12
+    static let cardContentInset: CGFloat = 14
+    static let transferRowSpacing: CGFloat = 8
+    static let transferViewportHeightRatio: CGFloat = 0.40
+    static let transferViewportMinimumHeight: CGFloat = 180
+    static let transferViewportMaximumHeight: CGFloat = 320
+    static let transferViewportMinimumCap: CGFloat = 240
+    static let transferEstimatedRowHeight: CGFloat = 78
+    static let actionCornerRadius: CGFloat = 7
+}
+
 private enum AirSendSettingsCategory: String, CaseIterable, Identifiable {
+    case status
     case devices
     case transfers
-    case clipboard
-    case diagnostics
     case settings
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .status:
+            return "Status"
         case .devices:
             return "Devices"
         case .transfers:
             return "Transfers"
-        case .clipboard:
-            return "Clipboard"
-        case .diagnostics:
-            return "Diagnostics"
         case .settings:
             return "Settings"
         }
@@ -29,41 +38,38 @@ private enum AirSendSettingsCategory: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
+        case .status:
+            return "Runtime health, automation, and quick actions."
         case .devices:
-            return "Targets, discovery, health, and recent AirSend activity."
+            return "Current target, nearby devices, and discovery."
         case .transfers:
-            return "Recent file transfer state and progress."
-        case .clipboard:
-            return "Clipboard text, images, and manual sync actions."
-        case .diagnostics:
-            return "Network health, receiver status, and troubleshooting."
+            return "Send and receive activity, progress, and history."
         case .settings:
-            return "Network, launch behavior, updates, and identity."
+            return "Automation, receiving, network, diagnostics, and identity."
         }
     }
 
     var symbol: String {
         switch self {
+        case .status:
+            return "waveform.path.ecg"
         case .devices:
             return "macbook.and.iphone"
         case .transfers:
             return "arrow.left.arrow.right"
-        case .clipboard:
-            return "arrow.triangle.2.circlepath"
-        case .diagnostics:
-            return "stethoscope"
         case .settings:
-            return "slider.horizontal.3"
+            return "gearshape"
         }
     }
 }
 
 private enum AirSendTransferHistoryFilter: String, CaseIterable, Identifiable {
-    case outgoing = "Sent"
-    case incoming = "Received"
+    case outgoing = "Send"
+    case incoming = "Receive"
 
     var id: String { rawValue }
     var direction: String { self == .outgoing ? "outgoing" : "incoming" }
+    var symbolName: String { self == .outgoing ? "arrow.up" : "arrow.down" }
 }
 
 struct AirSendSettingsView: View {
@@ -80,17 +86,38 @@ struct AirSendSettingsView: View {
 
     @ObservedObject var store: AirSendSettingsStore
 
-    @AppStorage("airsend.settings.selectedCategory")
-    private var selectedCategoryRawValue = AirSendSettingsCategory.devices.rawValue
+    @AppStorage("airsend.console.selectedCategory.v2")
+    private var selectedCategoryRawValue = AirSendSettingsCategory.status.rawValue
 
     @State private var transferHistoryFilter = AirSendTransferHistoryFilter.outgoing
+    @State private var selectedTransferID: String?
 
     private var snapshot: AirSendSettingsSnapshot {
         store.snapshot
     }
 
     private var selectedCategory: AirSendSettingsCategory {
-        AirSendSettingsCategory(rawValue: selectedCategoryRawValue) ?? .devices
+        AirSendSettingsCategory(rawValue: selectedCategoryRawValue) ?? .status
+    }
+
+    private var primaryDiagnostics: [AirSendDiagnosticSummary] {
+        let preferredOrder = ["network", "receiver", "storage"]
+        return preferredOrder.compactMap { id in
+            snapshot.diagnostics.first { $0.id == id }
+        }
+    }
+
+    private var selectedActiveTransfers: [AirSendTransferSummary] {
+        snapshot.activeTransfers.filter { $0.direction == transferHistoryFilter.direction }
+    }
+
+    private var selectedTransferHistory: [AirSendTransferSummary] {
+        transferHistoryFilter == .outgoing ? snapshot.sentHistory : snapshot.receivedHistory
+    }
+
+    private var selectedTransferActivity: [AirSendTransferSummary] {
+        (selectedActiveTransfers + selectedTransferHistory)
+            .sorted { $0.startedAt > $1.startedAt }
     }
 
     var body: some View {
@@ -112,7 +139,7 @@ struct AirSendSettingsView: View {
         .background(WindowDragSurface())
         .controlSize(.small)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .frame(minWidth: 760, minHeight: 480)
+        .frame(minWidth: 800, minHeight: 520)
         .overlay(alignment: .top) {
             edgeBlurOverlay(
                 direction: .blurredTopClearBottom,
@@ -209,7 +236,7 @@ struct AirSendSettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    pageContent(for: selectedCategory)
+                    pageContent(for: selectedCategory, availableHeight: proxy.size.height)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, detailContentTopInset)
@@ -223,15 +250,58 @@ struct AirSendSettingsView: View {
     }
 
     @ViewBuilder
-    private func pageContent(for category: AirSendSettingsCategory) -> some View {
+    private func pageContent(for category: AirSendSettingsCategory, availableHeight: CGFloat) -> some View {
         switch category {
-        case .devices:
+        case .status:
             VStack(alignment: .leading, spacing: 14) {
-                SettingsCard(title: "Connection") {
+                SettingsCard(title: "Status") {
                     SettingsConnectionOverviewRow(
                         snapshot: snapshot,
                         action: { store.actions.runDiagnostics() }
                     )
+                }
+
+                SettingsCard(title: "Health") {
+                    ForEach(primaryDiagnostics) { diagnostic in
+                        SettingsDiagnosticRow(diagnostic: diagnostic)
+                    }
+
+                    SettingsToggleRow(
+                        title: "Clipboard Sync",
+                        detail: "Sync copied text and images to the current Android target.",
+                        isOn: Binding(
+                            get: { snapshot.clipboardSyncEnabled },
+                            set: { store.actions.setClipboardSyncEnabled($0) }
+                        )
+                    )
+
+                    SettingsToggleRow(
+                        title: "Screenshot Sync",
+                        detail: "Send new macOS screenshots to one trusted target.",
+                        isOn: Binding(
+                            get: { snapshot.screenshotSyncEnabled },
+                            set: { store.actions.setScreenshotSyncEnabled($0) }
+                        )
+                    )
+                }
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 14) {
+                        statusQuickActionsCard
+                        recentActivityCard
+                    }
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        statusQuickActionsCard
+                        recentActivityCard
+                    }
+                }
+            }
+
+        case .devices:
+            VStack(alignment: .leading, spacing: 14) {
+                SettingsCard(title: "Current Target") {
+                    SettingsCurrentTargetRow(snapshot: snapshot)
                 }
 
                 SettingsCard(title: "LAN Devices") {
@@ -276,154 +346,194 @@ struct AirSendSettingsView: View {
                     )
                 }
 
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 14) {
-                        quickActionsCard
-                        recentActivityCard
-                    }
-
-                    VStack(alignment: .leading, spacing: 14) {
-                        quickActionsCard
-                        recentActivityCard
-                    }
+                SettingsCard(title: "Discovery") {
+                    SettingsButtonRow(
+                        primaryTitle: snapshot.isDiscoveryRefreshing ? "Refreshing…" : "Refresh Devices",
+                        primaryAction: { store.actions.rescan() },
+                        primaryDisabled: snapshot.isDiscoveryRefreshing,
+                        secondaryTitle: "Add by IP",
+                        secondaryAction: { store.actions.addDeviceByIP() },
+                        tertiaryTitle: "Use Broadcast",
+                        tertiaryAction: { store.actions.selectBroadcastTarget() }
+                    )
+                    SettingsValueRow(
+                        title: "Network requirement",
+                        value: "Same LAN",
+                        detail: snapshot.discoveryRefreshSummary
+                    )
                 }
             }
 
         case .transfers:
+            let transferViewportMaximumHeight = min(
+                AirSendSettingsMetrics.transferViewportMaximumHeight,
+                max(
+                    AirSendSettingsMetrics.transferViewportMinimumCap,
+                    availableHeight * AirSendSettingsMetrics.transferViewportHeightRatio
+                )
+            )
+            let estimatedTransferContentHeight =
+                CGFloat(selectedTransferActivity.count) * AirSendSettingsMetrics.transferEstimatedRowHeight
+                + CGFloat(max(0, selectedTransferActivity.count - 1)) * AirSendSettingsMetrics.transferRowSpacing
+                + AirSendSettingsMetrics.cardContentInset * 2
+            let transferViewportHeight = min(
+                transferViewportMaximumHeight,
+                max(
+                    AirSendSettingsMetrics.transferViewportMinimumHeight,
+                    estimatedTransferContentHeight
+                )
+            )
+
             VStack(alignment: .leading, spacing: 14) {
-                SettingsCard(title: "Active") {
-                    if snapshot.activeTransfers.isEmpty {
-                        SettingsEmptyStateRow(
-                            title: "No active transfers",
-                            message: "Current sends and receives appear here."
-                        )
+                SettingsTransferModeBar(
+                    filter: $transferHistoryFilter,
+                    historyCount: selectedTransferHistory.count,
+                    clearAction: { requestClearSelectedHistory() }
+                )
+
+                SettingsCard(title: "Activity") {
+                    if selectedTransferActivity.isEmpty {
+                        SettingsTransferEmptyState(direction: transferHistoryFilter)
                     } else {
-                        ForEach(snapshot.activeTransfers) { transfer in
-                            SettingsTransferRow(
-                                transfer: transfer,
-                                cancelAction: { store.actions.cancelTransfer(transfer.id) },
-                                retryAction: {},
-                                revealAction: {},
-                                shareAction: {},
-                                deleteAction: {}
-                            )
+                        ScrollViewReader { scrollProxy in
+                            ScrollView(.vertical) {
+                                LazyVStack(spacing: AirSendSettingsMetrics.transferRowSpacing) {
+                                    ForEach(selectedTransferActivity) { transfer in
+                                        SettingsTransferRow(
+                                            transfer: transfer,
+                                            isSelected: selectedTransferID == transfer.id,
+                                            selectAction: { selectedTransferID = transfer.id },
+                                            previewAction: {
+                                                store.actions.previewTransfer(
+                                                    transfer.id,
+                                                    selectedTransferActivity.map(\.id)
+                                                )
+                                            },
+                                            cancelAction: { store.actions.cancelTransfer(transfer.id) },
+                                            retryAction: { store.actions.retryTransfer(transfer.id) },
+                                            revealAction: { store.actions.revealTransfer(transfer.id) },
+                                            shareAction: { store.actions.shareTransfer(transfer.id) },
+                                            deleteAction: { store.actions.deleteHistory(transfer.id) }
+                                        )
+                                        .id(transfer.id)
+                                    }
+                                }
+                                .padding(AirSendSettingsMetrics.cardContentInset)
+                            }
+                            .frame(height: transferViewportHeight)
+                            .scrollContentBackground(.hidden)
+                            .onChange(of: selectedTransferID) { _, id in
+                                guard let id else { return }
+                                withAnimation(.easeOut(duration: 0.16)) {
+                                    scrollProxy.scrollTo(id)
+                                }
+                            }
                         }
                     }
                 }
 
-                SettingsCard(title: "History") {
-                    SettingsTransferHistoryHeader(
-                        filter: $transferHistoryFilter,
-                        clearAction: {
-                            store.actions.clearHistory(transferHistoryFilter.direction)
-                        }
-                    )
-
-                    let history = transferHistoryFilter == .outgoing
-                        ? snapshot.sentHistory
-                        : snapshot.receivedHistory
-                    if history.isEmpty {
-                        SettingsEmptyStateRow(
-                            title: transferHistoryFilter == .outgoing ? "Nothing sent yet" : "Nothing received yet",
-                            message: "Completed and failed transfers are stored locally."
+                if transferHistoryFilter == .outgoing {
+                    SettingsCard(title: "Transfer Queue") {
+                        SettingsTransferActionRow(
+                            title: "Choose Files",
+                            detail: snapshot.canSendToSelectedTarget
+                                ? "Send to \(snapshot.selectedTargetTitle)"
+                                : "Choose an online target first",
+                            symbolName: "folder.badge.plus",
+                            isEnabled: snapshot.canSendToSelectedTarget,
+                            action: { store.actions.chooseFilesToSend() }
                         )
-                    } else {
-                        ForEach(history) { transfer in
-                            SettingsTransferRow(
-                                transfer: transfer,
-                                cancelAction: {},
-                                retryAction: { store.actions.retryTransfer(transfer.id) },
-                                revealAction: { store.actions.revealTransfer(transfer.id) },
-                                shareAction: { store.actions.shareTransfer(transfer.id) },
-                                deleteAction: { store.actions.deleteHistory(transfer.id) }
+                        SettingsTransferActionRow(
+                            title: "Nearby Targets",
+                            detail: "\(snapshot.selectedTargetTitle) · \(snapshot.discoveredDeviceCount) online",
+                            symbolName: snapshot.selectedTargetIsBroadcast
+                                ? "square.grid.2x2"
+                                : "dot.radiowaves.left.and.right",
+                            action: { selectedCategoryRawValue = AirSendSettingsCategory.devices.rawValue }
+                        )
+                    }
+
+                    SettingsCard(title: "Send Options") {
+                        SettingsTransferActionRow(
+                            title: "Send Clipboard",
+                            detail: "Text or image from the clipboard",
+                            symbolName: "clipboard",
+                            isEnabled: snapshot.canSendToSelectedTarget,
+                            action: { store.actions.sendClipboardNow() }
+                        )
+                    }
+                } else {
+                    SettingsCard(title: "Transfer Queue") {
+                        SettingsTransferInfoRow(
+                            title: "Receive Requests",
+                            detail: selectedActiveTransfers.isEmpty
+                                ? "No active requests"
+                                : "\(selectedActiveTransfers.count) active",
+                            symbolName: "tray.and.arrow.down"
+                        )
+                    }
+
+                    SettingsCard(title: "Receive Options") {
+                        SettingsReceivePolicyRow(
+                            selection: Binding(
+                                get: { snapshot.receivePolicy },
+                                set: { store.actions.setReceivePolicy($0) }
                             )
-                        }
+                        )
+                        SettingsDestinationRow(
+                            title: "Files",
+                            path: snapshot.downloadDestination,
+                            action: { store.actions.selectDownloadDestination() }
+                        )
+                        SettingsDestinationRow(
+                            title: "Images & Video",
+                            path: snapshot.mediaDestination,
+                            action: { store.actions.selectMediaDestination() }
+                        )
                     }
                 }
             }
-
-        case .clipboard:
-            VStack(alignment: .leading, spacing: 14) {
-                SettingsCard(title: "Automatic Sync") {
-                    SettingsToggleRow(
-                        title: "Clipboard text",
-                        detail: "Sync copied text to the current Android target.",
-                        isOn: Binding(
-                            get: { snapshot.autoClipboardSyncEnabled },
-                            set: { store.actions.setAutoClipboardSyncEnabled($0) }
-                        )
-                    )
-
-                    SettingsToggleRow(
-                        title: "Clipboard images",
-                        detail: "Copied images to the selected target.",
-                        isOn: Binding(
-                            get: { snapshot.autoClipboardImageSyncEnabled },
-                            set: { store.actions.setAutoClipboardImageSyncEnabled($0) }
-                        )
-                    )
-
-                    SettingsToggleRow(
-                        title: "Screenshot files",
-                        detail: "New screenshots to one trusted target.",
-                        isOn: Binding(
-                            get: { snapshot.autoScreenshotFileSyncEnabled },
-                            set: { store.actions.setAutoScreenshotFileSyncEnabled($0) }
-                        )
-                    )
-                }
-
-                SettingsCard(title: "Screenshot Watcher") {
-                    SettingsValueRow(title: "Status", value: snapshot.screenshotWatcherStatus)
-                    SettingsValueRow(title: "Folder", value: snapshot.screenshotWatchFolder)
-                }
-
-                SettingsCard(title: "Target") {
-                    SettingsValueRow(title: "Current target", value: snapshot.selectedTargetTitle, detail: snapshot.selectedTargetSubtitle)
-                }
-
-                SettingsCard(title: "Actions") {
-                    SettingsButtonRow(
-                        primaryTitle: "Send Clipboard Now",
-                        primaryAction: { store.actions.sendClipboardNow() },
-                        secondaryTitle: "Choose Files",
-                        secondaryAction: { store.actions.chooseFilesToSend() }
-                    )
-                }
+            .onAppear { reconcileTransferSelection() }
+            .onChange(of: transferHistoryFilter) { _, _ in
+                selectedTransferID = selectedTransferActivity.first?.id
             }
-
-        case .diagnostics:
-            VStack(alignment: .leading, spacing: 14) {
-                SettingsCard(title: "Runtime Health") {
-                    ForEach(snapshot.diagnostics) { diagnostic in
-                        SettingsDiagnosticRow(diagnostic: diagnostic)
-                    }
-                }
-
-                SettingsCard(title: "Logs") {
-                    SettingsLogTailView(lines: snapshot.logTail)
-                }
-
-                SettingsCard(title: "Tools") {
-                    SettingsButtonRow(
-                        primaryTitle: "Run Diagnostics",
-                        primaryAction: { store.actions.runDiagnostics() },
-                        secondaryTitle: "Restart Runtime",
-                        secondaryAction: { store.actions.restartRuntime() },
-                        tertiaryTitle: "Export Logs",
-                        tertiaryAction: { store.actions.exportLogs() }
-                    )
-                    SettingsInlineCommandRow(
-                        title: "Clear Logs",
-                        symbolName: "trash",
-                        role: .destructive,
-                        action: { store.actions.clearLogs() }
-                    )
-                }
+            .onChange(of: selectedTransferActivity.map(\.id)) { _, _ in
+                reconcileTransferSelection()
+            }
+            .onChange(of: store.quickLookSelectionID) { _, id in
+                guard let id,
+                      selectedTransferActivity.contains(where: { $0.id == id }) else { return }
+                selectedTransferID = id
             }
 
         case .settings:
             VStack(alignment: .leading, spacing: 14) {
+                SettingsCard(title: "Automation") {
+                    SettingsToggleRow(
+                        title: "Clipboard Sync",
+                        detail: "Sync copied text and images to the current Android target.",
+                        isOn: Binding(
+                            get: { snapshot.clipboardSyncEnabled },
+                            set: { store.actions.setClipboardSyncEnabled($0) }
+                        )
+                    )
+
+                    SettingsToggleRow(
+                        title: "Screenshot Sync",
+                        detail: "Watch new screenshots and send them to one trusted target.",
+                        isOn: Binding(
+                            get: { snapshot.screenshotSyncEnabled },
+                            set: { store.actions.setScreenshotSyncEnabled($0) }
+                        )
+                    )
+
+                    SettingsValueRow(
+                        title: "Screenshot watcher",
+                        value: snapshot.screenshotWatcherStatus,
+                        detail: snapshot.screenshotWatchFolder
+                    )
+                }
+
                 SettingsCard(title: "Receiving") {
                     SettingsReceivePolicyRow(
                         selection: Binding(
@@ -509,7 +619,34 @@ struct AirSendSettingsView: View {
                     )
                 }
 
-                SettingsCard(title: "Receiver") {
+                SettingsCard(title: "Diagnostics") {
+                    ForEach(snapshot.diagnostics) { diagnostic in
+                        SettingsDiagnosticRow(diagnostic: diagnostic)
+                    }
+                }
+
+                SettingsCard(title: "Diagnostic Tools") {
+                    SettingsButtonRow(
+                        primaryTitle: "Run Diagnostics",
+                        primaryAction: { store.actions.runDiagnostics() },
+                        secondaryTitle: "Restart Runtime",
+                        secondaryAction: { store.actions.restartRuntime() },
+                        tertiaryTitle: "Export Logs",
+                        tertiaryAction: { store.actions.exportLogs() }
+                    )
+                }
+
+                SettingsCard(title: "Logs") {
+                    SettingsLogTailView(lines: snapshot.logTail)
+                    SettingsInlineCommandRow(
+                        title: "Clear Logs",
+                        symbolName: "trash",
+                        role: .destructive,
+                        action: { store.actions.clearLogs() }
+                    )
+                }
+
+                SettingsCard(title: "Identity") {
                     SettingsValueRow(title: "Fingerprint", value: snapshot.fingerprintSuffix)
                     SettingsButtonRow(
                         primaryTitle: "Reset Identity",
@@ -519,7 +656,8 @@ struct AirSendSettingsView: View {
                     )
                 }
 
-                SettingsCard(title: "Android") {
+                SettingsCard(title: "About") {
+                    SettingsValueRow(title: "Version", value: snapshot.currentVersion)
                     SettingsInlineCommandRow(
                         title: "Open AirSend Repository",
                         symbolName: "arrow.up.right.square",
@@ -530,16 +668,38 @@ struct AirSendSettingsView: View {
         }
     }
 
-    private var quickActionsCard: some View {
+    private func requestClearSelectedHistory() {
+        guard !selectedTransferHistory.isEmpty else { return }
+
+        let directionTitle = transferHistoryFilter == .outgoing ? "Sent" : "Received"
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Clear \(directionTitle) History?"
+        alert.informativeText = "This removes completed and failed transfer records. Saved files are not deleted."
+        alert.addButton(withTitle: "Clear History")
+        alert.addButton(withTitle: "Cancel")
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        store.actions.clearHistory(transferHistoryFilter.direction)
+    }
+
+    private func reconcileTransferSelection() {
+        if let selectedTransferID,
+           selectedTransferActivity.contains(where: { $0.id == selectedTransferID }) {
+            return
+        }
+        selectedTransferID = selectedTransferActivity.first?.id
+    }
+
+    private var statusQuickActionsCard: some View {
         SettingsCard(title: "Quick Actions") {
             SettingsButtonRow(
-                primaryTitle: snapshot.isDiscoveryRefreshing ? "Refreshing…" : "Refresh Devices",
-                primaryAction: { store.actions.rescan() },
-                primaryDisabled: snapshot.isDiscoveryRefreshing,
-                secondaryTitle: "Add by IP",
-                secondaryAction: { store.actions.addDeviceByIP() },
-                tertiaryTitle: "Broadcast",
-                tertiaryAction: { store.actions.selectBroadcastTarget() }
+                primaryTitle: "Run Diagnostics",
+                primaryAction: { store.actions.runDiagnostics() },
+                secondaryTitle: snapshot.isDiscoveryRefreshing ? "Refreshing…" : "Refresh Devices",
+                secondaryAction: { store.actions.rescan() },
+                tertiaryTitle: "Restart Runtime",
+                tertiaryAction: { store.actions.restartRuntime() }
             )
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -902,7 +1062,7 @@ private struct SettingsCard<Content: View>: View {
                 content
             }
             .background(
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                RoundedRectangle(cornerRadius: AirSendSettingsMetrics.cardCornerRadius, style: .continuous)
                     .fill(
                         LinearGradient(
                             colors: [
@@ -915,7 +1075,7 @@ private struct SettingsCard<Content: View>: View {
                     )
             )
             .overlay {
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                RoundedRectangle(cornerRadius: AirSendSettingsMetrics.cardCornerRadius, style: .continuous)
                     .strokeBorder(.white.opacity(0.09), lineWidth: 1)
             }
         }
@@ -1406,162 +1566,344 @@ private struct SettingsTrustedPeerRow: View {
     }
 }
 
-private struct SettingsTransferHistoryHeader: View {
+private struct SettingsTransferModeBar: View {
     @Binding var filter: AirSendTransferHistoryFilter
+    let historyCount: Int
     let clearAction: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
+        ZStack {
             Picker("Direction", selection: $filter) {
                 ForEach(AirSendTransferHistoryFilter.allCases) { item in
-                    Text(item.rawValue).tag(item)
+                    Label(item.rawValue, systemImage: item.symbolName)
+                        .tag(item)
                 }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 220)
+            .frame(width: 240)
 
-            Spacer(minLength: 8)
-
-            Button(role: .destructive, action: clearAction) {
-                Image(systemName: "trash")
-                    .frame(width: 20, height: 20)
+            HStack {
+                Spacer()
+                Button(role: .destructive, action: clearAction) {
+                    Image(systemName: "trash")
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.borderless)
+                .disabled(historyCount == 0)
+                .help("Clear \(filter == .outgoing ? "sent" : "received") history")
             }
-            .buttonStyle(.borderless)
-            .help("Clear \(filter.rawValue.lowercased()) history")
         }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct SettingsTransferEmptyState: View {
+    let direction: AirSendTransferHistoryFilter
+
+    var body: some View {
+        VStack(spacing: 9) {
+            SettingsGlowIcon(
+                symbolName: direction == .outgoing ? "paperplane" : "tray.and.arrow.down",
+                tint: Color(nsColor: direction == .outgoing ? .systemBlue : .systemGreen),
+                size: 42,
+                cornerRadius: 12
+            )
+
+            Text(direction == .outgoing ? "No sent files yet" : "No received files yet")
+                .font(.system(size: 13, weight: .semibold))
+
+            Text(
+                direction == .outgoing
+                    ? "Shared files and clipboard sends will appear here."
+                    : "Incoming transfers will appear here."
+            )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 22)
+    }
+}
+
+private struct SettingsTransferActionRow: View {
+    let title: String
+    let detail: String
+    let symbolName: String
+    var isEnabled = true
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                SettingsGlowIcon(
+                    symbolName: symbolName,
+                    tint: Color(nsColor: .systemBlue),
+                    size: 34,
+                    cornerRadius: 9
+                )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .medium))
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.55)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(.separator.opacity(0.28)).frame(height: 1)
+            Rectangle().fill(.separator.opacity(0.24)).frame(height: 1)
         }
+    }
+}
+
+private struct SettingsTransferInfoRow: View {
+    let title: String
+    let detail: String
+    let symbolName: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            SettingsGlowIcon(
+                symbolName: symbolName,
+                tint: Color(nsColor: .systemGreen),
+                size: 34,
+                cornerRadius: 9
+            )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 }
 
 private struct SettingsTransferRow: View {
     let transfer: AirSendTransferSummary
+    let isSelected: Bool
+    let selectAction: () -> Void
+    let previewAction: () -> Void
     let cancelAction: () -> Void
     let retryAction: () -> Void
     let revealAction: () -> Void
     let shareAction: () -> Void
     let deleteAction: () -> Void
 
+    @FocusState private var isPreviewFocused: Bool
+    @State private var isPreviewHovered = false
+
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            SettingsTransferPreview(
-                path: transfer.previewPath,
-                fallbackSymbol: transfer.direction == "incoming" ? "arrow.down" : "arrow.up",
-                tint: directionTint
-            )
-
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 7) {
-                    Text(transfer.fileTitle)
-                        .font(.system(size: 13, weight: .semibold))
-                        .lineLimit(1)
-                    SettingsTransferStatusChip(status: transfer.status)
-                }
-
-                Text("\(transfer.direction == "incoming" ? "From" : "To") \(transfer.peerTitle) · \(transfer.timeLabel)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                if transfer.canCancel {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ProgressView(value: transfer.progress)
-                            .progressViewStyle(.linear)
-                        Text(transfer.byteProgress)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .frame(height: 25, alignment: .top)
-                } else if let failure = transfer.failureMessage, !failure.isEmpty {
-                    Text(failure)
-                        .font(.caption2)
-                        .foregroundStyle(Color(nsColor: .systemOrange))
-                        .lineLimit(2)
-                } else if let preview = transfer.previewText, !preview.isEmpty {
-                    Text(preview)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
+        HStack(alignment: .center, spacing: 8) {
+            Button {
+                isPreviewFocused = true
+                if isSelected {
+                    previewAction()
                 } else {
+                    selectAction()
+                }
+            } label: {
+                HStack(alignment: .center, spacing: 12) {
+                    SettingsTransferPreview(fileKind: transfer.fileKind)
+                    transferDetails
+                    Spacer(minLength: 8)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 10)
+                .contentShape(
+                    RoundedRectangle(
+                        cornerRadius: AirSendSettingsMetrics.cardCornerRadius,
+                        style: .continuous
+                    )
+                )
+            }
+            .buttonStyle(.plain)
+            .focusable()
+            .focusEffectDisabled()
+            .focused($isPreviewFocused)
+            .onKeyPress(.space) {
+                if isSelected {
+                    previewAction()
+                } else {
+                    selectAction()
+                }
+                return .handled
+            }
+            .onAppear {
+                if isSelected { isPreviewFocused = true }
+            }
+            .onChange(of: isSelected) { _, selected in
+                if selected { isPreviewFocused = true }
+            }
+            .onHover { isPreviewHovered = $0 }
+            .help(isSelected ? "Open with Quick Look" : "Select transfer")
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 4) {
+                if isSelected {
+                    if transfer.canCancel {
+                        SettingsIconCommand(symbol: "xmark", help: "Cancel transfer", role: .destructive, action: cancelAction)
+                    } else {
+                        if transfer.canRetry {
+                            SettingsIconCommand(symbol: "arrow.clockwise", help: "Retry transfer", action: retryAction)
+                        }
+                        if transfer.hasAvailableFiles {
+                            SettingsIconCommand(symbol: "folder", help: "Show in Finder", action: revealAction)
+                            SettingsIconCommand(symbol: "square.and.arrow.up", help: "Share", action: shareAction)
+                        }
+                        SettingsIconCommand(symbol: "trash", help: "Delete history item", role: .destructive, action: deleteAction)
+                    }
+                }
+            }
+            .frame(width: 118, alignment: .trailing)
+            .padding(.trailing, 10)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(
+                cornerRadius: AirSendSettingsMetrics.cardCornerRadius,
+                style: .continuous
+            )
+            .fill(
+                isSelected
+                    ? Color(nsColor: .controlAccentColor).opacity(0.09)
+                    : (isPreviewHovered ? .white.opacity(0.045) : .clear)
+            )
+        }
+        .overlay {
+            RoundedRectangle(
+                cornerRadius: AirSendSettingsMetrics.cardCornerRadius,
+                style: .continuous
+            )
+            .strokeBorder(
+                isSelected ? Color(nsColor: .controlAccentColor).opacity(0.42) : .clear,
+                lineWidth: 1
+            )
+        }
+    }
+
+    private var transferDetails: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 7) {
+                Text(transfer.fileTitle)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                SettingsTransferStatusChip(status: transfer.status)
+            }
+
+            Text("\(transfer.direction == "incoming" ? "From" : "To") \(transfer.peerTitle) · \(transfer.timeLabel)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            if transfer.canCancel {
+                VStack(alignment: .leading, spacing: 4) {
+                    ProgressView(value: transfer.progress)
+                        .progressViewStyle(.linear)
                     Text(transfer.byteProgress)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
+                .frame(height: 25, alignment: .top)
+            } else if let failure = transfer.failureMessage, !failure.isEmpty {
+                Text(failure)
+                    .font(.caption2)
+                    .foregroundStyle(Color(nsColor: .systemOrange))
+                    .lineLimit(2)
+            } else if let preview = transfer.previewText, !preview.isEmpty {
+                Text(preview)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            } else {
+                Text(transfer.byteProgress)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
-
-            Spacer(minLength: 8)
-
-            HStack(spacing: 7) {
-                if transfer.canCancel {
-                    SettingsIconCommand(symbol: "xmark", help: "Cancel transfer", role: .destructive, action: cancelAction)
-                }
-                if transfer.canRetry {
-                    SettingsIconCommand(symbol: "arrow.clockwise", help: "Retry transfer", action: retryAction)
-                }
-                if transfer.hasAvailableFiles {
-                    SettingsIconCommand(symbol: "folder", help: "Show in Finder", action: revealAction)
-                    SettingsIconCommand(symbol: "square.and.arrow.up", help: "Share", action: shareAction)
-                }
-                if !transfer.canCancel {
-                    SettingsIconCommand(symbol: "trash", help: "Delete history item", role: .destructive, action: deleteAction)
-                }
-            }
-            .frame(minWidth: 30, alignment: .trailing)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(.separator.opacity(0.24)).frame(height: 1)
-        }
-    }
-
-    private var directionTint: Color {
-        transfer.direction == "incoming" ? Color(nsColor: .systemGreen) : Color(nsColor: .systemBlue)
     }
 }
 
 private struct SettingsTransferPreview: View {
-    let path: String?
-    let fallbackSymbol: String
-    let tint: Color
-
-    @State private var thumbnail: NSImage?
+    let fileKind: AirSendTransferFileKind
 
     var body: some View {
-        Group {
-            if let thumbnail {
-                Image(nsImage: thumbnail)
-                    .resizable()
-                    .scaledToFill()
-                    .accessibilityLabel("File preview")
-            } else {
-                SettingsGlowIcon(
-                    symbolName: fallbackSymbol,
-                    tint: tint,
-                    size: 38,
-                    cornerRadius: 8
-                )
-            }
-        }
+        SettingsGlowIcon(
+            symbolName: fileKind.symbolName,
+            tint: Color(nsColor: .systemBlue),
+            size: 38,
+            cornerRadius: 8
+        )
         .frame(width: 38, height: 38)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .task(id: path) {
-            thumbnail = nil
-            guard let path, FileManager.default.fileExists(atPath: path) else { return }
-            let request = QLThumbnailGenerator.Request(
-                fileAt: URL(fileURLWithPath: path),
-                size: NSSize(width: 76, height: 76),
-                scale: NSScreen.main?.backingScaleFactor ?? 2,
-                representationTypes: .thumbnail
-            )
-            thumbnail = try? await QLThumbnailGenerator.shared
-                .generateBestRepresentation(for: request)
-                .nsImage
+        .accessibilityLabel(fileKind.accessibilityLabel)
+    }
+}
+
+private extension AirSendTransferFileKind {
+    var symbolName: String {
+        switch self {
+        case .multiple: return "folder.fill"
+        case .androidPackage: return "shippingbox.fill"
+        case .image: return "photo.fill"
+        case .video: return "film.fill"
+        case .audio: return "music.note"
+        case .pdf: return "doc.richtext.fill"
+        case .archive: return "doc.zipper"
+        case .presentation: return "rectangle.3.group.fill"
+        case .spreadsheet: return "tablecells.fill"
+        case .wordProcessing: return "doc.text.fill"
+        case .html: return "chevron.left.forwardslash.chevron.right"
+        case .markdown: return "text.justify.leading"
+        case .structuredData: return "curlybraces.square.fill"
+        case .code: return "terminal.fill"
+        case .text: return "doc.plaintext.fill"
+        case .document: return "book.closed.fill"
+        case .generic: return "doc.fill"
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .multiple: return "Multiple files"
+        case .androidPackage: return "Android package"
+        case .image: return "Image file"
+        case .video: return "Video file"
+        case .audio: return "Audio file"
+        case .pdf: return "PDF document"
+        case .archive: return "Archive file"
+        case .presentation: return "Presentation"
+        case .spreadsheet: return "Spreadsheet"
+        case .wordProcessing: return "Word processing document"
+        case .html: return "HTML document"
+        case .markdown: return "Markdown document"
+        case .structuredData: return "Structured data file"
+        case .code: return "Source code file"
+        case .text: return "Text file"
+        case .document: return "Document"
+        case .generic: return "File"
         }
     }
 }
@@ -1606,14 +1948,35 @@ private struct SettingsIconCommand: View {
     let help: String
     var role: ButtonRole? = nil
     let action: () -> Void
+    @State private var isHovered = false
 
     var body: some View {
         Button(role: role, action: action) {
             Image(systemName: symbol)
-                .frame(width: 18, height: 18)
+                .frame(width: 26, height: 26)
+                .contentShape(
+                    RoundedRectangle(
+                        cornerRadius: AirSendSettingsMetrics.actionCornerRadius,
+                        style: .continuous
+                    )
+                )
         }
         .buttonStyle(.plain)
         .foregroundStyle(role == .destructive ? Color(nsColor: .systemRed) : .secondary)
+        .background {
+            RoundedRectangle(
+                cornerRadius: AirSendSettingsMetrics.actionCornerRadius,
+                style: .continuous
+            )
+            .fill(
+                isHovered
+                    ? (role == .destructive
+                        ? Color(nsColor: .systemRed).opacity(0.12)
+                        : .white.opacity(0.07))
+                    : .clear
+            )
+        }
+        .onHover { isHovered = $0 }
         .help(help)
         .accessibilityLabel(help)
     }

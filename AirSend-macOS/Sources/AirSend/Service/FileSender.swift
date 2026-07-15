@@ -6,6 +6,7 @@ actor FileSender {
     private struct SendContext: Sendable {
         let files: [String: FileDto]
         let fileURLs: [String: URL]
+        let historySourceURLs: [String: URL]
         let temporaryURLs: [URL]
         let securityScopedURLs: [URL]
         let source: TransferSource
@@ -66,6 +67,7 @@ actor FileSender {
     private let localProtocol: ProtocolType
     private let campusFallback: CampusFallbackCoordinator?
     private let transferCoordinator: TransferCoordinator
+    private let artifactStore: TransferArtifactStore?
     private let appVersion: String
 
     private var activeTransfers: [UUID: ActiveTransfer] = [:]
@@ -79,12 +81,14 @@ actor FileSender {
         fingerprint: String,
         localProtocol: ProtocolType = .https,
         campusFallback: CampusFallbackCoordinator? = nil,
-        transferCoordinator: TransferCoordinator = TransferCoordinator()
+        transferCoordinator: TransferCoordinator = TransferCoordinator(),
+        artifactStore: TransferArtifactStore? = nil
     ) {
         self.myFingerprint = fingerprint
         self.localProtocol = localProtocol
         self.campusFallback = campusFallback
         self.transferCoordinator = transferCoordinator
+        self.artifactStore = artifactStore
         self.appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "3.5.0"
     }
 
@@ -137,6 +141,7 @@ actor FileSender {
         let context = SendContext(
             files: [fileID: dto],
             fileURLs: [fileID: temporaryURL],
+            historySourceURLs: [fileID: temporaryURL],
             temporaryURLs: [temporaryURL],
             securityScopedURLs: [],
             source: source,
@@ -194,13 +199,14 @@ actor FileSender {
     private func send(context: SendContext, to device: Device) async throws -> UUID {
         guard !context.files.isEmpty else { throw SenderError.noFiles }
         let transferID = UUID()
+        let historySourcePaths = await historySourcePaths(for: context, transferID: transferID)
         let coreFiles = context.files.values.map {
             TransferFileRecord(
                 id: $0.id,
                 name: $0.fileName,
                 mimeType: $0.fileType,
                 size: $0.size,
-                sourcePath: context.fileURLs[$0.id]?.path
+                sourcePath: historySourcePaths[$0.id]
             )
         }.sorted { $0.id < $1.id }
         await transferCoordinator.register(
@@ -278,6 +284,37 @@ actor FileSender {
             }
             throw error
         }
+    }
+
+    private func historySourcePaths(
+        for context: SendContext,
+        transferID: UUID
+    ) async -> [String: String] {
+        var paths = context.historySourceURLs.mapValues(\.path)
+        guard let artifactStore else { return paths }
+
+        let temporaryPaths = Set(context.temporaryURLs.map { $0.standardizedFileURL.path })
+        let candidates = context.historySourceURLs.compactMap { fileID, url -> TransferArtifactCandidate? in
+            guard temporaryPaths.contains(url.standardizedFileURL.path),
+                  let file = context.files[fileID] else { return nil }
+            return TransferArtifactCandidate(
+                fileID: fileID,
+                fileName: file.fileName,
+                sourceURL: url
+            )
+        }
+        guard !candidates.isEmpty else { return paths }
+
+        do {
+            let preservedPaths = try await artifactStore.preserve(
+                transferID: transferID,
+                candidates: candidates
+            )
+            paths.merge(preservedPaths) { _, preserved in preserved }
+        } catch {
+            logTransfer("⚠️ Could not preserve transfer preview: \(error.localizedDescription)")
+        }
+        return paths
     }
 
     private func performDirectTransfer(
@@ -674,6 +711,7 @@ actor FileSender {
         guard !urls.isEmpty, urls.count <= 512 else { throw SenderError.noFiles }
         var files: [String: FileDto] = [:]
         var fileURLs: [String: URL] = [:]
+        var historySourceURLs: [String: URL] = [:]
         var temporaryURLs: [URL] = []
         var securityScopedURLs: [URL] = []
 
@@ -707,6 +745,7 @@ actor FileSender {
                 )
                 files[fileID] = file
                 fileURLs[fileID] = finalURL
+                historySourceURLs[fileID] = sourceURL
             }
         } catch {
             temporaryURLs.forEach { try? FileManager.default.removeItem(at: $0) }
@@ -722,6 +761,7 @@ actor FileSender {
         return SendContext(
             files: files,
             fileURLs: fileURLs,
+            historySourceURLs: historySourceURLs,
             temporaryURLs: temporaryURLs,
             securityScopedURLs: securityScopedURLs,
             source: source,

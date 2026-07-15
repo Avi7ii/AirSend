@@ -11,11 +11,12 @@ public struct DragActivationDecision: Equatable {
 }
 
 public enum DragPasteboardEvidence {
-    public static func hasPotentialDragSession(
-        hasFreshChangeCount: Bool,
-        hasReadablePayloadMetadata: Bool
+    public static func hasFreshChangeCount(
+        idleChangeCount: Int?,
+        currentChangeCount: Int
     ) -> Bool {
-        hasFreshChangeCount || hasReadablePayloadMetadata
+        guard let idleChangeCount else { return false }
+        return currentChangeCount != idleChangeCount
     }
 }
 
@@ -186,6 +187,7 @@ public struct DragActivationPolicy {
         changeCount: Int,
         location: CGPoint,
         hasRecognizedPayload: Bool,
+        hasFreshPayloadEvidence: Bool,
         isWithinActivationBand: Bool
     ) -> DragActivationDecision {
         observePointerDrag(location: location)
@@ -195,7 +197,9 @@ public struct DragActivationPolicy {
             location: location,
             hasRecognizedPayload: hasRecognizedPayload
         )
-        let shouldActivate = isWithinActivationBand && hasRecognizedPayload
+        let shouldActivate = isWithinActivationBand
+            && hasRecognizedPayload
+            && hasFreshPayloadEvidence
         return DragActivationDecision(
             shouldActivate: shouldActivate,
             allowsFallbackRecovery: shouldActivate && hasRecognizedPayload && (isFirstRecognizedPayload || hasMovedEnough)

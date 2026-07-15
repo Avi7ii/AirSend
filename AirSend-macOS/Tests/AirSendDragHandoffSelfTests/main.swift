@@ -12,13 +12,14 @@ func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     }
 }
 
-func testFirstRecognizedDragInsideActivationBandActivatesImmediately() throws {
+func testFreshRecognizedDragInsideActivationBandActivatesImmediately() throws {
     var policy = DragActivationPolicy(minimumTravel: 18)
 
     let decision = policy.decision(
         changeCount: 42,
         location: CGPoint(x: 420, y: 860),
         hasRecognizedPayload: true,
+        hasFreshPayloadEvidence: true,
         isWithinActivationBand: true
     )
 
@@ -33,6 +34,7 @@ func testRecognizedDragOutsideActivationBandDoesNotActivate() throws {
         changeCount: 42,
         location: CGPoint(x: 420, y: 500),
         hasRecognizedPayload: true,
+        hasFreshPayloadEvidence: true,
         isWithinActivationBand: false
     )
 
@@ -46,6 +48,7 @@ func testPlainPointerDragInsideActivationBandDoesNotShowCandidateDropZone() thro
         changeCount: 1,
         location: CGPoint(x: 420, y: 700),
         hasRecognizedPayload: false,
+        hasFreshPayloadEvidence: false,
         isWithinActivationBand: false
     )
     try expect(!first.shouldActivate, "plain pointer movement outside activation band should not activate")
@@ -54,6 +57,7 @@ func testPlainPointerDragInsideActivationBandDoesNotShowCandidateDropZone() thro
         changeCount: 1,
         location: CGPoint(x: 420, y: 860),
         hasRecognizedPayload: false,
+        hasFreshPayloadEvidence: false,
         isWithinActivationBand: true
     )
 
@@ -68,6 +72,7 @@ func testUnrecognizedDragPasteboardInsideActivationBandDoesNotShowDropZone() thr
         changeCount: 1,
         location: CGPoint(x: 420, y: 700),
         hasRecognizedPayload: false,
+        hasFreshPayloadEvidence: true,
         isWithinActivationBand: false
     )
     try expect(!first.shouldActivate, "drag pasteboard movement outside activation band should not activate")
@@ -76,6 +81,7 @@ func testUnrecognizedDragPasteboardInsideActivationBandDoesNotShowDropZone() thr
         changeCount: 1,
         location: CGPoint(x: 420, y: 860),
         hasRecognizedPayload: false,
+        hasFreshPayloadEvidence: true,
         isWithinActivationBand: true
     )
 
@@ -83,32 +89,53 @@ func testUnrecognizedDragPasteboardInsideActivationBandDoesNotShowDropZone() thr
     try expect(!second.allowsFallbackRecovery, "unverified payloads must not use fallback file sending")
 }
 
-func testFreshDragPasteboardChangeCountsAsEvidenceBeforePayloadIsReadable() throws {
+func testDragPasteboardChangeMustDifferFromIdleBaseline() throws {
     try expect(
-        DragPasteboardEvidence.hasPotentialDragSession(
-            hasFreshChangeCount: true,
-            hasReadablePayloadMetadata: false
+        DragPasteboardEvidence.hasFreshChangeCount(
+            idleChangeCount: 41,
+            currentChangeCount: 42
         ),
-        "fresh drag pasteboard change should count as candidate evidence even before file metadata is readable"
+        "a changed drag pasteboard should count as fresh gesture evidence"
     )
 
     try expect(
-        !DragPasteboardEvidence.hasPotentialDragSession(
-            hasFreshChangeCount: false,
-            hasReadablePayloadMetadata: false
+        !DragPasteboardEvidence.hasFreshChangeCount(
+            idleChangeCount: 42,
+            currentChangeCount: 42
         ),
-        "plain window movement without a fresh drag pasteboard change should not count as candidate evidence"
+        "unchanged stale drag pasteboard contents must not count as a new gesture"
+    )
+    try expect(
+        !DragPasteboardEvidence.hasFreshChangeCount(
+            idleChangeCount: nil,
+            currentChangeCount: 42
+        ),
+        "missing idle evidence must fail closed instead of treating residual metadata as fresh"
     )
 }
 
-func testReadablePayloadMetadataCountsAsEvidenceWhenChangeCountIsStable() throws {
-    try expect(
-        DragPasteboardEvidence.hasPotentialDragSession(
-            hasFreshChangeCount: false,
-            hasReadablePayloadMetadata: true
-        ),
-        "readable drag metadata should preserve wide activation when drag pasteboard change counts are stable"
+func testStaleRecognizedPayloadDoesNotActivateOnClickJitterOrTravel() throws {
+    var policy = DragActivationPolicy(minimumTravel: 18)
+
+    let jitter = policy.decision(
+        changeCount: 42,
+        location: CGPoint(x: 420, y: 860),
+        hasRecognizedPayload: true,
+        hasFreshPayloadEvidence: false,
+        isWithinActivationBand: true
     )
+    try expect(!jitter.shouldActivate, "a click with stale file metadata must not show the drop zone")
+    try expect(!jitter.allowsFallbackRecovery, "a stale click must never be allowed to resend an old file")
+
+    let moved = policy.decision(
+        changeCount: 42,
+        location: CGPoint(x: 470, y: 900),
+        hasRecognizedPayload: true,
+        hasFreshPayloadEvidence: false,
+        isWithinActivationBand: true
+    )
+    try expect(!moved.shouldActivate, "pointer movement alone must not turn stale file metadata into a drag session")
+    try expect(!moved.allowsFallbackRecovery, "stale metadata must remain ineligible for fallback after movement")
 }
 
 func testMovedWindowUnderPointerIsRecognizedAsWindowDrag() throws {
@@ -246,12 +273,12 @@ func testTransitionCorridorConnectsActivationPointWithoutBecomingScreenWide() th
 }
 
 let tests: [(String, () throws -> Void)] = [
-    ("firstRecognizedDragInsideActivationBandActivatesImmediately", testFirstRecognizedDragInsideActivationBandActivatesImmediately),
+    ("freshRecognizedDragInsideActivationBandActivatesImmediately", testFreshRecognizedDragInsideActivationBandActivatesImmediately),
     ("recognizedDragOutsideActivationBandDoesNotActivate", testRecognizedDragOutsideActivationBandDoesNotActivate),
     ("plainPointerDragInsideActivationBandDoesNotShowCandidateDropZone", testPlainPointerDragInsideActivationBandDoesNotShowCandidateDropZone),
     ("unrecognizedDragPasteboardInsideActivationBandDoesNotShowDropZone", testUnrecognizedDragPasteboardInsideActivationBandDoesNotShowDropZone),
-    ("freshDragPasteboardChangeCountsAsEvidenceBeforePayloadIsReadable", testFreshDragPasteboardChangeCountsAsEvidenceBeforePayloadIsReadable),
-    ("readablePayloadMetadataCountsAsEvidenceWhenChangeCountIsStable", testReadablePayloadMetadataCountsAsEvidenceWhenChangeCountIsStable),
+    ("dragPasteboardChangeMustDifferFromIdleBaseline", testDragPasteboardChangeMustDifferFromIdleBaseline),
+    ("staleRecognizedPayloadDoesNotActivateOnClickJitterOrTravel", testStaleRecognizedPayloadDoesNotActivateOnClickJitterOrTravel),
     ("movedWindowUnderPointerIsRecognizedAsWindowDrag", testMovedWindowUnderPointerIsRecognizedAsWindowDrag),
     ("unrelatedWindowMovementDoesNotSuppressFileDrag", testUnrelatedWindowMovementDoesNotSuppressFileDrag),
     ("windowDragRemainsRecognizedAfterPointerReachesMenuBar", testWindowDragRemainsRecognizedAfterPointerReachesMenuBar),

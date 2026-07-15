@@ -55,7 +55,7 @@ public struct AirSendRuntimeConfiguration: Codable, Equatable, Sendable {
         screenshotSyncEnabled: Bool = false,
         launchAtLoginEnabled: Bool = false,
         downloadDestination: String = "~/Downloads",
-        mediaDestination: String = "~/Pictures",
+        mediaDestination: String = "~/Downloads",
         transportPreference: TransportPreference = .https,
         historyLimitPerDirection: Int = 30
     ) {

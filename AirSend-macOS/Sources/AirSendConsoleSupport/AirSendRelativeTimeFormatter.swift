@@ -5,10 +5,8 @@ public enum AirSendRelativeTimeFormatter {
         let seconds = max(0, Int(now.timeIntervalSince(date)))
 
         switch seconds {
-        case ..<6:
-            return "just now"
         case ..<60:
-            return "\(seconds)s ago"
+            return "just now"
         case ..<3_600:
             return "\(seconds / 60)m ago"
         case ..<86_400:
@@ -23,10 +21,8 @@ public enum AirSendRelativeTimeFormatter {
         let nextElapsed: TimeInterval
 
         switch elapsed {
-        case ..<6:
-            nextElapsed = 6
         case ..<60:
-            nextElapsed = floor(elapsed) + 1
+            nextElapsed = 60
         case ..<3_600:
             nextElapsed = floor(elapsed / 60) * 60 + 60
         case ..<86_400:

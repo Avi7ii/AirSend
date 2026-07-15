@@ -16,11 +16,11 @@ func testRelativeActivityTimeLabels() throws {
 
     try expect(
         AirSendRelativeTimeFormatter.label(since: now.addingTimeInterval(-4), now: now) == "just now",
-        "events under six seconds old should read just now"
+        "events under one minute old should read just now"
     )
     try expect(
-        AirSendRelativeTimeFormatter.label(since: now.addingTimeInterval(-42), now: now) == "42s ago",
-        "events under one minute should show seconds"
+        AirSendRelativeTimeFormatter.label(since: now.addingTimeInterval(-42), now: now) == "just now",
+        "recent events should not force per-second UI refreshes"
     )
     try expect(
         AirSendRelativeTimeFormatter.label(since: now.addingTimeInterval(-125), now: now) == "2m ago",
@@ -37,13 +37,13 @@ func testNextRelativeActivityRefreshDate() throws {
 
     try expect(
         AirSendRelativeTimeFormatter.nextLabelChangeDate(since: now.addingTimeInterval(-4), now: now)
-            == now.addingTimeInterval(2),
-        "just now should refresh when it leaves the just-now range"
+            == now.addingTimeInterval(56),
+        "just now should refresh at the one-minute boundary"
     )
     try expect(
         AirSendRelativeTimeFormatter.nextLabelChangeDate(since: now.addingTimeInterval(-42), now: now)
-            == now.addingTimeInterval(1),
-        "second labels should refresh at the next second boundary"
+            == now.addingTimeInterval(18),
+        "recent labels should not refresh every second"
     )
     try expect(
         AirSendRelativeTimeFormatter.nextLabelChangeDate(since: now.addingTimeInterval(-125), now: now)
@@ -101,10 +101,42 @@ func testConnectionHealthUsesOnlyLiveState() throws {
     )
 }
 
+func testTransferFileClassificationMatchesAndroidTaxonomy() throws {
+    let cases: [(name: String, mimeType: String, fileCount: Int, expected: AirSendTransferFileKind)] = [
+        ("files", "", 2, .multiple),
+        ("release.APK", "application/octet-stream", 1, .androidPackage),
+        ("photo", " public.heic ", 1, .image),
+        ("movie.MKV", "", 1, .video),
+        ("song", "audio/flac", 1, .audio),
+        ("report.pdf", "", 1, .pdf),
+        ("source.tar", "application/octet-stream", 1, .archive),
+        ("deck.key", "", 1, .presentation),
+        ("table.csv", "text/plain", 1, .spreadsheet),
+        ("letter.pages", "", 1, .wordProcessing),
+        ("index.xhtml", "", 1, .html),
+        ("README.md", "text/plain", 1, .markdown),
+        ("payload.bin", "application/problem+json", 1, .structuredData),
+        ("main.swift", "text/plain", 1, .code),
+        ("notes.log", "application/octet-stream", 1, .text),
+        ("book.epub", "application/octet-stream", 1, .document),
+        ("payload.bin", "application/octet-stream", 1, .generic),
+    ]
+
+    for item in cases {
+        let actual = AirSendTransferFileClassifier.classify(
+            name: item.name,
+            mimeType: item.mimeType,
+            fileCount: item.fileCount
+        )
+        try expect(actual == item.expected, "\(item.name) should classify as \(item.expected), got \(actual)")
+    }
+}
+
 let tests: [(String, () throws -> Void)] = [
     ("relativeActivityTimeLabels", testRelativeActivityTimeLabels),
     ("nextRelativeActivityRefreshDate", testNextRelativeActivityRefreshDate),
     ("connectionHealthUsesOnlyLiveState", testConnectionHealthUsesOnlyLiveState),
+    ("transferFileClassificationMatchesAndroidTaxonomy", testTransferFileClassificationMatchesAndroidTaxonomy),
 ]
 
 do {

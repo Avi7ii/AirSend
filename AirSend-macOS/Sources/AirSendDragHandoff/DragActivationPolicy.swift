@@ -187,6 +187,7 @@ public struct DragActivationPolicy {
         changeCount: Int,
         location: CGPoint,
         hasRecognizedPayload: Bool,
+        hasResolvedFileURLs: Bool,
         hasFreshPayloadEvidence: Bool,
         isWithinActivationBand: Bool
     ) -> DragActivationDecision {
@@ -202,7 +203,9 @@ public struct DragActivationPolicy {
             && hasFreshPayloadEvidence
         return DragActivationDecision(
             shouldActivate: shouldActivate,
-            allowsFallbackRecovery: shouldActivate && hasRecognizedPayload && (isFirstRecognizedPayload || hasMovedEnough)
+            allowsFallbackRecovery: shouldActivate
+                && hasResolvedFileURLs
+                && (isFirstRecognizedPayload || hasMovedEnough)
         )
     }
 }

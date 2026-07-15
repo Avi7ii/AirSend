@@ -10,6 +10,7 @@ import ServiceManagement
 import IOKit.pwr_mgt
 import Network
 import UniformTypeIdentifiers
+import Darwin
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMenuDelegate {
@@ -1281,7 +1282,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private let dragCompactKeepaliveInset: CGFloat = 14
     private let dragTransitionCorridorRadius: CGFloat = 42
     private let dragPreviewExitDelay: TimeInterval = 0.22
-    private let dragReleasePollInterval: TimeInterval = 0.05
+    private let dragReleasePollInterval: TimeInterval = 0.2
     private let dragReleaseGraceDelay: TimeInterval = 0.18
     private let dragReleaseFallbackInset: CGFloat = 14
 
@@ -1494,6 +1495,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         )
     }
 
+    @discardableResult
+    private func resolvePendingDragPayloadIfAvailable(from pasteboard: NSPasteboard) -> Bool {
+        if !pendingDragPayloadURLs.isEmpty {
+            return true
+        }
+        guard activeDragSessionID != nil,
+              LocalFileDrag.metadataEvidence(from: pasteboard).canBeLocalFileDrag else {
+            return false
+        }
+
+        let urls = LocalFileDrag.stageValidLocalFileURLs(from: pasteboard)
+        guard !urls.isEmpty else { return false }
+        pendingDragPayloadURLs = urls
+        currentDragAllowsFallbackRecovery = true
+        FileLogger.log("📎 [DragHandoff] Delayed file URLs resolved for active candidate session: \(urls.count) file(s)")
+        return true
+    }
+
     private func checkForNearbyFileDragTrigger() {
         let dragPasteboard = NSPasteboard(name: .drag)
         guard (NSEvent.pressedMouseButtons & 0x1) != 0 else {
@@ -1514,14 +1533,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                   !dropZoneWindow.isShowingSuccess,
                   !dropZoneWindow.isShowingError else { return }
 
-            if pendingDragPayloadURLs.isEmpty,
-               hasFreshDragPasteboardPayload,
-               LocalFileDrag.metadataEvidence(from: dragPasteboard).canBeLocalFileDrag {
-                let urls = LocalFileDrag.stageValidLocalFileURLs(from: dragPasteboard)
-                if !urls.isEmpty {
-                    pendingDragPayloadURLs = urls
-                    currentDragAllowsFallbackRecovery = true
-                }
+            if hasFreshDragPasteboardPayload {
+                resolvePendingDragPayloadIfAvailable(from: dragPasteboard)
             }
 
             if shouldKeepDragPreviewVisible(at: mouseLocation) {
@@ -1544,7 +1557,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
         let inspection = LocalFileDrag.inspectLocalFileDrag(from: dragPasteboard)
         let urls = inspection.looksLikeStrictLocalFileDrag ? inspection.urls : []
-        guard !urls.isEmpty else { return }
 
         if currentGestureMovedWindow() {
             dragGestureRejected = true
@@ -1556,6 +1568,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             changeCount: dragPasteboard.changeCount,
             location: CGPoint(x: mouseLocation.x, y: mouseLocation.y),
             hasRecognizedPayload: true,
+            hasResolvedFileURLs: !urls.isEmpty,
             hasFreshPayloadEvidence: hasFreshDragPasteboardPayload,
             isWithinActivationBand: isWithinActivationBand
         )
@@ -1563,8 +1576,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         guard activationDecision.shouldActivate else { return }
 
         let idlePasteboardDescription = lastIdleDragPasteboardChangeCount.map(String.init) ?? "none"
-        FileLogger.log("🧲 [DragProximity] Status-bar activation band triggered with \(urls.count) verified fresh file(s). pasteboard=\(dragPasteboard.changeCount) idle=\(idlePasteboardDescription) triggerFrame=\(triggerFrame.debugDescription)")
-        beginDropZonePreview(with: urls, allowFallbackRecovery: activationDecision.allowsFallbackRecovery)
+        let payloadState = urls.isEmpty ? "candidate metadata; URLs pending" : "\(urls.count) verified file(s)"
+        FileLogger.log("🧲 [DragProximity] Status-bar activation band triggered with \(payloadState). pasteboard=\(dragPasteboard.changeCount) idle=\(idlePasteboardDescription) triggerFrame=\(triggerFrame.debugDescription)")
+        beginDropZonePreview(
+            with: urls,
+            isFileDragCandidate: true,
+            allowFallbackRecovery: activationDecision.allowsFallbackRecovery
+        )
     }
 
     private func shouldKeepDragPreviewVisible(at point: NSPoint) -> Bool {
@@ -1629,7 +1647,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         guard dragReleaseMonitorTimer == nil else { return }
         let timer = Timer(timeInterval: dragReleasePollInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.handleDragReleaseIfNeeded(trigger: "poll")
+                guard let self else { return }
+                if NSEvent.pressedMouseButtons != 0 {
+                    self.resolvePendingDragPayloadIfAvailable(from: NSPasteboard(name: .drag))
+                }
+                self.handleDragReleaseIfNeeded(trigger: "watchdog")
             }
         }
         timer.tolerance = dragReleasePollInterval * 0.5
@@ -1758,13 +1780,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
     }
 
-    private func beginDropZonePreview(with urls: [URL], verifiedByAppKit: Bool = false, allowFallbackRecovery: Bool = false) {
-        guard !urls.isEmpty else { return }
+    private func beginDropZonePreview(
+        with urls: [URL],
+        isFileDragCandidate: Bool = false,
+        verifiedByAppKit: Bool = false,
+        allowFallbackRecovery: Bool = false
+    ) {
+        guard !urls.isEmpty || isFileDragCandidate else { return }
         if let activeDragSessionID,
            resolvedDragSessionID != activeDragSessionID,
            (dropZoneWindow.isPreviewActive || dropZoneWindow.isAcceptingDragSession || !pendingDragPayloadURLs.isEmpty) {
-            pendingDragPayloadURLs = urls
-            if verifiedByAppKit || allowFallbackRecovery {
+            if !urls.isEmpty {
+                pendingDragPayloadURLs = urls
+            }
+            if !pendingDragPayloadURLs.isEmpty && (verifiedByAppKit || allowFallbackRecovery) {
                 currentDragAllowsFallbackRecovery = true
             }
             FileLogger.log("🔁 [DragHandoff] Preview already active; refreshing payload without resetting window.")
@@ -1775,19 +1804,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         dropZoneWindow.setPreferredAnchorPoint(activationPoint)
         dropZoneWindow.prepareForDragPreview()
         beginDragSession(with: urls)
-        currentDragAllowsFallbackRecovery = verifiedByAppKit || allowFallbackRecovery
+        currentDragAllowsFallbackRecovery = !urls.isEmpty && (verifiedByAppKit || allowFallbackRecovery)
         startDragReleaseMonitoring()
         dropZoneWindow.prewarmForDrag(under: statusItem)
         dropZoneWindow.setPreviewDragActive(true)
         dropZoneWindow.setPreviewHoverActive(false)
         updateWindowStatus()
-        FileLogger.log("🚀 [DragHandoff] Showing drop zone preview for \(urls.count) file(s)")
+        let previewState = urls.isEmpty ? "delayed-URL file candidate" : "\(urls.count) file(s)"
+        FileLogger.log("🚀 [DragHandoff] Showing drop zone preview for \(previewState)")
         dropZoneWindow.show(under: statusItem)
     }
 
     private func handleDropZoneDragEnter() {
         cancelScheduledDragPreviewExit()
-        currentDragAllowsFallbackRecovery = true
+        resolvePendingDragPayloadIfAvailable(from: NSPasteboard(name: .drag))
+        currentDragAllowsFallbackRecovery = !pendingDragPayloadURLs.isEmpty
         dropZoneWindow.setPreviewDragActive(true)
         dropZoneWindow.setPreviewHoverActive(true)
         FileLogger.log("🎯 [DragHandoff] Drag entered drop zone window")
@@ -2194,7 +2225,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     // MARK: - DropTargetViewDelegate
 
     func didEnterDrag(urls: [URL]) {
-        beginDropZonePreview(with: urls, verifiedByAppKit: true)
+        beginDropZonePreview(with: urls, isFileDragCandidate: true, verifiedByAppKit: true)
     }
 
     func didExitDrag() {
@@ -4345,6 +4376,19 @@ private struct SelfTestCaseResult {
     let errorDescription: String?
 }
 
+private struct SelfTestHTTPResponse: Sendable {
+    let statusCode: Int
+    let body: Data
+}
+
+private struct SelfTestPreparedUpload: Sendable {
+    let sessionID: String
+    let fileID: String
+    let token: String
+    let fileName: String
+    let size: Int64
+}
+
 private final class SelfTestExitState: @unchecked Sendable {
     var code: Int32 = 0
 }
@@ -4617,11 +4661,461 @@ private enum SelfTestRunner {
                   receiverRecords.allSatisfy({ $0.status == .completed }) else {
                 throw NSError(domain: "SelfTestRunner", code: 14, userInfo: [NSLocalizedDescriptionKey: "Loopback transfer records did not reach independent terminal states"])
             }
+
+            try await runReceiverBoundaryTests(
+                port: port,
+                destination: destination,
+                coordinator: receiverCoordinator
+            )
             await receiver.stop()
         } catch {
             await receiver.stop()
             throw error
         }
+    }
+
+    static func runReceiverBoundaryTests(
+        port: UInt16,
+        destination: URL,
+        coordinator: TransferCoordinator
+    ) async throws {
+        try await testUploadTokenReplay(port: port, destination: destination, coordinator: coordinator)
+        try await testUploadSizeMismatch(port: port, destination: destination, coordinator: coordinator)
+        try await testTruncatedUpload(port: port, destination: destination, coordinator: coordinator)
+        try await testReceiverCancellation(port: port, destination: destination, coordinator: coordinator)
+        print("RECEIVER_BOUNDARY_TESTS_OK")
+    }
+
+    static func testUploadTokenReplay(
+        port: UInt16,
+        destination: URL,
+        coordinator: TransferCoordinator
+    ) async throws {
+        let payload = Data("single-use upload token".utf8)
+        let prepared = try await prepareLoopbackUpload(
+            port: port,
+            fileName: "token-replay.txt",
+            size: Int64(payload.count)
+        )
+        let firstUpload = try await uploadLoopbackPayload(port: port, prepared: prepared, payload: payload)
+        guard firstUpload.statusCode == 200 else {
+            throw selfTestError(20, "Initial token upload returned HTTP \(firstUpload.statusCode)")
+        }
+
+        let replay = try await uploadLoopbackPayload(port: port, prepared: prepared, payload: payload)
+        guard replay.statusCode == 403 else {
+            throw selfTestError(21, "Replayed upload token returned HTTP \(replay.statusCode) instead of 403")
+        }
+
+        _ = try await waitForReceiverRecord(
+            fileName: prepared.fileName,
+            status: .completed,
+            coordinator: coordinator
+        )
+        let matches = try FileManager.default.contentsOfDirectory(
+            at: destination,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ).filter { $0.lastPathComponent == prepared.fileName }
+        guard matches.count == 1,
+              try Data(contentsOf: matches[0]) == payload else {
+            throw selfTestError(22, "Token replay created duplicate or corrupted destination data")
+        }
+        try assertReceiverStagingRemoved(sessionID: prepared.sessionID)
+    }
+
+    static func testUploadSizeMismatch(
+        port: UInt16,
+        destination: URL,
+        coordinator: TransferCoordinator
+    ) async throws {
+        let prepared = try await prepareLoopbackUpload(
+            port: port,
+            fileName: "size-mismatch.txt",
+            size: 32
+        )
+        let response = try await uploadLoopbackPayload(
+            port: port,
+            prepared: prepared,
+            payload: Data("short".utf8)
+        )
+        guard response.statusCode == 400 else {
+            throw selfTestError(23, "Size mismatch returned HTTP \(response.statusCode) instead of 400")
+        }
+
+        let record = try await waitForReceiverRecord(
+            fileName: prepared.fileName,
+            status: .failed,
+            coordinator: coordinator
+        )
+        guard record.failure?.code == "size_mismatch" else {
+            throw selfTestError(24, "Size mismatch did not retain its structured failure code")
+        }
+        try assertDestinationMissing(fileName: prepared.fileName, destination: destination)
+        try assertReceiverStagingRemoved(sessionID: prepared.sessionID)
+    }
+
+    static func testTruncatedUpload(
+        port: UInt16,
+        destination: URL,
+        coordinator: TransferCoordinator
+    ) async throws {
+        let prepared = try await prepareLoopbackUpload(
+            port: port,
+            fileName: "truncated-upload.txt",
+            size: 64
+        )
+        let response = try sendTruncatedLoopbackUpload(
+            port: port,
+            prepared: prepared,
+            bodyPrefix: Data("partial".utf8)
+        )
+        guard response.statusCode == 500 else {
+            throw selfTestError(25, "Truncated upload returned HTTP \(response.statusCode) instead of 500")
+        }
+
+        let record = try await waitForReceiverRecord(
+            fileName: prepared.fileName,
+            status: .failed,
+            coordinator: coordinator
+        )
+        guard record.failure?.code == "receive_upload_failed" else {
+            throw selfTestError(26, "Truncated upload did not retain its structured failure code")
+        }
+        try assertDestinationMissing(fileName: prepared.fileName, destination: destination)
+        try assertReceiverStagingRemoved(sessionID: prepared.sessionID)
+    }
+
+    static func testReceiverCancellation(
+        port: UInt16,
+        destination: URL,
+        coordinator: TransferCoordinator
+    ) async throws {
+        async let cancelledPreparation = prepareLoopbackUpload(
+            port: port,
+            fileName: "cancelled-upload.txt",
+            size: 16
+        )
+        let survivorPayload = Data("independent session".utf8)
+        async let survivorPreparation = prepareLoopbackUpload(
+            port: port,
+            fileName: "cancel-survivor.txt",
+            size: Int64(survivorPayload.count)
+        )
+        let (prepared, survivor) = try await (cancelledPreparation, survivorPreparation)
+
+        let cancellation = try await sendLoopbackRequest(
+            port: port,
+            method: "POST",
+            path: "/api/localsend/v2/cancel",
+            queryItems: [URLQueryItem(name: "sessionId", value: prepared.sessionID)]
+        )
+        guard cancellation.statusCode == 200 else {
+            throw selfTestError(27, "Receiver cancellation returned HTTP \(cancellation.statusCode)")
+        }
+
+        let secondCancellation = try await sendLoopbackRequest(
+            port: port,
+            method: "POST",
+            path: "/api/localsend/v2/cancel",
+            queryItems: [URLQueryItem(name: "sessionId", value: prepared.sessionID)]
+        )
+        guard secondCancellation.statusCode == 404 else {
+            throw selfTestError(28, "Cancelled receiver session remained reusable")
+        }
+
+        let payload = Data(repeating: 0x61, count: Int(prepared.size))
+        let uploadAfterCancel = try await uploadLoopbackPayload(
+            port: port,
+            prepared: prepared,
+            payload: payload
+        )
+        guard uploadAfterCancel.statusCode == 403 else {
+            throw selfTestError(29, "Cancelled session accepted an upload token")
+        }
+
+        let survivorUpload = try await uploadLoopbackPayload(
+            port: port,
+            prepared: survivor,
+            payload: survivorPayload
+        )
+        guard survivorUpload.statusCode == 200 else {
+            throw selfTestError(39, "Cancelling one receiver session disrupted an independent session")
+        }
+
+        _ = try await waitForReceiverRecord(
+            fileName: prepared.fileName,
+            status: .cancelled,
+            coordinator: coordinator
+        )
+        _ = try await waitForReceiverRecord(
+            fileName: survivor.fileName,
+            status: .completed,
+            coordinator: coordinator
+        )
+        try assertDestinationMissing(fileName: prepared.fileName, destination: destination)
+        try assertReceiverStagingRemoved(sessionID: prepared.sessionID)
+        let survivorURL = destination.appendingPathComponent(survivor.fileName)
+        guard try Data(contentsOf: survivorURL) == survivorPayload else {
+            throw selfTestError(40, "Independent receiver session completed with corrupted data")
+        }
+        try assertReceiverStagingRemoved(sessionID: survivor.sessionID)
+    }
+
+    static func prepareLoopbackUpload(
+        port: UInt16,
+        fileName: String,
+        size: Int64
+    ) async throws -> SelfTestPreparedUpload {
+        let fileID = UUID().uuidString
+        let request = PrepareUploadRequestDto(
+            info: RegisterDto(
+                alias: "Boundary Test Sender",
+                version: "selftest",
+                deviceModel: "macOS",
+                deviceType: DeviceType.desktop.rawValue,
+                fingerprint: "boundary-test-sender",
+                macAddress: nil,
+                port: nil,
+                protocolType: ProtocolType.http.rawValue,
+                download: true
+            ),
+            files: [
+                fileID: FileDto(
+                    id: fileID,
+                    fileName: fileName,
+                    size: size,
+                    fileType: "application/octet-stream",
+                    sha256: nil,
+                    preview: nil
+                ),
+            ]
+        )
+        let body = try JSONEncoder().encode(request)
+        let response = try await sendLoopbackRequest(
+            port: port,
+            method: "POST",
+            path: "/api/localsend/v2/prepare-upload",
+            body: body,
+            contentType: "application/json"
+        )
+        guard response.statusCode == 200 else {
+            throw selfTestError(30, "Prepare upload returned HTTP \(response.statusCode)")
+        }
+        let decoded = try JSONDecoder().decode(PrepareUploadResponseDto.self, from: response.body)
+        guard let token = decoded.files[fileID] else {
+            throw selfTestError(31, "Prepare upload omitted the file token")
+        }
+        return SelfTestPreparedUpload(
+            sessionID: decoded.sessionId,
+            fileID: fileID,
+            token: token,
+            fileName: fileName,
+            size: size
+        )
+    }
+
+    static func uploadLoopbackPayload(
+        port: UInt16,
+        prepared: SelfTestPreparedUpload,
+        payload: Data
+    ) async throws -> SelfTestHTTPResponse {
+        try await sendLoopbackRequest(
+            port: port,
+            method: "POST",
+            path: "/api/localsend/v2/upload",
+            queryItems: uploadQueryItems(for: prepared),
+            body: payload,
+            contentType: "application/octet-stream"
+        )
+    }
+
+    static func sendLoopbackRequest(
+        port: UInt16,
+        method: String,
+        path: String,
+        queryItems: [URLQueryItem] = [],
+        body: Data = Data(),
+        contentType: String? = nil
+    ) async throws -> SelfTestHTTPResponse {
+        var components = URLComponents()
+        components.scheme = "http"
+        components.host = "127.0.0.1"
+        components.port = Int(port)
+        components.path = path
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
+        guard let url = components.url else {
+            throw selfTestError(32, "Could not construct loopback URL")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.timeoutInterval = 5
+        request.httpBody = body
+        if let contentType {
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        }
+        let (responseBody, rawResponse) = try await URLSession.shared.data(for: request)
+        guard let response = rawResponse as? HTTPURLResponse else {
+            throw selfTestError(33, "Loopback response was not HTTP")
+        }
+        return SelfTestHTTPResponse(statusCode: response.statusCode, body: responseBody)
+    }
+
+    static func sendTruncatedLoopbackUpload(
+        port: UInt16,
+        prepared: SelfTestPreparedUpload,
+        bodyPrefix: Data
+    ) throws -> SelfTestHTTPResponse {
+        let socketFD = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard socketFD >= 0 else { throw posixSelfTestError("socket") }
+        defer { Darwin.close(socketFD) }
+
+        var yes: Int32 = 1
+        guard setsockopt(socketFD, SOL_SOCKET, SO_NOSIGPIPE, &yes, socklen_t(MemoryLayout<Int32>.size)) == 0 else {
+            throw posixSelfTestError("setsockopt(SO_NOSIGPIPE)")
+        }
+        var timeout = timeval(tv_sec: 5, tv_usec: 0)
+        guard setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.stride)) == 0,
+              setsockopt(socketFD, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.stride)) == 0 else {
+            throw posixSelfTestError("setsockopt(timeout)")
+        }
+
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.stride)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = port.bigEndian
+        guard inet_pton(AF_INET, "127.0.0.1", &address.sin_addr) == 1 else {
+            throw selfTestError(34, "Could not encode loopback address")
+        }
+        let connectResult = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.stride))
+            }
+        }
+        guard connectResult == 0 else { throw posixSelfTestError("connect") }
+
+        let target = uploadRequestTarget(for: prepared)
+        var requestData = Data(
+            "POST \(target) HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\nContent-Type: application/octet-stream\r\nContent-Length: \(prepared.size)\r\nConnection: close\r\n\r\n".utf8
+        )
+        requestData.append(bodyPrefix)
+        try sendAll(requestData, to: socketFD)
+        guard Darwin.shutdown(socketFD, SHUT_WR) == 0 else {
+            throw posixSelfTestError("shutdown")
+        }
+
+        var responseData = Data()
+        var buffer = [UInt8](repeating: 0, count: 4_096)
+        while true {
+            let received = buffer.withUnsafeMutableBytes { rawBuffer in
+                Darwin.recv(socketFD, rawBuffer.baseAddress, rawBuffer.count, 0)
+            }
+            if received > 0 {
+                responseData.append(contentsOf: buffer.prefix(received))
+                continue
+            }
+            if received == 0 { break }
+            if errno == EINTR { continue }
+            throw posixSelfTestError("recv")
+        }
+
+        guard let headerEnd = responseData.range(of: Data("\r\n\r\n".utf8)),
+              let statusLine = String(
+                data: responseData.subdata(in: responseData.startIndex..<headerEnd.lowerBound),
+                encoding: .utf8
+              )?.components(separatedBy: "\r\n").first,
+              let statusCode = Int(statusLine.split(separator: " ").dropFirst().first ?? "") else {
+            throw selfTestError(35, "Could not parse truncated upload response")
+        }
+        return SelfTestHTTPResponse(
+            statusCode: statusCode,
+            body: responseData.subdata(in: headerEnd.upperBound..<responseData.endIndex)
+        )
+    }
+
+    static func sendAll(_ data: Data, to socketFD: Int32) throws {
+        var offset = 0
+        while offset < data.count {
+            let sent = data.withUnsafeBytes { rawBuffer -> Int in
+                guard let baseAddress = rawBuffer.baseAddress else { return -1 }
+                return Darwin.send(socketFD, baseAddress.advanced(by: offset), rawBuffer.count - offset, 0)
+            }
+            if sent > 0 {
+                offset += sent
+                continue
+            }
+            if sent < 0, errno == EINTR { continue }
+            throw posixSelfTestError("send")
+        }
+    }
+
+    static func uploadQueryItems(for prepared: SelfTestPreparedUpload) -> [URLQueryItem] {
+        [
+            URLQueryItem(name: "sessionId", value: prepared.sessionID),
+            URLQueryItem(name: "fileId", value: prepared.fileID),
+            URLQueryItem(name: "token", value: prepared.token),
+        ]
+    }
+
+    static func uploadRequestTarget(for prepared: SelfTestPreparedUpload) -> String {
+        var components = URLComponents()
+        components.path = "/api/localsend/v2/upload"
+        components.queryItems = uploadQueryItems(for: prepared)
+        let query = components.percentEncodedQuery.map { "?\($0)" } ?? ""
+        return components.percentEncodedPath + query
+    }
+
+    static func waitForReceiverRecord(
+        fileName: String,
+        status: TransferStatus,
+        coordinator: TransferCoordinator,
+        timeout: TimeInterval = 2
+    ) async throws -> TransferRecord {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let record = await coordinator.list().last(where: {
+                $0.files.contains(where: { $0.name == fileName }) && $0.status == status
+            }) {
+                return record
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        } while Date() < deadline
+        throw selfTestError(36, "Timed out waiting for \(fileName) to reach \(status.rawValue)")
+    }
+
+    static func assertDestinationMissing(fileName: String, destination: URL) throws {
+        let path = destination.appendingPathComponent(fileName).path
+        guard !FileManager.default.fileExists(atPath: path) else {
+            throw selfTestError(37, "Failed receiver session published \(fileName)")
+        }
+    }
+
+    static func assertReceiverStagingRemoved(sessionID: String) throws {
+        let stagingPath = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("AirSend-macOS", isDirectory: true)
+            .appendingPathComponent(".incoming-staging", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+            .path
+        guard !FileManager.default.fileExists(atPath: stagingPath) else {
+            throw selfTestError(38, "Receiver staging directory survived terminal session \(sessionID)")
+        }
+    }
+
+    static func selfTestError(_ code: Int, _ message: String) -> NSError {
+        NSError(
+            domain: "SelfTestRunner",
+            code: code,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
+    }
+
+    static func posixSelfTestError(_ operation: String, code: Int32 = errno) -> NSError {
+        NSError(
+            domain: NSPOSIXErrorDomain,
+            code: Int(code),
+            userInfo: [NSLocalizedDescriptionKey: "\(operation) failed: \(String(cString: strerror(code)))"]
+        )
     }
 
     static func runCase(_ label: String, operation: @escaping () async throws -> Void) async -> SelfTestCaseResult {

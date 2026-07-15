@@ -19,6 +19,7 @@ func testFreshRecognizedDragInsideActivationBandActivatesImmediately() throws {
         changeCount: 42,
         location: CGPoint(x: 420, y: 860),
         hasRecognizedPayload: true,
+        hasResolvedFileURLs: true,
         hasFreshPayloadEvidence: true,
         isWithinActivationBand: true
     )
@@ -34,6 +35,7 @@ func testRecognizedDragOutsideActivationBandDoesNotActivate() throws {
         changeCount: 42,
         location: CGPoint(x: 420, y: 500),
         hasRecognizedPayload: true,
+        hasResolvedFileURLs: true,
         hasFreshPayloadEvidence: true,
         isWithinActivationBand: false
     )
@@ -48,6 +50,7 @@ func testPlainPointerDragInsideActivationBandDoesNotShowCandidateDropZone() thro
         changeCount: 1,
         location: CGPoint(x: 420, y: 700),
         hasRecognizedPayload: false,
+        hasResolvedFileURLs: false,
         hasFreshPayloadEvidence: false,
         isWithinActivationBand: false
     )
@@ -57,6 +60,7 @@ func testPlainPointerDragInsideActivationBandDoesNotShowCandidateDropZone() thro
         changeCount: 1,
         location: CGPoint(x: 420, y: 860),
         hasRecognizedPayload: false,
+        hasResolvedFileURLs: false,
         hasFreshPayloadEvidence: false,
         isWithinActivationBand: true
     )
@@ -72,6 +76,7 @@ func testUnrecognizedDragPasteboardInsideActivationBandDoesNotShowDropZone() thr
         changeCount: 1,
         location: CGPoint(x: 420, y: 700),
         hasRecognizedPayload: false,
+        hasResolvedFileURLs: false,
         hasFreshPayloadEvidence: true,
         isWithinActivationBand: false
     )
@@ -81,12 +86,29 @@ func testUnrecognizedDragPasteboardInsideActivationBandDoesNotShowDropZone() thr
         changeCount: 1,
         location: CGPoint(x: 420, y: 860),
         hasRecognizedPayload: false,
+        hasResolvedFileURLs: false,
         hasFreshPayloadEvidence: true,
         isWithinActivationBand: true
     )
 
-    try expect(!second.shouldActivate, "pasteboard metadata without verified local-file URLs must not show the drop zone")
-    try expect(!second.allowsFallbackRecovery, "unverified payloads must not use fallback file sending")
+    try expect(!second.shouldActivate, "non-file pasteboard metadata must not show the drop zone")
+    try expect(!second.allowsFallbackRecovery, "non-file payloads must not use fallback file sending")
+}
+
+func testFreshFileMetadataActivatesCandidateBeforeURLsResolve() throws {
+    var policy = DragActivationPolicy(minimumTravel: 18)
+
+    let decision = policy.decision(
+        changeCount: 42,
+        location: CGPoint(x: 420, y: 860),
+        hasRecognizedPayload: true,
+        hasResolvedFileURLs: false,
+        hasFreshPayloadEvidence: true,
+        isWithinActivationBand: true
+    )
+
+    try expect(decision.shouldActivate, "fresh file metadata should show a candidate drop zone before delayed URLs resolve")
+    try expect(!decision.allowsFallbackRecovery, "candidate metadata must never enable fallback sending before URLs resolve")
 }
 
 func testDragPasteboardChangeMustDifferFromIdleBaseline() throws {
@@ -121,6 +143,7 @@ func testStaleRecognizedPayloadDoesNotActivateOnClickJitterOrTravel() throws {
         changeCount: 42,
         location: CGPoint(x: 420, y: 860),
         hasRecognizedPayload: true,
+        hasResolvedFileURLs: true,
         hasFreshPayloadEvidence: false,
         isWithinActivationBand: true
     )
@@ -131,6 +154,7 @@ func testStaleRecognizedPayloadDoesNotActivateOnClickJitterOrTravel() throws {
         changeCount: 42,
         location: CGPoint(x: 470, y: 900),
         hasRecognizedPayload: true,
+        hasResolvedFileURLs: true,
         hasFreshPayloadEvidence: false,
         isWithinActivationBand: true
     )
@@ -277,6 +301,7 @@ let tests: [(String, () throws -> Void)] = [
     ("recognizedDragOutsideActivationBandDoesNotActivate", testRecognizedDragOutsideActivationBandDoesNotActivate),
     ("plainPointerDragInsideActivationBandDoesNotShowCandidateDropZone", testPlainPointerDragInsideActivationBandDoesNotShowCandidateDropZone),
     ("unrecognizedDragPasteboardInsideActivationBandDoesNotShowDropZone", testUnrecognizedDragPasteboardInsideActivationBandDoesNotShowDropZone),
+    ("freshFileMetadataActivatesCandidateBeforeURLsResolve", testFreshFileMetadataActivatesCandidateBeforeURLsResolve),
     ("dragPasteboardChangeMustDifferFromIdleBaseline", testDragPasteboardChangeMustDifferFromIdleBaseline),
     ("staleRecognizedPayloadDoesNotActivateOnClickJitterOrTravel", testStaleRecognizedPayloadDoesNotActivateOnClickJitterOrTravel),
     ("movedWindowUnderPointerIsRecognizedAsWindowDrag", testMovedWindowUnderPointerIsRecognizedAsWindowDrag),

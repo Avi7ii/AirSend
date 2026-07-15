@@ -55,7 +55,6 @@ enum LocalFileDrag {
     static func metadataEvidence(from pasteboard: NSPasteboard) -> MetadataEvidence {
         let typeNames = pasteboardTypeNames(from: pasteboard)
         let hasLegacyFinderFileList = typeNames.contains(legacyFilenamesType.rawValue)
-            || (pasteboard.propertyList(forType: legacyFilenamesType) as? [String])?.isEmpty == false
         let hasFileRelatedType = typeNames.contains(NSPasteboard.PasteboardType.fileURL.rawValue)
             || hasLegacyFinderFileList
             || typeNames.contains { typeName in

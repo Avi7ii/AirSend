@@ -37,13 +37,15 @@ final class DropTargetView: NSView {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        let urls = LocalFileDrag.stageValidLocalFileURLs(from: sender.draggingPasteboard)
-        guard !urls.isEmpty else {
-            FileLogger.log("⛔️ [Drag] DropTargetView ignored non-local-file drag. \(LocalFileDrag.debugSummary(from: sender.draggingPasteboard))")
+        let metadata = LocalFileDrag.metadataEvidence(from: sender.draggingPasteboard)
+        guard metadata.canBeLocalFileDrag else {
+            FileLogger.log("⛔️ [Drag] DropTargetView ignored non-file drag metadata. \(LocalFileDrag.debugSummary(from: sender.draggingPasteboard))")
             return []
         }
 
-        FileLogger.log("🔘 [Drag] draggingEntered DropTargetView (MenuBar button) with \(urls.count) file(s). \(LocalFileDrag.debugSummary(from: sender.draggingPasteboard))")
+        let urls = LocalFileDrag.stageValidLocalFileURLs(from: sender.draggingPasteboard)
+        let payloadState = urls.isEmpty ? "candidate with delayed URLs" : "\(urls.count) resolved file(s)"
+        FileLogger.log("🔘 [Drag] draggingEntered DropTargetView (MenuBar button), \(payloadState). \(LocalFileDrag.debugSummary(from: sender.draggingPasteboard))")
         delegate?.didEnterDrag(urls: urls)
         return .copy
     }
@@ -56,7 +58,10 @@ final class DropTargetView: NSView {
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
         let urls = LocalFileDrag.stagedOrCurrentLocalFileURLs(from: sender.draggingPasteboard)
-        return urls.isEmpty ? [] : .copy
+        if !urls.isEmpty {
+            return .copy
+        }
+        return LocalFileDrag.metadataEvidence(from: sender.draggingPasteboard).canBeLocalFileDrag ? .copy : []
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {

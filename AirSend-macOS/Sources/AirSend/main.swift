@@ -1247,21 +1247,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private var lastDragEvaluationUptime: TimeInterval = 0
     private var dragReleaseMonitorTimer: Timer?
     private var dragReleaseRecoveryWorkItem: DispatchWorkItem?
+    private var dragPreviewExitWorkItem: DispatchWorkItem?
     private var pendingDragPayloadURLs: [URL] = []
     private var activeDragSessionID: UUID?
     private var resolvedDragSessionID: UUID?
-    private var lastIdleDragPasteboardChangeCount: Int?
     private var dragGestureRejected = false
     private var dragActivationPolicy = DragActivationPolicy()
     private var currentDragAllowsFallbackRecovery = false
+    private var dragPreviewActivationPoint: NSPoint?
+    private var hasEnteredCompactDropTarget = false
+    private var dragStartQuartzLocation: CGPoint?
+    private var initialDragWindowFrames: [CGWindowID: CGRect] = [:]
+    private var hasCapturedInitialDragWindowFrames = false
     private let dragEvaluationInterval: TimeInterval = 0.05
     private let dragActivationBandHeight: CGFloat = 132
     private let dragActivationLeftReach: CGFloat = 250
     private let dragActivationFallbackWidth: CGFloat = 320
-    private let dragActivationPreviewKeepaliveInset: CGFloat = 18
+    private let dragCompactKeepaliveInset: CGFloat = 14
+    private let dragTransitionCorridorRadius: CGFloat = 42
+    private let dragPreviewExitDelay: TimeInterval = 0.22
     private let dragReleasePollInterval: TimeInterval = 0.05
     private let dragReleaseGraceDelay: TimeInterval = 0.18
-    private let dragReleaseFallbackInset: CGFloat = 36
+    private let dragReleaseFallbackInset: CGFloat = 14
 
     private func filterValidLocalDropURLs(_ urls: [URL]) -> [URL] {
         LocalFileDrag.filterExistingLocalFileURLs(urls)
@@ -1269,7 +1276,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
     private func startDragProximityMonitoring() {
         guard globalDragEventMonitor == nil, localDragEventMonitor == nil else { return }
-        lastIdleDragPasteboardChangeCount = NSPasteboard(name: .drag).changeCount
 
         globalDragEventMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
@@ -1292,6 +1298,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private func stopDragProximityMonitoring() {
         dragEvaluationWorkItem?.cancel()
         dragEvaluationWorkItem = nil
+        dragPreviewExitWorkItem?.cancel()
+        dragPreviewExitWorkItem = nil
         if let globalDragEventMonitor {
             NSEvent.removeMonitor(globalDragEventMonitor)
             self.globalDragEventMonitor = nil
@@ -1306,23 +1314,91 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         switch event.type {
         case .leftMouseDown:
             guard activeDragSessionID == nil else { return }
-            dragGestureRejected = isLocal && event.window === settingsWindowController?.window
-            dragActivationPolicy.reset()
+            resetObservedDragGesture(startingAt: NSEvent.mouseLocation)
+            dragGestureRejected = isLocal && isAirSendOwnedWindow(event.window)
         case .leftMouseDragged:
-            if isLocal && event.window === settingsWindowController?.window {
+            beginObservedDragGestureIfNeeded(at: NSEvent.mouseLocation)
+            if activeDragSessionID == nil, isLocal, isAirSendOwnedWindow(event.window) {
                 dragGestureRejected = true
             }
             requestDragEvaluation()
         case .leftMouseUp:
-            lastIdleDragPasteboardChangeCount = NSPasteboard(name: .drag).changeCount
             dragEvaluationWorkItem?.cancel()
             dragEvaluationWorkItem = nil
-            dragGestureRejected = false
-            dragActivationPolicy.reset()
             handleDragReleaseIfNeeded(trigger: isLocal ? "local-mouse-up" : "global-mouse-up")
+            resetObservedDragGesture()
         default:
             break
         }
+    }
+
+    private func isAirSendOwnedWindow(_ window: NSWindow?) -> Bool {
+        guard let window else { return false }
+        return NSApp.windows.contains { $0 === window }
+    }
+
+    private func beginObservedDragGestureIfNeeded(at point: NSPoint) {
+        guard dragStartQuartzLocation == nil else { return }
+        dragStartQuartzLocation = currentQuartzPointerLocation(fallback: point)
+        dragActivationPolicy.reset()
+    }
+
+    private func resetObservedDragGesture(startingAt point: NSPoint? = nil) {
+        dragGestureRejected = false
+        dragActivationPolicy.reset()
+        dragStartQuartzLocation = point.map { currentQuartzPointerLocation(fallback: $0) }
+        initialDragWindowFrames = [:]
+        hasCapturedInitialDragWindowFrames = false
+    }
+
+    private func currentQuartzPointerLocation(fallback point: NSPoint) -> CGPoint {
+        if let location = CGEvent(source: nil)?.location {
+            return location
+        }
+        let primaryScreenTop = NSScreen.screens.first?.frame.maxY ?? 0
+        return CGPoint(x: point.x, y: primaryScreenTop - point.y)
+    }
+
+    private func captureInitialDragWindowFramesIfNeeded() {
+        guard !hasCapturedInitialDragWindowFrames else { return }
+        initialDragWindowFrames = visibleTopLevelWindowFrames()
+        hasCapturedInitialDragWindowFrames = true
+    }
+
+    private func visibleTopLevelWindowFrames() -> [CGWindowID: CGRect] {
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let windowInfo = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            return [:]
+        }
+
+        var frames: [CGWindowID: CGRect] = [:]
+        for entry in windowInfo {
+            guard (entry[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                  (entry[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 0 > 0,
+                  let windowNumber = entry[kCGWindowNumber as String] as? NSNumber,
+                  let boundsDictionary = entry[kCGWindowBounds as String] as? [String: Any],
+                  let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary),
+                  bounds.width >= 120,
+                  bounds.height >= 80 else {
+                continue
+            }
+            frames[CGWindowID(windowNumber.uint32Value)] = bounds
+        }
+        return frames
+    }
+
+    private func currentGestureMovedWindow() -> Bool {
+        guard hasCapturedInitialDragWindowFrames,
+              let dragStartQuartzLocation,
+              !initialDragWindowFrames.isEmpty else {
+            return false
+        }
+        return WindowDragEvidence.hasMovedWindowFromDragStart(
+            initialFrames: initialDragWindowFrames,
+            currentFrames: visibleTopLevelWindowFrames(),
+            dragStartPointerLocation: dragStartQuartzLocation,
+            minimumOriginTravel: 4
+        )
     }
 
     private func requestDragEvaluation() {
@@ -1404,31 +1480,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private func checkForNearbyFileDragTrigger() {
         let dragPasteboard = NSPasteboard(name: .drag)
         guard (NSEvent.pressedMouseButtons & 0x1) != 0 else {
-            lastIdleDragPasteboardChangeCount = dragPasteboard.changeCount
-            dragGestureRejected = false
-            dragActivationPolicy.reset()
+            resetObservedDragGesture()
             return
         }
 
         let mouseLocation = NSEvent.mouseLocation
-        guard let triggerFrame = statusBarActivationFrame() else { return }
-        let isWithinActivationBand = triggerFrame.contains(mouseLocation)
-        let isWithinDropZoneKeepalive = dropZoneWindow.dragReleaseFallbackFrame(inset: dragActivationPreviewKeepaliveInset).contains(mouseLocation)
-        let shouldKeepPreviewVisible = DragPreviewVisibilityPolicy.shouldKeepPreviewVisible(
-            isWithinDropZoneKeepalive: isWithinDropZoneKeepalive,
-            isAcceptingDragSession: dropZoneWindow.isAcceptingDragSession,
-            isHoveringDropTarget: dropZoneWindow.isHoveringDropTarget
-        )
+        beginObservedDragGestureIfNeeded(at: mouseLocation)
 
         if dropZoneWindow.isPreviewActive || activeDragSessionID != nil || !pendingDragPayloadURLs.isEmpty {
             guard !dropZoneWindow.isPerformingDrop,
                   !dropZoneWindow.isShowingSuccess,
                   !dropZoneWindow.isShowingError else { return }
 
-            let hasFreshPayload = lastIdleDragPasteboardChangeCount.map {
-                dragPasteboard.changeCount != $0
-            } ?? false
-            if hasFreshPayload,
+            if pendingDragPayloadURLs.isEmpty,
                LocalFileDrag.metadataEvidence(from: dragPasteboard).canBeLocalFileDrag {
                 let urls = LocalFileDrag.stageValidLocalFileURLs(from: dragPasteboard)
                 if !urls.isEmpty {
@@ -1437,42 +1501,102 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 }
             }
 
-            if !shouldKeepPreviewVisible {
-                FileLogger.log("🧭 [DragProximity] Drag left preview keepalive region; dismissing preview. activationBand=\(isWithinActivationBand) keepalive=\(isWithinDropZoneKeepalive) accepting=\(dropZoneWindow.isAcceptingDragSession)")
-                clearTransientDragState()
-                dropZoneWindow.hide()
+            if shouldKeepDragPreviewVisible(at: mouseLocation) {
+                cancelScheduledDragPreviewExit()
+            } else {
+                scheduleDragPreviewExit()
             }
             return
         }
 
         guard !dragGestureRejected else { return }
-        let hasFreshDragPasteboardPayload = lastIdleDragPasteboardChangeCount.map {
-            dragPasteboard.changeCount != $0
-        } ?? false
         let metadata = LocalFileDrag.metadataEvidence(from: dragPasteboard)
-        guard hasFreshDragPasteboardPayload, metadata.canBeLocalFileDrag else { return }
+        guard metadata.canBeLocalFileDrag else { return }
+        captureInitialDragWindowFramesIfNeeded()
 
-        let inspection = isWithinActivationBand
-            ? LocalFileDrag.inspectLocalFileDrag(from: dragPasteboard)
-            : nil
-        let urls = inspection?.looksLikeStrictLocalFileDrag == true ? inspection?.urls ?? [] : []
+        guard let triggerFrame = statusBarActivationFrame() else { return }
+        let isWithinActivationBand = triggerFrame.contains(mouseLocation)
+        guard isWithinActivationBand else { return }
+
+        let inspection = LocalFileDrag.inspectLocalFileDrag(from: dragPasteboard)
+        let urls = inspection.looksLikeStrictLocalFileDrag ? inspection.urls : []
+        guard !urls.isEmpty else { return }
+
+        if currentGestureMovedWindow() {
+            dragGestureRejected = true
+            FileLogger.log("🪟 [DragProximity] Rejected moving-window gesture with stale file pasteboard evidence.")
+            return
+        }
+
         let activationDecision = dragActivationPolicy.decision(
             changeCount: dragPasteboard.changeCount,
             location: CGPoint(x: mouseLocation.x, y: mouseLocation.y),
-            hasRecognizedPayload: !urls.isEmpty,
-            hasDragPasteboardEvidence: true,
+            hasRecognizedPayload: true,
             isWithinActivationBand: isWithinActivationBand
         )
 
         guard activationDecision.shouldActivate else { return }
 
-        if urls.isEmpty {
-            FileLogger.log("🧲 [DragProximity] Candidate drag reached status-bar activation band before file URLs were readable. triggerFrame=\(triggerFrame.debugDescription)")
-            beginDropZonePreviewForCandidateDrag()
-        } else {
-            FileLogger.log("🧲 [DragProximity] Status-bar activation band triggered with \(urls.count) file(s). triggerFrame=\(triggerFrame.debugDescription)")
-            beginDropZonePreview(with: urls, allowFallbackRecovery: activationDecision.allowsFallbackRecovery)
+        FileLogger.log("🧲 [DragProximity] Status-bar activation band triggered with \(urls.count) verified file(s). triggerFrame=\(triggerFrame.debugDescription)")
+        beginDropZonePreview(with: urls, allowFallbackRecovery: activationDecision.allowsFallbackRecovery)
+    }
+
+    private func shouldKeepDragPreviewVisible(at point: NSPoint) -> Bool {
+        let compactFrame = dropZoneWindow.dragVisibleContentFrame(inset: dragCompactKeepaliveInset)
+        let isWithinCompactKeepalive = compactFrame.contains(point)
+        if isWithinCompactKeepalive {
+            hasEnteredCompactDropTarget = true
         }
+
+        let isWithinTransitionCorridor: Bool
+        if !hasEnteredCompactDropTarget, let dragPreviewActivationPoint {
+            isWithinTransitionCorridor = DragTransitionCorridor.contains(
+                CGPoint(x: point.x, y: point.y),
+                from: CGPoint(x: dragPreviewActivationPoint.x, y: dragPreviewActivationPoint.y),
+                to: compactFrame,
+                corridorRadius: dragTransitionCorridorRadius,
+                targetInset: 0
+            )
+        } else {
+            isWithinTransitionCorridor = false
+        }
+
+        return DragPreviewVisibilityPolicy.shouldKeepPreviewVisible(
+            isWithinTransitionCorridor: isWithinTransitionCorridor,
+            isWithinCompactKeepalive: isWithinCompactKeepalive,
+            hasEnteredCompactDropTarget: hasEnteredCompactDropTarget,
+            isAcceptingDragSession: dropZoneWindow.isAcceptingDragSession,
+            isHoveringDropTarget: dropZoneWindow.isHoveringDropTarget
+        )
+    }
+
+    private func cancelScheduledDragPreviewExit() {
+        dragPreviewExitWorkItem?.cancel()
+        dragPreviewExitWorkItem = nil
+    }
+
+    private func scheduleDragPreviewExit() {
+        guard dragPreviewExitWorkItem == nil else { return }
+        let sessionID = activeDragSessionID
+        let workItem = DispatchWorkItem { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.dragPreviewExitWorkItem = nil
+                guard self.activeDragSessionID == sessionID,
+                      !self.dropZoneWindow.isPerformingDrop,
+                      !self.dropZoneWindow.isShowingSuccess,
+                      !self.dropZoneWindow.isShowingError,
+                      !self.shouldKeepDragPreviewVisible(at: NSEvent.mouseLocation) else {
+                    return
+                }
+
+                FileLogger.log("🧭 [DragProximity] Drag left the compact handoff corridor; dismissing preview after \(Int(self.dragPreviewExitDelay * 1_000))ms.")
+                self.clearTransientDragState()
+                self.dropZoneWindow.hide()
+            }
+        }
+        dragPreviewExitWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + dragPreviewExitDelay, execute: workItem)
     }
 
     private func startDragReleaseMonitoring() {
@@ -1497,6 +1621,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         resolvedDragSessionID = nil
         pendingDragPayloadURLs = urls
         currentDragAllowsFallbackRecovery = false
+        hasEnteredCompactDropTarget = false
+        cancelScheduledDragPreviewExit()
         dragReleaseRecoveryWorkItem?.cancel()
         dragReleaseRecoveryWorkItem = nil
     }
@@ -1542,7 +1668,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
 
         let releasePoint = NSEvent.mouseLocation
-        let fallbackFrame = dropZoneWindow.dragReleaseFallbackFrame(inset: dragReleaseFallbackInset)
+        let fallbackFrame = dropZoneWindow.dragVisibleContentFrame(inset: dragReleaseFallbackInset)
         let wasHoveringDropTarget = dropZoneWindow.isAcceptingDragSession || dropZoneWindow.isHoveringDropTarget
         guard !pendingDragPayloadURLs.isEmpty,
               currentDragAllowsFallbackRecovery,
@@ -1571,7 +1697,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     return
                 }
 
-                let stillNearFallback = self.dropZoneWindow.dragReleaseFallbackFrame(inset: self.dragReleaseFallbackInset).contains(releasePoint)
+                let stillNearFallback = self.dropZoneWindow.dragVisibleContentFrame(inset: self.dragReleaseFallbackInset).contains(releasePoint)
                 guard (stillNearFallback && self.currentDragAllowsFallbackRecovery) || wasHoveringDropTarget else {
                     FileLogger.log("🧭 [DragRelease] Grace period ended outside fallback zone. Dismissing preview.")
                     self.clearTransientDragState()
@@ -1590,12 +1716,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
     private func clearTransientDragState(preserveResolutionState: Bool = false) {
         stopDragReleaseMonitoring()
+        cancelScheduledDragPreviewExit()
         dragReleaseRecoveryWorkItem?.cancel()
         dragReleaseRecoveryWorkItem = nil
         pendingDragPayloadURLs = []
         currentDragAllowsFallbackRecovery = false
-        dragGestureRejected = false
-        dragActivationPolicy.reset()
+        dragPreviewActivationPoint = nil
+        hasEnteredCompactDropTarget = false
         dropZoneWindow.setPreviewDragActive(false)
         dropZoneWindow.setPreviewHoverActive(false)
         LocalFileDrag.clearCachedDragPayload()
@@ -1603,25 +1730,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             activeDragSessionID = nil
             resolvedDragSessionID = nil
         }
-    }
-
-    private func beginDropZonePreviewForCandidateDrag() {
-        if let activeDragSessionID,
-           resolvedDragSessionID != activeDragSessionID,
-           dropZoneWindow.isPreviewActive {
-            return
-        }
-        dropZoneWindow.setPreferredAnchorPoint(NSEvent.mouseLocation)
-        dropZoneWindow.prepareForDragPreview()
-        beginDragSession(with: [])
-        currentDragAllowsFallbackRecovery = false
-        startDragReleaseMonitoring()
-        dropZoneWindow.prewarmForDrag(under: statusItem)
-        dropZoneWindow.setPreviewDragActive(true)
-        dropZoneWindow.setPreviewHoverActive(false)
-        updateWindowStatus()
-        FileLogger.log("🚀 [DragHandoff] Showing candidate drop zone preview before file payload is readable")
-        dropZoneWindow.show(under: statusItem)
     }
 
     private func beginDropZonePreview(with urls: [URL], verifiedByAppKit: Bool = false, allowFallbackRecovery: Bool = false) {
@@ -1636,7 +1744,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             FileLogger.log("🔁 [DragHandoff] Preview already active; refreshing payload without resetting window.")
             return
         }
-        dropZoneWindow.setPreferredAnchorPoint(NSEvent.mouseLocation)
+        let activationPoint = NSEvent.mouseLocation
+        dragPreviewActivationPoint = activationPoint
+        dropZoneWindow.setPreferredAnchorPoint(activationPoint)
         dropZoneWindow.prepareForDragPreview()
         beginDragSession(with: urls)
         currentDragAllowsFallbackRecovery = verifiedByAppKit || allowFallbackRecovery
@@ -1650,6 +1760,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
 
     private func handleDropZoneDragEnter() {
+        cancelScheduledDragPreviewExit()
         currentDragAllowsFallbackRecovery = true
         dropZoneWindow.setPreviewDragActive(true)
         dropZoneWindow.setPreviewHoverActive(true)
@@ -1658,6 +1769,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
     private func handleDropZoneDragExit() {
         dropZoneWindow.setPreviewHoverActive(false)
+        requestDragEvaluation()
         FileLogger.log("🚪 [DragHandoff] Drag exited drop zone window; proximity monitor will decide whether preview stays visible")
     }
 
@@ -2038,7 +2150,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
               !dropZoneWindow.isShowingSuccess,
               !dropZoneWindow.isShowingError else { return }
 
-        FileLogger.log("↘️ [DragHandoff] Drag left status item; preview stays pinned until mouse up")
+        FileLogger.log("↘️ [DragHandoff] Drag left status item; compact handoff corridor is now active")
     }
 
     private func sendTextWithFallback(_ text: String, to group: DeviceGroupViewModel) async throws {

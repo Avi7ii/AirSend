@@ -1172,6 +1172,16 @@ class DropZoneWindow: NSPanel {
     func dragReleaseFallbackFrame(inset: CGFloat) -> NSRect {
         self.frame.insetBy(dx: -inset, dy: -inset)
     }
+
+    func dragVisibleContentFrame(inset: CGFloat) -> NSRect {
+        dropView.layoutSubtreeIfNeeded()
+        let contentFrameInWindow = dropView.contentBox.convert(dropView.contentBox.bounds, to: nil)
+        let contentFrameOnScreen = convertToScreen(contentFrameInWindow)
+        guard contentFrameOnScreen.width > 0, contentFrameOnScreen.height > 0 else {
+            return dragReleaseFallbackFrame(inset: inset)
+        }
+        return contentFrameOnScreen.insetBy(dx: -inset, dy: -inset)
+    }
     
 
     func hide() {

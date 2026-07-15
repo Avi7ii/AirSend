@@ -44,11 +44,76 @@ public enum WindowDragEvidence {
 
 public enum DragPreviewVisibilityPolicy {
     public static func shouldKeepPreviewVisible(
-        isWithinDropZoneKeepalive: Bool,
+        isWithinTransitionCorridor: Bool,
+        isWithinCompactKeepalive: Bool,
+        hasEnteredCompactDropTarget: Bool,
         isAcceptingDragSession: Bool,
         isHoveringDropTarget: Bool
     ) -> Bool {
-        isWithinDropZoneKeepalive || isAcceptingDragSession || isHoveringDropTarget
+        if isAcceptingDragSession || isHoveringDropTarget {
+            return true
+        }
+        if hasEnteredCompactDropTarget {
+            return isWithinCompactKeepalive
+        }
+        return isWithinTransitionCorridor || isWithinCompactKeepalive
+    }
+}
+
+public enum DragTransitionCorridor {
+    public static func contains(
+        _ point: CGPoint,
+        from activationPoint: CGPoint,
+        to targetFrame: CGRect,
+        corridorRadius: CGFloat = 42,
+        targetInset: CGFloat = 10
+    ) -> Bool {
+        guard !targetFrame.isNull, !targetFrame.isInfinite, !targetFrame.isEmpty else {
+            return false
+        }
+
+        let inset = max(0, targetInset)
+        let expandedTarget = targetFrame.insetBy(dx: -inset, dy: -inset)
+        if expandedTarget.contains(point) {
+            return true
+        }
+
+        let destination = CGPoint(
+            x: min(max(activationPoint.x, expandedTarget.minX), expandedTarget.maxX),
+            y: min(max(activationPoint.y, expandedTarget.minY), expandedTarget.maxY)
+        )
+        let radius = max(0, corridorRadius)
+        return squaredDistance(
+            from: point,
+            toSegmentFrom: activationPoint,
+            to: destination
+        ) <= radius * radius
+    }
+
+    private static func squaredDistance(
+        from point: CGPoint,
+        toSegmentFrom start: CGPoint,
+        to end: CGPoint
+    ) -> CGFloat {
+        let segmentX = end.x - start.x
+        let segmentY = end.y - start.y
+        let segmentLengthSquared = segmentX * segmentX + segmentY * segmentY
+        guard segmentLengthSquared > .ulpOfOne else {
+            let dx = point.x - start.x
+            let dy = point.y - start.y
+            return dx * dx + dy * dy
+        }
+
+        let projection = ((point.x - start.x) * segmentX + (point.y - start.y) * segmentY)
+            / segmentLengthSquared
+        let t = min(1, max(0, projection))
+        let closest = CGPoint(
+            x: start.x + t * segmentX,
+            y: start.y + t * segmentY
+        )
+        let dx = point.x - closest.x
+        let dy = point.y - closest.y
+        return dx * dx + dy * dy
     }
 }
 
@@ -121,7 +186,6 @@ public struct DragActivationPolicy {
         changeCount: Int,
         location: CGPoint,
         hasRecognizedPayload: Bool,
-        hasDragPasteboardEvidence: Bool,
         isWithinActivationBand: Bool
     ) -> DragActivationDecision {
         observePointerDrag(location: location)
@@ -131,7 +195,7 @@ public struct DragActivationPolicy {
             location: location,
             hasRecognizedPayload: hasRecognizedPayload
         )
-        let shouldActivate = isWithinActivationBand && (hasRecognizedPayload || hasDragPasteboardEvidence)
+        let shouldActivate = isWithinActivationBand && hasRecognizedPayload
         return DragActivationDecision(
             shouldActivate: shouldActivate,
             allowsFallbackRecovery: shouldActivate && hasRecognizedPayload && (isFirstRecognizedPayload || hasMovedEnough)

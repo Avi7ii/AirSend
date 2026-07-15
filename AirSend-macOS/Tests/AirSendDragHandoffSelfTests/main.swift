@@ -19,7 +19,6 @@ func testFirstRecognizedDragInsideActivationBandActivatesImmediately() throws {
         changeCount: 42,
         location: CGPoint(x: 420, y: 860),
         hasRecognizedPayload: true,
-        hasDragPasteboardEvidence: true,
         isWithinActivationBand: true
     )
 
@@ -34,7 +33,6 @@ func testRecognizedDragOutsideActivationBandDoesNotActivate() throws {
         changeCount: 42,
         location: CGPoint(x: 420, y: 500),
         hasRecognizedPayload: true,
-        hasDragPasteboardEvidence: true,
         isWithinActivationBand: false
     )
 
@@ -48,7 +46,6 @@ func testPlainPointerDragInsideActivationBandDoesNotShowCandidateDropZone() thro
         changeCount: 1,
         location: CGPoint(x: 420, y: 700),
         hasRecognizedPayload: false,
-        hasDragPasteboardEvidence: false,
         isWithinActivationBand: false
     )
     try expect(!first.shouldActivate, "plain pointer movement outside activation band should not activate")
@@ -57,7 +54,6 @@ func testPlainPointerDragInsideActivationBandDoesNotShowCandidateDropZone() thro
         changeCount: 1,
         location: CGPoint(x: 420, y: 860),
         hasRecognizedPayload: false,
-        hasDragPasteboardEvidence: false,
         isWithinActivationBand: true
     )
 
@@ -65,14 +61,13 @@ func testPlainPointerDragInsideActivationBandDoesNotShowCandidateDropZone() thro
     try expect(!second.allowsFallbackRecovery, "plain pointer movement should not use fallback file sending")
 }
 
-func testUnrecognizedDragPasteboardInsideActivationBandShowsCandidateDropZoneAfterMovement() throws {
+func testUnrecognizedDragPasteboardInsideActivationBandDoesNotShowDropZone() throws {
     var policy = DragActivationPolicy(minimumTravel: 18)
 
     let first = policy.decision(
         changeCount: 1,
         location: CGPoint(x: 420, y: 700),
         hasRecognizedPayload: false,
-        hasDragPasteboardEvidence: true,
         isWithinActivationBand: false
     )
     try expect(!first.shouldActivate, "drag pasteboard movement outside activation band should not activate")
@@ -81,12 +76,11 @@ func testUnrecognizedDragPasteboardInsideActivationBandShowsCandidateDropZoneAft
         changeCount: 1,
         location: CGPoint(x: 420, y: 860),
         hasRecognizedPayload: false,
-        hasDragPasteboardEvidence: true,
         isWithinActivationBand: true
     )
 
-    try expect(second.shouldActivate, "unrecognized drag near status bar should show a candidate drop zone")
-    try expect(!second.allowsFallbackRecovery, "candidate preview without file URLs should not use fallback file sending")
+    try expect(!second.shouldActivate, "pasteboard metadata without verified local-file URLs must not show the drop zone")
+    try expect(!second.allowsFallbackRecovery, "unverified payloads must not use fallback file sending")
 }
 
 func testFreshDragPasteboardChangeCountsAsEvidenceBeforePayloadIsReadable() throws {
@@ -171,23 +165,83 @@ func testWindowDragRemainsRecognizedAfterPointerReachesMenuBar() throws {
     )
 }
 
-func testPreviewDismissesAfterLeavingDropZoneKeepaliveRegion() throws {
+func testPreviewUsesTransitionCorridorBeforeEnteringCompactTarget() throws {
     try expect(
-        !DragPreviewVisibilityPolicy.shouldKeepPreviewVisible(
-            isWithinDropZoneKeepalive: false,
+        DragPreviewVisibilityPolicy.shouldKeepPreviewVisible(
+            isWithinTransitionCorridor: true,
+            isWithinCompactKeepalive: false,
+            hasEnteredCompactDropTarget: false,
             isAcceptingDragSession: false,
             isHoveringDropTarget: false
         ),
-        "an active preview should dismiss once the pointer leaves the compact drop-zone keepalive region"
+        "the initial handoff corridor should keep the preview visible while approaching the drop target"
+    )
+
+    try expect(
+        !DragPreviewVisibilityPolicy.shouldKeepPreviewVisible(
+            isWithinTransitionCorridor: false,
+            isWithinCompactKeepalive: false,
+            hasEnteredCompactDropTarget: false,
+            isAcceptingDragSession: false,
+            isHoveringDropTarget: false
+        ),
+        "the preview should be eligible for dismissal after leaving the initial corridor"
+    )
+}
+
+func testPreviewShrinksToCompactTargetAfterEntry() throws {
+    try expect(
+        !DragPreviewVisibilityPolicy.shouldKeepPreviewVisible(
+            isWithinTransitionCorridor: true,
+            isWithinCompactKeepalive: false,
+            hasEnteredCompactDropTarget: true,
+            isAcceptingDragSession: false,
+            isHoveringDropTarget: false
+        ),
+        "the wide transition corridor must stop keeping the preview alive after the compact target is entered"
     )
 
     try expect(
         DragPreviewVisibilityPolicy.shouldKeepPreviewVisible(
-            isWithinDropZoneKeepalive: true,
+            isWithinTransitionCorridor: false,
+            isWithinCompactKeepalive: true,
+            hasEnteredCompactDropTarget: true,
             isAcceptingDragSession: false,
             isHoveringDropTarget: false
         ),
-        "the compact drop-zone keepalive region should prevent edge flicker"
+        "the compact keepalive region should prevent edge flicker after entry"
+    )
+}
+
+func testTransitionCorridorConnectsActivationPointWithoutBecomingScreenWide() throws {
+    let target = CGRect(x: 700, y: 500, width: 240, height: 210)
+    let activation = CGPoint(x: 600, y: 860)
+
+    try expect(
+        DragTransitionCorridor.contains(
+            CGPoint(x: 650, y: 785),
+            from: activation,
+            to: target
+        ),
+        "a point on the route from activation to the target should remain in the handoff corridor"
+    )
+
+    try expect(
+        !DragTransitionCorridor.contains(
+            CGPoint(x: 500, y: 785),
+            from: activation,
+            to: target
+        ),
+        "the handoff corridor should stay narrow instead of keeping a large part of the screen active"
+    )
+
+    try expect(
+        DragTransitionCorridor.contains(
+            CGPoint(x: 820, y: 600),
+            from: activation,
+            to: target
+        ),
+        "the visible drop target itself should always be part of the corridor"
     )
 }
 
@@ -195,13 +249,15 @@ let tests: [(String, () throws -> Void)] = [
     ("firstRecognizedDragInsideActivationBandActivatesImmediately", testFirstRecognizedDragInsideActivationBandActivatesImmediately),
     ("recognizedDragOutsideActivationBandDoesNotActivate", testRecognizedDragOutsideActivationBandDoesNotActivate),
     ("plainPointerDragInsideActivationBandDoesNotShowCandidateDropZone", testPlainPointerDragInsideActivationBandDoesNotShowCandidateDropZone),
-    ("unrecognizedDragPasteboardInsideActivationBandShowsCandidateDropZoneAfterMovement", testUnrecognizedDragPasteboardInsideActivationBandShowsCandidateDropZoneAfterMovement),
+    ("unrecognizedDragPasteboardInsideActivationBandDoesNotShowDropZone", testUnrecognizedDragPasteboardInsideActivationBandDoesNotShowDropZone),
     ("freshDragPasteboardChangeCountsAsEvidenceBeforePayloadIsReadable", testFreshDragPasteboardChangeCountsAsEvidenceBeforePayloadIsReadable),
     ("readablePayloadMetadataCountsAsEvidenceWhenChangeCountIsStable", testReadablePayloadMetadataCountsAsEvidenceWhenChangeCountIsStable),
     ("movedWindowUnderPointerIsRecognizedAsWindowDrag", testMovedWindowUnderPointerIsRecognizedAsWindowDrag),
     ("unrelatedWindowMovementDoesNotSuppressFileDrag", testUnrelatedWindowMovementDoesNotSuppressFileDrag),
     ("windowDragRemainsRecognizedAfterPointerReachesMenuBar", testWindowDragRemainsRecognizedAfterPointerReachesMenuBar),
-    ("previewDismissesAfterLeavingDropZoneKeepaliveRegion", testPreviewDismissesAfterLeavingDropZoneKeepaliveRegion),
+    ("previewUsesTransitionCorridorBeforeEnteringCompactTarget", testPreviewUsesTransitionCorridorBeforeEnteringCompactTarget),
+    ("previewShrinksToCompactTargetAfterEntry", testPreviewShrinksToCompactTargetAfterEntry),
+    ("transitionCorridorConnectsActivationPointWithoutBecomingScreenWide", testTransitionCorridorConnectsActivationPointWithoutBecomingScreenWide),
 ]
 
 do {

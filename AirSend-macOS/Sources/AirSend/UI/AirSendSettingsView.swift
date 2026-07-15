@@ -304,7 +304,17 @@ struct AirSendSettingsView: View {
                     SettingsCurrentTargetRow(snapshot: snapshot)
                 }
 
-                SettingsCard(title: "LAN Devices") {
+                SettingsCard(
+                    title: "LAN Devices",
+                    headerAccessory: {
+                        SettingsDiscoveryHeaderActions(
+                            isRefreshing: snapshot.isDiscoveryRefreshing,
+                            refreshAction: { store.actions.rescan() },
+                            addByIPAction: { store.actions.addDeviceByIP() },
+                            broadcastAction: { store.actions.selectBroadcastTarget() }
+                        )
+                    }
+                ) {
                     SettingsDevicesSummaryRow(snapshot: snapshot)
 
                     if snapshot.nearbyDevices.isEmpty {
@@ -346,22 +356,6 @@ struct AirSendSettingsView: View {
                     )
                 }
 
-                SettingsCard(title: "Discovery") {
-                    SettingsButtonRow(
-                        primaryTitle: snapshot.isDiscoveryRefreshing ? "Refreshing…" : "Refresh Devices",
-                        primaryAction: { store.actions.rescan() },
-                        primaryDisabled: snapshot.isDiscoveryRefreshing,
-                        secondaryTitle: "Add by IP",
-                        secondaryAction: { store.actions.addDeviceByIP() },
-                        tertiaryTitle: "Use Broadcast",
-                        tertiaryAction: { store.actions.selectBroadcastTarget() }
-                    )
-                    SettingsValueRow(
-                        title: "Network requirement",
-                        value: "Same LAN",
-                        detail: snapshot.discoveryRefreshSummary
-                    )
-                }
             }
 
         case .transfers:
@@ -1048,15 +1042,42 @@ private struct SettingsSidebarButtonStyle: ButtonStyle {
     }
 }
 
-private struct SettingsCard<Content: View>: View {
+private struct SettingsCard<Content: View, HeaderAccessory: View>: View {
     let title: String
-    @ViewBuilder var content: Content
+    let headerAccessory: HeaderAccessory
+    let content: Content
+
+    init(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) where HeaderAccessory == EmptyView {
+        self.title = title
+        self.headerAccessory = EmptyView()
+        self.content = content()
+    }
+
+    init(
+        title: String,
+        @ViewBuilder headerAccessory: () -> HeaderAccessory,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.headerAccessory = headerAccessory()
+        self.content = content()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title.uppercased())
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(alignment: .center, spacing: 14) {
+                Text(title.uppercased())
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+
+                headerAccessory
+
+                Spacer(minLength: 0)
+            }
 
             VStack(alignment: .leading, spacing: 0) {
                 content
@@ -1079,6 +1100,28 @@ private struct SettingsCard<Content: View>: View {
                     .strokeBorder(.white.opacity(0.09), lineWidth: 1)
             }
         }
+    }
+}
+
+private struct SettingsDiscoveryHeaderActions: View {
+    let isRefreshing: Bool
+    let refreshAction: () -> Void
+    let addByIPAction: () -> Void
+    let broadcastAction: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(isRefreshing ? "Refreshing…" : "Refresh Devices", action: refreshAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(isRefreshing)
+
+            Button("Add by IP", action: addByIPAction)
+                .buttonStyle(.bordered)
+
+            Button("Use Broadcast", action: broadcastAction)
+                .buttonStyle(.bordered)
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 

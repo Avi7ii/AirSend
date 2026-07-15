@@ -72,7 +72,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private var currentTransferProgress: Double = 0
     private var currentTransferTarget: String = ""
     private var transferProgressMenuItem: NSMenuItem?
-    private var runtimeTransferMenuViews: [UUID: RuntimeTransferMenuItemView] = [:]
     private var isStatusMenuOpen = false
     private var pendingStatusMenuRefresh = false
     private var settingsWindowController: AirSendSettingsWindowController?
@@ -1876,7 +1875,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
 
         runtimeTransfersByID[transfer.id] = transfer
-        runtimeTransferMenuViews[transfer.id]?.update(record: transfer)
         refreshStatusItemActivityIndicator()
 
         if transfer.direction == .incoming, dropZoneWindow.isPerformingDrop {
@@ -3206,7 +3204,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
     
     func setupMenu() {
-        runtimeTransferMenuViews.removeAll(keepingCapacity: true)
         let menu: NSMenu
         if let existing = statusItem.menu {
             menu = existing
@@ -3226,62 +3223,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             menu.addItem(NSMenuItem.separator())
         }
 
-        // 1. Core Action
+        // Immediate actions stay at the top; configuration belongs in the main window.
         menu.addItem(NSMenuItem(title: "Send Clipboard", action: #selector(sendClipboard), keyEquivalent: "s"))
         menu.addItem(NSMenuItem(title: "Send Files…", action: #selector(chooseFilesToSend), keyEquivalent: "o"))
-        let autoClipboardItem = NSMenuItem()
-        autoClipboardItem.view = AutoClipboardToggleMenuItemView(
-            title: "Auto Sync Clipboard Text",
-            isOn: isAutoClipboardSyncEnabled,
-            onToggle: { [weak self] enabled in
-                self?.setAutoClipboardSyncEnabled(enabled, showInfoIfEnabling: true)
-            }
-        )
-        menu.addItem(autoClipboardItem)
-        let autoScreenshotItem = NSMenuItem()
-        autoScreenshotItem.view = AutoClipboardToggleMenuItemView(
-            title: "Auto Sync Clipboard Images",
-            isOn: isAutoScreenshotSyncEnabled,
-            onToggle: { [weak self] enabled in
-                self?.setAutoScreenshotSyncEnabled(enabled, showInfoIfEnabling: true)
-            }
-        )
-        menu.addItem(autoScreenshotItem)
-        let screenshotFilesItem = NSMenuItem()
-        screenshotFilesItem.view = AutoClipboardToggleMenuItemView(
-            title: "Auto Sync Screenshot Files",
-            isOn: isScreenshotFileSyncEnabled,
-            onToggle: { [weak self] enabled in
-                self?.setScreenshotFileSyncEnabled(enabled)
-            }
-        )
-        menu.addItem(screenshotFilesItem)
         menu.addItem(NSMenuItem.separator())
-
-        let activeTransfers = runtimeTransfersByID.values
-            .filter { !$0.status.isTerminal }
-            .sorted { $0.startedAt > $1.startedAt }
-        if !activeTransfers.isEmpty {
-            let headerItem = NSMenuItem()
-            headerItem.view = MenuSectionHeaderView(title: "ACTIVE TRANSFERS")
-            headerItem.isEnabled = false
-            menu.addItem(headerItem)
-
-            for transfer in activeTransfers.prefix(4) {
-                let item = NSMenuItem()
-                let view = RuntimeTransferMenuItemView(record: transfer) { [weak self] id in
-                    self?.cancelTransfer(id: id.uuidString)
-                }
-                item.view = view
-                menu.addItem(item)
-                runtimeTransferMenuViews[transfer.id] = view
-            }
-            menu.addItem(NSMenuItem.separator())
-        }
         
         let groups = buildDeviceGroups()
         
-        // 2. KNOWN DEVICES
+        // Target selection is the only live state kept in the compact menu.
         let knownGroups = groups.filter {
             historyDeviceGroupKeys.contains($0.key) || selectedDeviceGroupKey == $0.key
         }
@@ -3298,7 +3247,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             menu.addItem(NSMenuItem.separator())
         }
         
-        // 3. OTHER DEVICES
         let otherGroups = groups.filter {
             !historyDeviceGroupKeys.contains($0.key) && selectedDeviceGroupKey != $0.key
         }
@@ -3318,7 +3266,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             }
         }
         
-        // 4. BROADCAST
         let broadcastItem = NSMenuItem(title: "All Devices (Broadcast)", action: #selector(deviceSelected(_:)), keyEquivalent: "")
         broadcastItem.representedObject = broadcastSelectionKey
         broadcastItem.state = selectedDeviceGroupKey == broadcastSelectionKey ? .on : .off
@@ -3326,41 +3273,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         
         menu.addItem(NSMenuItem.separator())
         
-        // 5. ADVANCED SUBMENU
-        let advancedMenu = NSMenu(title: "Advanced")
-        advancedMenu.autoenablesItems = false
-        
-        advancedMenu.addItem(NSMenuItem(title: "Add Device by IP...", action: #selector(addDeviceByIP), keyEquivalent: "a"))
-        advancedMenu.addItem(NSMenuItem(title: "Clear Discovered Devices", action: #selector(clearDeviceHistory), keyEquivalent: ""))
-        advancedMenu.addItem(NSMenuItem(title: "Reset Identity", action: #selector(resetIdentity(_:)), keyEquivalent: ""))
-        let compatibilityItem = NSMenuItem(title: "Compatibility Mode (HTTP)", action: #selector(toggleLanCompatibilityMode(_:)), keyEquivalent: "")
-        compatibilityItem.state = preferredLocalProtocol == .http ? .on : .off
-        advancedMenu.addItem(compatibilityItem)
-
-        let receivePolicyMenu = NSMenu(title: "Receive Requests")
-        for option in [("Ask Every Time", ReceivePolicy.ask), ("Trusted Devices Only", ReceivePolicy.trustedOnly), ("Off", ReceivePolicy.off)] {
-            let item = NSMenuItem(title: option.0, action: #selector(receivePolicySelected(_:)), keyEquivalent: "")
-            item.representedObject = option.1.rawValue
-            item.state = runtimeConfiguration.receivePolicy == option.1 ? .on : .off
-            receivePolicyMenu.addItem(item)
-        }
-        let receivePolicyItem = NSMenuItem(title: "Receive Requests", action: nil, keyEquivalent: "")
-        receivePolicyItem.submenu = receivePolicyMenu
-        advancedMenu.addItem(receivePolicyItem)
-        
-        advancedMenu.addItem(NSMenuItem.separator())
-        let autoUpdateItem = NSMenuItem(title: "Auto-check for Updates", action: #selector(toggleAutoUpdate(_:)), keyEquivalent: "")
-        autoUpdateItem.state = isAutoUpdateEnabled ? .on : .off
-        advancedMenu.addItem(autoUpdateItem)
-        
-        let advancedItem = NSMenuItem(title: "Advanced", action: nil, keyEquivalent: "")
-        advancedItem.submenu = advancedMenu
-        menu.addItem(advancedItem)
-        
-        // 6. SYSTEM STATUS
-        let launchItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin(_:)), keyEquivalent: "")
-        launchItem.state = isLaunchAtLoginEnabled ? .on : .off
-        menu.addItem(launchItem)
         let settingsItem = NSMenuItem(title: "Open AirSend…", action: #selector(openSettingsWindow(_:)), keyEquivalent: ",")
         settingsItem.keyEquivalentModifierMask = [.command]
         menu.addItem(settingsItem)
@@ -3372,13 +3284,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             menu.addItem(installUpdateItem)
         }
         
-        // 7. VERSION & UPDATE
         let updateItem = NSMenuItem()
         updateItem.view = UpdateMenuItemView()
         menu.addItem(updateItem)
         
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Rescan and Refresh", action: #selector(scanForDevices(_:)), keyEquivalent: "r"))
+        menu.addItem(NSMenuItem(title: "Refresh Devices", action: #selector(scanForDevices(_:)), keyEquivalent: "r"))
         menu.addItem(NSMenuItem(title: "Quit AirSend", action: #selector(quit), keyEquivalent: "q"))
     }
     
@@ -4292,10 +4203,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
     }
     
-    @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {
-        setLaunchAtLoginEnabled(!isLaunchAtLoginEnabled)
-    }
-    
     // MARK: - Update Logic
     
     @objc func manualCheckUpdate() {
@@ -4307,18 +4214,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         UpdateService.shared.installUpdate()
     }
     
-    @objc func toggleAutoUpdate(_ sender: NSMenuItem) {
-        setAutoUpdateEnabled(!isAutoUpdateEnabled)
-    }
-
-    @objc private func toggleLanCompatibilityMode(_ sender: NSMenuItem) {
-        setCompatibilityModeEnabled(preferredLocalProtocol != .http)
-    }
-
-    @objc private func receivePolicySelected(_ sender: NSMenuItem) {
-        guard let rawValue = sender.representedObject as? String else { return }
-        setReceivePolicy(rawValue)
-    }
 }
 
 // MARK: - UI Helpers

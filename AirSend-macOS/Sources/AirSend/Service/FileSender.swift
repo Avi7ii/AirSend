@@ -1,719 +1,752 @@
+import AirSendRuntimeCore
 import Foundation
-import Network
+import UniformTypeIdentifiers
 
 actor FileSender {
-    private let alias = Host.current().localizedName ?? "Mac Headless"
-    private let deviceModel = "macOS"
-    private let deviceType = DeviceType.desktop
-    private let myFingerprint: String
-    
-    private let sessionDelegate: SessionDelegate
-    private let localProtocol: ProtocolType
-    private let campusFallback: CampusFallbackCoordinator?
-    
-    // Callback for progress: (overallProgress 0.0-1.0)
-    var onProgress: (@Sendable (Double) -> Void)?
-    // Callback when receiver clicks "Accept"
-    var onAccepted: (@Sendable () -> Void)?
-    // Callback when transfer is cancelled
-    var onCancelled: (@Sendable () -> Void)?
-    
-    // Progress tracking
-    private var totalBytes: Int64 = 0
-    private var sentBytesMap: [String: Int64] = [:]
-    
-    // Active upload sessions (for cancellation)
-    private var activeSessions: Set<URLSession> = []
-    private var activeProcesses: [Process] = []
-    private var isCancelled = false
-
-    init(
-        fingerprint: String,
-        localProtocol: ProtocolType = .https,
-        campusFallback: CampusFallbackCoordinator? = nil
-    ) {
-        self.myFingerprint = fingerprint
-        self.localProtocol = localProtocol
-        self.campusFallback = campusFallback
-        let delegate = SessionDelegate()
-        self.sessionDelegate = delegate
-    }
-    
-    func setOnProgress(_ callback: @escaping @Sendable (Double) -> Void) {
-        self.onProgress = callback
-    }
-    
-    func setOnAccepted(_ callback: @escaping @Sendable () -> Void) {
-        self.onAccepted = callback
-    }
-    
-    func setOnCancelled(_ callback: @escaping @Sendable () -> Void) {
-        self.onCancelled = callback
-    }
-    
-    /// Cancel the current upload immediately
-    /// Cancel the current upload immediately
-    func cancelCurrentTransfer() async {
-        logTransfer("🛑 [FileSender] cancelCurrentTransfer called. isCancelled: \(isCancelled), activeSessions count: \(activeSessions.count), activeProcesses count: \(activeProcesses.count)")
-        isCancelled = true
-        for session in activeSessions {
-            logTransfer("🛑 [FileSender] Invalidating and cancelling an active URLSession...")
-            session.invalidateAndCancel()
-        }
-        for process in activeProcesses where process.isRunning {
-            logTransfer("🛑 [FileSender] Terminating active curl process...")
-            process.terminate()
-        }
-        activeSessions.removeAll()
-        activeProcesses.removeAll()
-        if let campusFallback {
-            await campusFallback.cancelAllOutgoingTransfers()
-        }
-        logTransfer("🛑 [FileSender] All uploads cancelled by user/system")
-        onCancelled?()
-    }
-    
-    private func updateGlobalProgress() {
-        guard totalBytes > 0 else { return }
-        let totalSent = sentBytesMap.values.reduce(0, +)
-        let progress = min(Double(totalSent) / Double(totalBytes), 1.0)
-        onProgress?(progress)
+    private struct SendContext: Sendable {
+        let files: [String: FileDto]
+        let fileURLs: [String: URL]
+        let temporaryURLs: [URL]
+        let securityScopedURLs: [URL]
+        let source: TransferSource
+        let previewText: String?
+        let retrySpec: TransferRetrySpec?
     }
 
-    private func updateFallbackProgress(fileId: String, sentBytes: Int64) {
-        sentBytesMap[fileId] = sentBytes
-        updateGlobalProgress()
+    private struct RemoteSession: Sendable {
+        let sessionID: String
+        let device: Device
+        let scheme: String
     }
 
-    private func makeSession(requestTimeout: TimeInterval,
-                             resourceTimeout: TimeInterval,
-                             delegate: SessionDelegate? = nil) -> URLSession {
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = requestTimeout
-        config.timeoutIntervalForResource = resourceTimeout
-        config.httpMaximumConnectionsPerHost = 1
-        config.waitsForConnectivity = false
-        config.httpShouldUsePipelining = false
-        config.connectionProxyDictionary = [:]
-        return URLSession(configuration: config, delegate: delegate ?? sessionDelegate, delegateQueue: nil)
+    private struct ActiveTransfer {
+        var sessions: [ObjectIdentifier: URLSession] = [:]
+        var campusTransferIDs: Set<String> = []
+        var remoteSession: RemoteSession?
+        var accepted = false
+        var cancelled = false
+        let startedAt: Date
     }
 
-    private func formattedHost(for device: Device) -> String {
-        if device.ip.contains(":") && !device.ip.hasPrefix("[") {
-            return "[\(device.ip)]"
-        }
-        return device.ip
-    }
-
-    private func buildURL(for device: Device, scheme: String, path: String) -> URL? {
-        URL(string: "\(scheme)://\(formattedHost(for: device)):\(device.port)\(path)")
-    }
-
-    private func probeReachability(to device: Device, scheme: String) async throws {
-        guard let url = buildURL(for: device, scheme: scheme, path: "/api/localsend/v2/info") else {
-            throw NSError(domain: "FileSender", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid probe URL"])
-        }
-
-        let response = try await performCurlRequest(
-            url: url.absoluteString,
-            method: "GET",
-            headers: [
-                "User-Agent: LocalSend/3.5.0",
-                "Connection: close"
-            ],
-            timeout: 4.0
-        )
-
-        guard 200..<300 ~= response.statusCode else {
-            throw NSError(domain: "FileSender", code: -1, userInfo: [NSLocalizedDescriptionKey: "Probe failed for \(scheme.uppercased())"])
-        }
-    }
-
-    private func isTransientTransportError(_ error: Error) -> Bool {
-        let nsError = error as NSError
-        if nsError.domain == NSURLErrorDomain {
-            return nsError.code == NSURLErrorTimedOut
-                || nsError.code == NSURLErrorNetworkConnectionLost
-                || nsError.code == NSURLErrorNotConnectedToInternet
-        }
-        if nsError.domain == "FileSenderCurl" {
-            return nsError.code == 28
-        }
-        return false
-    }
-
-    private func shouldFallbackScheme(for device: Device, preferredScheme: String, after error: Error) -> Bool {
-        if !device.https {
-            return true
-        }
-        guard preferredScheme == "https" else {
-            return true
-        }
-        return !isTransientTransportError(error)
-    }
-
-    private func resolveReachableScheme(for device: Device, preferredScheme: String) async throws -> String {
-        let fallbackScheme = preferredScheme == "https" ? "http" : "https"
-        var lastError: Error?
-
-        let preferredAttempts = (device.https && preferredScheme == "https") ? 3 : 2
-
-        for attempt in 1...preferredAttempts {
-            do {
-                try await probeReachability(to: device, scheme: preferredScheme)
-                if attempt == 1 {
-                    logTransfer("✅ Data-plane preflight passed via \(preferredScheme.uppercased()) for \(device.alias)")
-                } else {
-                    logTransfer("✅ Data-plane preflight recovered via \(preferredScheme.uppercased()) for \(device.alias) on retry \(attempt)/\(preferredAttempts)")
-                }
-                return preferredScheme
-            } catch {
-                lastError = error
-                logTransfer("⚠️ Preflight \(preferredScheme.uppercased()) failed for \(device.alias) [attempt \(attempt)/\(preferredAttempts)]: \(error.localizedDescription)")
-                if attempt < preferredAttempts && isTransientTransportError(error) {
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                    continue
-                }
-                break
-            }
-        }
-
-        if let fallbackTriggerError = lastError, shouldFallbackScheme(for: device, preferredScheme: preferredScheme, after: fallbackTriggerError) {
-            do {
-                try await probeReachability(to: device, scheme: fallbackScheme)
-                logTransfer("🔁 Data-plane preflight switched to \(fallbackScheme.uppercased()) for \(device.alias)")
-                return fallbackScheme
-            } catch {
-                lastError = error
-                logTransfer("⚠️ Preflight \(fallbackScheme.uppercased()) failed for \(device.alias): \(error.localizedDescription)")
-            }
-        }
-
-        throw lastError ?? NSError(domain: "FileSender", code: -1, userInfo: [NSLocalizedDescriptionKey: "Peer preflight failed"])
-    }
-
-    private func shouldRetryPrepare(after error: Error) -> Bool {
-        let nsError = error as NSError
-        if nsError.domain == NSURLErrorDomain {
-            return nsError.code == NSURLErrorCannotConnectToHost
-                || nsError.code == NSURLErrorNetworkConnectionLost
-                || nsError.code == NSURLErrorNotConnectedToInternet
-                || nsError.code == NSURLErrorTimedOut
-        }
-        if nsError.domain == "FileSenderCurl" {
-            return nsError.code == 28
-        }
-        return false
-    }
-
-    private func performPrepareRequest(_ request: URLRequest) async throws -> (Data, Int) {
-        guard let url = request.url else {
-            throw NSError(domain: "FileSender", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid prepare URL"])
-        }
-
-        let bodyFile = try writeTemporaryData(request.httpBody ?? Data(), suffix: "json")
-        defer { try? FileManager.default.removeItem(at: bodyFile) }
-
-        let response = try await performCurlRequest(
-            url: url.absoluteString,
-            method: "POST",
-            headers: [
-                "Content-Type: application/json",
-                "Accept: application/json",
-                "User-Agent: LocalSend/3.5.0",
-                "Connection: close"
-            ],
-            bodyFile: bodyFile,
-            timeout: 30.0
-        )
-        return (response.body, response.statusCode)
-    }
-    
-    func sendFiles(_ urls: [URL], to device: Device) async throws {
-        let preferredScheme = device.https ? "https" : "http"
-        logTransfer("🚀 Starting sendFiles to \(device.alias) (\(device.ip)) using preferred \(preferredScheme)")
-        
-        let context = try await prepareContext(urls: urls)
-        
-        // 清理临时文件（必须在 sendFiles 层 defer，不能放 internalSend 里，
-        // 否则 HTTPS→HTTP 回退时临时文件会被提前删除）
-        defer {
-            for url in context.tempFiles {
-                try? FileManager.default.removeItem(at: url)
-            }
-        }
-        
-        // Reset progress tracking
-        self.totalBytes = context.fileDtos.values.reduce(0) { $0 + $1.size }
-        self.sentBytesMap = [:]
-        self.isCancelled = false
-        sessionDelegate.expectedFingerprints[device.ip] = device.id
-        
-        do {
-            let resolvedScheme = try await resolveReachableScheme(for: device, preferredScheme: preferredScheme)
-            try await internalSend(context: context, to: device, scheme: resolvedScheme)
-        } catch {
-            guard let campusFallback else {
-                throw error
-            }
-            logTransfer("⚠️ Direct file send failed for \(device.alias), switching to campus multicast fallback: \(error.localizedDescription)")
-            let fallbackLimit = CampusFallbackCoordinator.maximumPayloadBytes
-            for (fileId, fileDto) in context.fileDtos {
-                guard let fileURL = context.fileMap[fileId] else { continue }
-                guard fileDto.size <= Int64(fallbackLimit) else {
-                    throw NSError(
-                        domain: "CampusFallback",
-                        code: -1,
-                        userInfo: [NSLocalizedDescriptionKey: "Direct file send failed and campus fallback only supports files up to \(fallbackLimit) bytes"]
-                    )
-                }
-                let data = try Data(contentsOf: fileURL)
-                try await campusFallback.sendFile(
-                    data: data,
-                    fileName: fileDto.fileName,
-                    fileType: fileDto.fileType,
-                    to: device,
-                    onAccepted: onAccepted,
-                    onProgress: { [weak self] progress in
-                        Task {
-                            await self?.updateFallbackProgress(
-                                fileId: fileId,
-                                sentBytes: Int64(Double(fileDto.size) * progress)
-                            )
-                        }
-                    }
-                )
-                updateFallbackProgress(fileId: fileId, sentBytes: fileDto.size)
-            }
-        }
-    }
-    
-    private struct SendContext {
-        let fileDtos: [String: FileDto]
-        let fileMap: [String: URL]
-        let tempFiles: [URL]
-    }
-    
-    // Track session in actor
-    private func registerSession(_ session: URLSession) {
-        activeSessions.insert(session)
-    }
-    
-    private func unregisterSession(_ session: URLSession) {
-        activeSessions.remove(session)
-    }
-
-    private func registerProcess(_ process: Process) {
-        activeProcesses.append(process)
-    }
-
-    private func unregisterProcess(_ process: Process) {
-        activeProcesses.removeAll { $0 === process }
-    }
-
-    private struct CurlHTTPResult {
+    private struct HTTPResult: Sendable {
         let statusCode: Int
         let body: Data
     }
 
-    private struct Header {
-        let name: String
-        let value: String
+    private enum SenderError: LocalizedError, Sendable {
+        case invalidURL
+        case noFiles
+        case declined(Int)
+        case unexpectedStatus(Int, String)
+        case malformedResponse(String)
+        case fallbackTooLarge(Int64)
 
-        init(_ line: String) {
-            let parts = line.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
-            self.name = String(parts.first ?? "")
-            self.value = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : ""
+        var errorDescription: String? {
+            switch self {
+            case .invalidURL:
+                return "The peer address is invalid"
+            case .noFiles:
+                return "No readable files were selected"
+            case .declined:
+                return "The receiver declined the transfer"
+            case let .unexpectedStatus(status, body):
+                return body.isEmpty ? "The receiver returned HTTP \(status)" : "HTTP \(status): \(body)"
+            case let .malformedResponse(message):
+                return message
+            case let .fallbackTooLarge(size):
+                return "The direct connection failed and the \(size)-byte payload is too large for campus fallback"
+            }
         }
     }
 
-    private func writeTemporaryData(_ data: Data, suffix: String) throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("airsend-\(UUID().uuidString).\(suffix)")
-        try data.write(to: url)
+    private let alias = Host.current().localizedName ?? "AirSend"
+    private let deviceModel = "macOS"
+    private let deviceType = DeviceType.desktop
+    private let myFingerprint: String
+    private let localProtocol: ProtocolType
+    private let campusFallback: CampusFallbackCoordinator?
+    private let transferCoordinator: TransferCoordinator
+    private let appVersion: String
+
+    private var activeTransfers: [UUID: ActiveTransfer] = [:]
+    private var activeTransferOrder: [UUID] = []
+
+    private var onProgress: (@Sendable (Double) -> Void)?
+    private var onAccepted: (@Sendable () -> Void)?
+    private var onCancelled: (@Sendable () -> Void)?
+
+    init(
+        fingerprint: String,
+        localProtocol: ProtocolType = .https,
+        campusFallback: CampusFallbackCoordinator? = nil,
+        transferCoordinator: TransferCoordinator = TransferCoordinator()
+    ) {
+        self.myFingerprint = fingerprint
+        self.localProtocol = localProtocol
+        self.campusFallback = campusFallback
+        self.transferCoordinator = transferCoordinator
+        self.appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "3.5.0"
+    }
+
+    func setOnProgress(_ callback: @escaping @Sendable (Double) -> Void) {
+        onProgress = callback
+    }
+
+    func setOnAccepted(_ callback: @escaping @Sendable () -> Void) {
+        onAccepted = callback
+    }
+
+    func setOnCancelled(_ callback: @escaping @Sendable () -> Void) {
+        onCancelled = callback
+    }
+
+    @discardableResult
+    func sendFiles(
+        _ urls: [URL],
+        to device: Device,
+        source: TransferSource = .filePicker
+    ) async throws -> UUID {
+        let context = try await prepareFileContext(urls: urls, source: source)
+        return try await send(context: context, to: device)
+    }
+
+    @discardableResult
+    func sendData(
+        _ data: Data,
+        fileName: String,
+        mimeType: String,
+        previewText: String?,
+        source: TransferSource,
+        to device: Device
+    ) async throws -> UUID {
+        let temporaryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("airsend-payload-\(UUID().uuidString)", isDirectory: false)
+        try data.write(to: temporaryURL, options: .atomic)
+        let fileID = UUID().uuidString
+        let dto = FileDto(
+            id: fileID,
+            fileName: fileName,
+            size: Int64(data.count),
+            fileType: mimeType,
+            sha256: nil,
+            preview: previewText
+        )
+        let retrySpec = source == .clipboard
+            ? TransferRetrySpec(targetID: device.id, source: source, textPayload: previewText)
+            : nil
+        let context = SendContext(
+            files: [fileID: dto],
+            fileURLs: [fileID: temporaryURL],
+            temporaryURLs: [temporaryURL],
+            securityScopedURLs: [],
+            source: source,
+            previewText: previewText,
+            retrySpec: retrySpec
+        )
+        return try await send(context: context, to: device)
+    }
+
+    func retry(_ record: TransferRecord, to device: Device) async throws -> UUID {
+        guard let retrySpec = record.retrySpec else {
+            throw SenderError.malformedResponse("This transfer no longer has a retryable source")
+        }
+        if let text = retrySpec.textPayload {
+            return try await sendData(
+                Data(text.utf8),
+                fileName: "clipboard.txt",
+                mimeType: "text/plain",
+                previewText: text,
+                source: retrySpec.source,
+                to: device
+            )
+        }
+        let urls = retrySpec.sourcePaths.map { URL(fileURLWithPath: $0) }
+        guard urls.allSatisfy({ FileManager.default.fileExists(atPath: $0.path) }) else {
+            throw SenderError.malformedResponse("One or more original files are no longer available")
+        }
+        return try await sendFiles(urls, to: device, source: retrySpec.source)
+    }
+
+    func cancelCurrentTransfer() async {
+        guard let transferID = activeTransferOrder.last else { return }
+        await cancelTransfer(transferID)
+    }
+
+    func cancelTransfer(_ transferID: UUID) async {
+        guard var active = activeTransfers[transferID] else { return }
+        active.cancelled = true
+        activeTransfers[transferID] = active
+        _ = try? await transferCoordinator.requestCancellation(id: transferID)
+        active.sessions.values.forEach { $0.invalidateAndCancel() }
+        if let campusFallback {
+            for campusID in active.campusTransferIDs {
+                await campusFallback.cancelOutgoingTransfer(campusID)
+            }
+        }
+        if let remoteSession = active.remoteSession {
+            Task { [weak self] in
+                await self?.sendRemoteCancellation(remoteSession)
+            }
+        }
+        onCancelled?()
+    }
+
+    private func send(context: SendContext, to device: Device) async throws -> UUID {
+        guard !context.files.isEmpty else { throw SenderError.noFiles }
+        let transferID = UUID()
+        let coreFiles = context.files.values.map {
+            TransferFileRecord(
+                id: $0.id,
+                name: $0.fileName,
+                mimeType: $0.fileType,
+                size: $0.size,
+                sourcePath: context.fileURLs[$0.id]?.path
+            )
+        }.sorted { $0.id < $1.id }
+        await transferCoordinator.register(
+            id: transferID,
+            direction: .outgoing,
+            source: context.source,
+            peer: PeerIdentity(
+                id: device.id,
+                alias: device.alias,
+                fingerprint: device.id,
+                address: "\(device.ip):\(device.port)"
+            ),
+            files: coreFiles,
+            status: .queued,
+            previewText: context.previewText,
+            retrySpec: context.retrySpec.map {
+                TransferRetrySpec(
+                    targetID: device.id,
+                    source: $0.source,
+                    sourcePaths: $0.sourcePaths,
+                    textPayload: $0.textPayload
+                )
+            }
+        )
+        activeTransfers[transferID] = ActiveTransfer(startedAt: Date())
+        activeTransferOrder.append(transferID)
+        _ = try? await transferCoordinator.transition(id: transferID, to: .awaitingAcceptance)
+
+        defer {
+            for url in context.temporaryURLs {
+                try? FileManager.default.removeItem(at: url)
+            }
+            context.securityScopedURLs.forEach { $0.stopAccessingSecurityScopedResource() }
+            cleanupTransfer(transferID)
+        }
+
+        do {
+            do {
+                try await performDirectTransfer(
+                    transferID: transferID,
+                    context: context,
+                    device: device
+                )
+            } catch {
+                guard !isCancellation(error, transferID: transferID) else { throw CancellationError() }
+                guard !isDecline(error), !isCertificateFailure(error), let campusFallback else { throw error }
+                logTransfer("⚠️ Direct transfer to \(device.alias) failed; trying bounded campus fallback: \(error.localizedDescription)")
+                if let remoteSession = activeTransfers[transferID]?.remoteSession {
+                    await sendRemoteCancellation(remoteSession)
+                }
+                try await performCampusFallback(
+                    transferID: transferID,
+                    context: context,
+                    device: device,
+                    campusFallback: campusFallback
+                )
+            }
+
+            _ = try await transferCoordinator.finishCompleted(id: transferID)
+            return transferID
+        } catch {
+            if isCancellation(error, transferID: transferID) {
+                _ = try? await transferCoordinator.finishCancelled(id: transferID)
+                throw CancellationError()
+            }
+            if isDecline(error) {
+                _ = try? await transferCoordinator.finishDeclined(id: transferID)
+            } else {
+                _ = try? await transferCoordinator.finishFailed(
+                    id: transferID,
+                    code: failureCode(for: error),
+                    message: error.localizedDescription,
+                    retryable: isRetryable(error)
+                )
+            }
+            throw error
+        }
+    }
+
+    private func performDirectTransfer(
+        transferID: UUID,
+        context: SendContext,
+        device: Device
+    ) async throws {
+        let scheme = device.https ? "https" : "http"
+        let requestDTO = PrepareUploadRequestDto(
+            info: RegisterDto(
+                alias: alias,
+                version: appVersion,
+                deviceModel: deviceModel,
+                deviceType: deviceType.rawValue,
+                fingerprint: myFingerprint,
+                macAddress: LocalNetworkIdentity.primaryHardwareAddress(),
+                port: Int(NetworkPorts.transferPort),
+                protocolType: localProtocol.rawValue,
+                download: true
+            ),
+            files: context.files
+        )
+        let body = try JSONEncoder().encode(requestDTO)
+        let prepareURL = try endpointURL(device: device, scheme: scheme, path: "/api/localsend/v2/prepare-upload")
+        var request = URLRequest(url: prepareURL)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.timeoutInterval = 30
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("LocalSend/\(appVersion)", forHTTPHeaderField: "User-Agent")
+        request.setValue("close", forHTTPHeaderField: "Connection")
+
+        let result = try await performWithOneRetry(
+            transferID: transferID,
+            request: request,
+            device: device,
+            timeout: 30
+        )
+        if result.statusCode == 403 { throw SenderError.declined(result.statusCode) }
+        guard result.statusCode == 200 || result.statusCode == 204 else {
+            throw SenderError.unexpectedStatus(
+                result.statusCode,
+                String(data: result.body, encoding: .utf8) ?? ""
+            )
+        }
+
+        await markAccepted(transferID)
+        if result.statusCode == 204 { return }
+
+        let response: PrepareUploadResponseDto
+        do {
+            response = try JSONDecoder().decode(PrepareUploadResponseDto.self, from: result.body)
+        } catch {
+            throw SenderError.malformedResponse("The receiver returned an invalid prepare response")
+        }
+        guard Set(response.files.keys) == Set(context.files.keys) else {
+            throw SenderError.malformedResponse("The receiver did not return an upload token for every file")
+        }
+        setRemoteSession(
+            RemoteSession(sessionID: response.sessionId, device: device, scheme: scheme),
+            transferID: transferID
+        )
+
+        let entries = response.files.sorted { $0.key < $1.key }
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            var iterator = entries.makeIterator()
+            for _ in 0..<min(3, entries.count) {
+                if let entry = iterator.next() {
+                    group.addTask { try await self.upload(entry, transferID: transferID, context: context, device: device, scheme: scheme, sessionID: response.sessionId) }
+                }
+            }
+            while try await group.next() != nil {
+                if let entry = iterator.next() {
+                    group.addTask { try await self.upload(entry, transferID: transferID, context: context, device: device, scheme: scheme, sessionID: response.sessionId) }
+                }
+            }
+        }
+    }
+
+    private func upload(
+        _ entry: (key: String, value: String),
+        transferID: UUID,
+        context: SendContext,
+        device: Device,
+        scheme: String,
+        sessionID: String
+    ) async throws {
+        guard let file = context.files[entry.key], let fileURL = context.fileURLs[entry.key] else {
+            throw SenderError.malformedResponse("A prepared file is no longer available")
+        }
+        try checkCancellation(transferID)
+        var components = URLComponents(
+            url: try endpointURL(device: device, scheme: scheme, path: "/api/localsend/v2/upload"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "sessionId", value: sessionID),
+            URLQueryItem(name: "fileId", value: entry.key),
+            URLQueryItem(name: "token", value: entry.value),
+        ]
+        guard let uploadURL = components.url else { throw SenderError.invalidURL }
+        var request = URLRequest(url: uploadURL)
+        request.httpMethod = "POST"
+        request.timeoutInterval = max(180, Double(file.size) / 1_000_000)
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.setValue("LocalSend/\(appVersion)", forHTTPHeaderField: "User-Agent")
+        request.setValue("close", forHTTPHeaderField: "Connection")
+
+        let result = try await performUpload(
+            transferID: transferID,
+            fileID: file.id,
+            size: file.size,
+            request: request,
+            fileURL: fileURL,
+            device: device
+        )
+        guard 200..<300 ~= result.statusCode else {
+            throw SenderError.unexpectedStatus(
+                result.statusCode,
+                String(data: result.body, encoding: .utf8) ?? ""
+            )
+        }
+        await reportProgress(transferID: transferID, fileID: file.id, bytes: file.size, force: true)
+    }
+
+    private func performCampusFallback(
+        transferID: UUID,
+        context: SendContext,
+        device: Device,
+        campusFallback: CampusFallbackCoordinator
+    ) async throws {
+        for fileID in context.files.keys.sorted() {
+            try checkCancellation(transferID)
+            guard let file = context.files[fileID], let fileURL = context.fileURLs[fileID] else { continue }
+            guard file.size <= Int64(CampusFallbackCoordinator.maximumPayloadBytes) else {
+                throw SenderError.fallbackTooLarge(file.size)
+            }
+            let campusID = "\(transferID.uuidString)-\(fileID)"
+            addCampusTransferID(campusID, to: transferID)
+            let data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
+            try await campusFallback.sendFile(
+                data: data,
+                fileName: file.fileName,
+                fileType: file.fileType,
+                to: device,
+                transferID: campusID,
+                onAccepted: { [weak self] in
+                    Task { await self?.markAccepted(transferID) }
+                },
+                onProgress: { [weak self] progress in
+                    Task {
+                        await self?.reportProgress(
+                            transferID: transferID,
+                            fileID: file.id,
+                            bytes: Int64(Double(file.size) * progress),
+                            force: false
+                        )
+                    }
+                }
+            )
+            await markAccepted(transferID)
+            await reportProgress(transferID: transferID, fileID: file.id, bytes: file.size, force: true)
+        }
+    }
+
+    private func performWithOneRetry(
+        transferID: UUID,
+        request: URLRequest,
+        device: Device,
+        timeout: TimeInterval
+    ) async throws -> HTTPResult {
+        var lastError: Error?
+        for attempt in 1...2 {
+            try checkCancellation(transferID)
+            do {
+                return try await performRequest(
+                    transferID: transferID,
+                    request: request,
+                    device: device,
+                    timeout: timeout
+                )
+            } catch {
+                lastError = error
+                guard attempt == 1, isRetryable(error), !isCertificateFailure(error) else { throw error }
+                try await Task.sleep(nanoseconds: 350_000_000)
+            }
+        }
+        throw lastError ?? SenderError.malformedResponse("The request failed")
+    }
+
+    private func performRequest(
+        transferID: UUID,
+        request: URLRequest,
+        device: Device,
+        timeout: TimeInterval
+    ) async throws -> HTTPResult {
+        let delegate = SessionDelegate(
+            expectedFingerprint: device.https ? device.id : nil,
+            host: device.ip
+        )
+        let session = makeSession(delegate: delegate, timeout: timeout)
+        try register(session: session, transferID: transferID)
+        defer {
+            unregister(session: session, transferID: transferID)
+            session.finishTasksAndInvalidate()
+        }
+        let (data, response) = try await session.data(for: request)
+        return HTTPResult(statusCode: (response as? HTTPURLResponse)?.statusCode ?? -1, body: data)
+    }
+
+    private func performUpload(
+        transferID: UUID,
+        fileID: String,
+        size: Int64,
+        request: URLRequest,
+        fileURL: URL,
+        device: Device
+    ) async throws -> HTTPResult {
+        let delegate = SessionDelegate(
+            expectedFingerprint: device.https ? device.id : nil,
+            host: device.ip,
+            onProgress: { [weak self] _, sent, _ in
+                Task {
+                    await self?.reportProgress(
+                        transferID: transferID,
+                        fileID: fileID,
+                        bytes: min(size, sent),
+                        force: false
+                    )
+                }
+            }
+        )
+        let session = makeSession(delegate: delegate, timeout: request.timeoutInterval)
+        try register(session: session, transferID: transferID)
+        defer {
+            unregister(session: session, transferID: transferID)
+            session.finishTasksAndInvalidate()
+        }
+        let (data, response) = try await session.upload(for: request, fromFile: fileURL)
+        return HTTPResult(statusCode: (response as? HTTPURLResponse)?.statusCode ?? -1, body: data)
+    }
+
+    private func makeSession(delegate: SessionDelegate, timeout: TimeInterval) -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = timeout
+        configuration.timeoutIntervalForResource = timeout
+        configuration.httpMaximumConnectionsPerHost = 1
+        configuration.waitsForConnectivity = false
+        configuration.httpShouldUsePipelining = false
+        configuration.connectionProxyDictionary = [:]
+        return URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+    }
+
+    private func endpointURL(device: Device, scheme: String, path: String) throws -> URL {
+        let host = device.ip.contains(":") && !device.ip.hasPrefix("[") ? "[\(device.ip)]" : device.ip
+        guard let url = URL(string: "\(scheme)://\(host):\(device.port)\(path)") else {
+            throw SenderError.invalidURL
+        }
         return url
     }
 
-    private func performCurlRequest(url: String,
-                                    method: String,
-                                    headers: [String],
-                                    bodyFile: URL? = nil,
-                                    timeout: TimeInterval) async throws -> CurlHTTPResult {
-        let responseFile = FileManager.default.temporaryDirectory.appendingPathComponent("airsend-response-\(UUID().uuidString).tmp")
-        defer { try? FileManager.default.removeItem(at: responseFile) }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
-
-        var arguments = [
-            "-sS",
-            "-k",
-            "--http1.1",
-            "--connect-timeout", String(max(1, Int(ceil(min(timeout, 4))))),
-            "--max-time", String(max(1, Int(ceil(timeout)))),
-            "--output", responseFile.path,
-            "--write-out", "%{http_code}",
-            "-X", method
-        ]
-
-        for header in headers {
-            arguments.append(contentsOf: ["-H", header])
+    private func markAccepted(_ transferID: UUID) async {
+        guard var active = activeTransfers[transferID], !active.accepted else { return }
+        active.accepted = true
+        activeTransfers[transferID] = active
+        if let record = await transferCoordinator.record(id: transferID), record.status == .awaitingAcceptance {
+            _ = try? await transferCoordinator.transition(id: transferID, to: .preparing)
         }
-
-        if let bodyFile {
-            arguments.append(contentsOf: ["--data-binary", "@\(bodyFile.path)"])
-        }
-
-        arguments.append(url)
-        process.arguments = arguments
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        registerProcess(process)
-        defer { unregisterProcess(process) }
-
-        let terminationStatus: Int32 = try await withCheckedThrowingContinuation { continuation in
-            process.terminationHandler = { proc in
-                continuation.resume(returning: proc.terminationStatus)
-            }
-
-            do {
-                try process.run()
-            } catch {
-                continuation.resume(throwing: error)
-            }
-        }
-
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        let body = (try? Data(contentsOf: responseFile)) ?? Data()
-
-        if terminationStatus != 0 {
-            let stderr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "curl failed"
-            throw NSError(domain: "FileSenderCurl", code: Int(terminationStatus), userInfo: [NSLocalizedDescriptionKey: stderr])
-        }
-
-        let statusCode = Int(String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? -1
-        return CurlHTTPResult(statusCode: statusCode, body: body)
+        onAccepted?()
     }
 
-    private func performURLSessionUpload(url: URL,
-                                         headers: [String],
-                                         bodyFile: URL,
-                                         fileId: String,
-                                         fileSize: Int64,
-                                         device: Device,
-                                         timeout: TimeInterval) async throws -> CurlHTTPResult {
-        let delegate = SessionDelegate()
-        delegate.expectedFingerprints[device.ip] = device.id
-        let sender = self
-        delegate.onProgress = { _, totalBytesSent, _ in
-            let sent = min(totalBytesSent, fileSize)
-            Task {
-                await sender.updateSentBytes(fileId: fileId, sent: sent)
-            }
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.timeoutInterval = timeout
-        for header in headers.map(Header.init) where !header.name.isEmpty {
-            request.setValue(header.value, forHTTPHeaderField: header.name)
-        }
-
-        let session = makeSession(requestTimeout: timeout, resourceTimeout: timeout, delegate: delegate)
-        registerSession(session)
-        defer {
-            unregisterSession(session)
-            session.finishTasksAndInvalidate()
-        }
-
-        let (data, response) = try await session.upload(for: request, fromFile: bodyFile)
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-        return CurlHTTPResult(statusCode: statusCode, body: data)
-    }
-    
-    private func prepareContext(urls: [URL]) async throws -> SendContext {
-        var fileDtos: [String: FileDto] = [:]
-        var fileMap: [String: URL] = [:]
-        var tempFiles: [URL] = []
-        
-        for url in urls {
-            let fileId = UUID().uuidString
-            fileMap[fileId] = url
-            
-            let resources = try url.resourceValues(forKeys: [.fileSizeKey, .nameKey, .contentTypeKey])
-            let fileName = resources.name ?? url.lastPathComponent
-            
-            var isDir: ObjCBool = false
-            var finalUrl = url
-            var isTemp = false
-            
-            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
-                logTransfer("📂 Directory detected: \(fileName). Zipping...")
-                if let zipUrl = zipDirectory(at: url) {
-                    finalUrl = zipUrl
-                    isTemp = true
-                } else {
-                    logTransfer("❌ Failed to zip directory: \(fileName)")
-                    continue
-                }
-            }
-            
-            let finalResources = try finalUrl.resourceValues(forKeys: [.fileSizeKey, .nameKey, .contentTypeKey])
-            let finalFileSize = Int64(finalResources.fileSize ?? 0)
-            let finalFileName = finalResources.name ?? finalUrl.lastPathComponent
-            let finalFileType = finalFileName.hasSuffix(".zip") ? "application/zip" : (finalResources.contentType?.identifier ?? "application/octet-stream")
-
-            let fileDto = FileDto(
-                id: fileId,
-                fileName: finalFileName,
-                size: finalFileSize,
-                fileType: finalFileType,
-                sha256: nil,
-                preview: nil
-            )
-            fileDtos[fileId] = fileDto
-            fileMap[fileId] = finalUrl
-            
-            if isTemp {
-                 tempFiles.append(finalUrl)
-            }
-        }
-        return SendContext(fileDtos: fileDtos, fileMap: fileMap, tempFiles: tempFiles)
-    }
-    
-    private func internalSend(context: SendContext, to device: Device, scheme: String) async throws {
-        let host = formattedHost(for: device)
-        
-        // 1. Prepare DTOs from context
-        let fileDtos = context.fileDtos
-        let fileMap = context.fileMap
-        
-        // Pass fingerprint for verification
-        sessionDelegate.expectedFingerprints[device.ip] = device.id
-        
-        // 临时文件清理已移至 sendFiles 的 defer 中，避免 HTTPS→HTTP 重试时文件被提前删除
-        
-        guard !fileDtos.isEmpty else {
-            logTransfer("⚠️ No valid files to send")
-            throw NSError(
-                domain: "FileSender",
-                code: -2,
-                userInfo: [NSLocalizedDescriptionKey: "No valid local files to send"]
-            )
-        }
-        
-        let infoDto = RegisterDto(
-            alias: alias,
-            version: "3.5.0",
-            deviceModel: deviceModel,
-            deviceType: deviceType.rawValue,
-            fingerprint: myFingerprint,
-            macAddress: LocalNetworkIdentity.primaryHardwareAddress(),
-            port: Int(NetworkPorts.transferPort),
-            protocolType: localProtocol.rawValue,
-            download: true
-        )
-        
-        let requestDto = PrepareUploadRequestDto(
-            info: infoDto,
-            files: fileDtos
-        )
-        
-        // 2. Send Prepare Request
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = .prettyPrinted
-        let bodyData = try encoder.encode(requestDto)
-        
-        if let jsonString = String(data: bodyData, encoding: .utf8) {
-            logTransfer("📝 Prepare Request Body:\n\(jsonString)")
-        }
-        
-        var activeScheme = scheme
-        var lastError: Error?
-        var data: Data = Data()
-        var prepareStatusCode: Int?
-
-        for attempt in 1...2 {
-            let prepareUrlString = "\(activeScheme)://\(host):\(device.port)/api/localsend/v2/prepare-upload"
-            guard let prepareUrl = URL(string: prepareUrlString) else {
-                throw NSError(domain: "FileSender", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid prepare URL"])
-            }
-
-            var request = URLRequest(url: prepareUrl)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-            request.setValue("LocalSend/3.5.0", forHTTPHeaderField: "User-Agent")
-            request.setValue("close", forHTTPHeaderField: "Connection")
-            request.timeoutInterval = 30.0
-            request.httpBody = bodyData
-
-            do {
-                logTransfer("📡 Sending prepare to \(prepareUrlString) [attempt \(attempt)/2]")
-                let result = try await performPrepareRequest(request)
-                data = result.0
-                prepareStatusCode = result.1
-                logTransfer("📥 Handshake received response: \(result.1)")
-                break
-            } catch {
-                lastError = error
-                if attempt < 2 && shouldRetryPrepare(after: error) {
-                    logTransfer("♻️ Prepare transport failed: \(error.localizedDescription). Re-probing peer and retrying once...")
-                    activeScheme = try await resolveReachableScheme(for: device, preferredScheme: activeScheme)
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                    continue
-                }
-                logTransfer("❌ Prepare request failed: \(error.localizedDescription)")
-                throw error
-            }
-        }
-
-        guard let prepareStatusCode = prepareStatusCode else {
-             logTransfer("❌ Prepare failed: Timeout or persistent error: \(lastError?.localizedDescription ?? "Unknown")")
-             throw lastError ?? NSError(domain: "FileSender", code: -1, userInfo: [NSLocalizedDescriptionKey: "Handshake timeout"])
-        }
-        
-        logTransfer("📥 Prepare response status: \(prepareStatusCode)")
-        
-        if prepareStatusCode == 200 || prepareStatusCode == 204 {
-             onAccepted?()
-             if prepareStatusCode == 204 {
-                 logTransfer("✅ Receiver finished without requesting files (204)")
-                 return
-             }
-            
-            let decoder = JSONDecoder()
-            let responseDto = try decoder.decode(PrepareUploadResponseDto.self, from: data)
-            let uploadScheme = activeScheme
-            
-            // 3. Upload Files with Concurrency Control
-            let maxConcurrency = 3
-            try await withThrowingTaskGroup(of: Void.self) { group in
-                var uploadedCount = 0
-                let fileEntries = Array(responseDto.files)
-                
-                for entry in fileEntries {
-                    let fileId = entry.key
-                    let token = entry.value
-                    guard let fileUrl = fileMap[fileId] else { continue }
-                    
-                    group.addTask {
-                        logTransfer("📤 Starting concurrent upload for \(fileUrl.lastPathComponent) (ID: \(fileId))...")
-                        try await self.uploadFile(url: fileUrl, to: device, fileId: fileId, token: token, sessionId: responseDto.sessionId, scheme: uploadScheme)
-                    }
-                    
-                    uploadedCount += 1
-                    // Simple throttling: if we reach maxConcurrency, wait for one to finish before adding more
-                    if uploadedCount >= maxConcurrency {
-                        try await group.next()
-                        uploadedCount -= 1
-                    }
-                }
-                
-                // Wait for any remaining files to finish
-                try await group.waitForAll()
-            }
-            
-            logTransfer("🎉 All files sent successfully to \(device.alias)")
-            
-        } else {
-             logTransfer("❌ Prepare declined: \(prepareStatusCode)")
-             throw NSError(domain: "FileSender", code: prepareStatusCode, userInfo: [NSLocalizedDescriptionKey: "Request declined: \(prepareStatusCode)"])
-        }
-    }
-    
-    private func uploadFile(url: URL, to device: Device, fileId: String, token: String, sessionId: String, scheme: String) async throws {
-        let host = formattedHost(for: device)
-        let urlString = "\(scheme)://\(host):\(device.port)/api/localsend/v2/upload?sessionId=\(sessionId)&fileId=\(fileId)&token=\(token)"
-        
-        // Get file size without loading into memory
-        let resourceValues = try url.resourceValues(forKeys: [.fileSizeKey])
-        let fileSize = Int64(resourceValues.fileSize ?? 0)
-        
-        logTransfer("📦 File to upload: \(url.path), size: \(fileSize) bytes")
-        logTransfer("⬆️ Uploading \(fileId) (\(fileSize) bytes) to \(urlString)")
-        
-        // Check if cancelled before starting
-        guard !isCancelled else {
-            throw NSError(domain: "FileSender", code: -999, userInfo: [NSLocalizedDescriptionKey: "Transfer cancelled"])
-        }
-
-        guard let uploadURL = URL(string: urlString) else {
-            throw NSError(domain: "FileSender", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid upload URL"])
-        }
-
-        let response = try await performURLSessionUpload(
-            url: uploadURL,
-            headers: [
-                "Content-Type: application/octet-stream",
-                "User-Agent: LocalSend/3.5.0",
-                "Connection: close"
-            ],
-            bodyFile: url,
-            fileId: fileId,
-            fileSize: fileSize,
-            device: device,
-            timeout: 180.0
-        )
-
-        logTransfer("📥 Upload response for \(fileId): HTTP \(response.statusCode)")
-        
-        if response.statusCode >= 200 && response.statusCode < 300 {
-            logTransfer("✅ Upload complete for \(fileId)")
-            updateSentBytes(fileId: fileId, sent: fileSize)
-        } else {
-            let body = String(data: response.body, encoding: .utf8) ?? ""
-            logTransfer("❌ Upload failed for \(fileId): HTTP \(response.statusCode) - \(body)")
-            throw NSError(domain: "FileSender", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: "Upload failed: HTTP \(response.statusCode)"])
+    private func reportProgress(
+        transferID: UUID,
+        fileID: String,
+        bytes: Int64,
+        force: Bool
+    ) async {
+        guard activeTransfers[transferID] != nil else { return }
+        if let record = try? await transferCoordinator.updateFileProgress(
+            transferID: transferID,
+            fileID: fileID,
+            transferredBytes: bytes,
+            forceEvent: force
+        ) {
+            onProgress?(record.progress)
         }
     }
 
-    private func updateSentBytes(fileId: String, sent: Int64) {
-        sentBytesMap[fileId] = sent
-        updateGlobalProgress()
+    private func register(session: URLSession, transferID: UUID) throws {
+        try checkCancellation(transferID)
+        guard var active = activeTransfers[transferID] else { throw CancellationError() }
+        active.sessions[ObjectIdentifier(session)] = session
+        activeTransfers[transferID] = active
     }
-    
-    private func zipDirectory(at url: URL) -> URL? {
-        let fileManager = FileManager.default
-        let tempDir = fileManager.temporaryDirectory
-        let zipFileName = url.lastPathComponent + ".zip"
-        let zipUrl = tempDir.appendingPathComponent(zipFileName)
-        
-        try? fileManager.removeItem(at: zipUrl)
-        
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
-        process.arguments = ["-r", "-y", zipUrl.path, url.lastPathComponent]
-        process.currentDirectoryURL = url.deletingLastPathComponent()
-        
-        let pipe = Pipe()
-        process.standardError = pipe
-        
+
+    private func unregister(session: URLSession, transferID: UUID) {
+        guard var active = activeTransfers[transferID] else { return }
+        active.sessions.removeValue(forKey: ObjectIdentifier(session))
+        activeTransfers[transferID] = active
+    }
+
+    private func addCampusTransferID(_ campusID: String, to transferID: UUID) {
+        guard var active = activeTransfers[transferID] else { return }
+        active.campusTransferIDs.insert(campusID)
+        activeTransfers[transferID] = active
+    }
+
+    private func setRemoteSession(_ remoteSession: RemoteSession, transferID: UUID) {
+        guard var active = activeTransfers[transferID] else { return }
+        active.remoteSession = remoteSession
+        activeTransfers[transferID] = active
+    }
+
+    private func cleanupTransfer(_ transferID: UUID) {
+        activeTransfers.removeValue(forKey: transferID)
+        activeTransferOrder.removeAll { $0 == transferID }
+    }
+
+    private func checkCancellation(_ transferID: UUID) throws {
+        guard let active = activeTransfers[transferID], !active.cancelled else { throw CancellationError() }
+    }
+
+    private func isCancellation(_ error: Error, transferID: UUID) -> Bool {
+        error is CancellationError
+            || (error as NSError).code == NSURLErrorCancelled
+            || activeTransfers[transferID]?.cancelled == true
+            || activeTransfers[transferID] == nil
+    }
+
+    private func isDecline(_ error: Error) -> Bool {
+        if case SenderError.declined = error { return true }
+        return false
+    }
+
+    private func isCertificateFailure(_ error: Error) -> Bool {
+        let code = (error as NSError).code
+        return [
+            NSURLErrorServerCertificateUntrusted,
+            NSURLErrorServerCertificateHasBadDate,
+            NSURLErrorServerCertificateNotYetValid,
+            NSURLErrorServerCertificateHasUnknownRoot,
+            NSURLErrorClientCertificateRejected,
+        ].contains(code)
+    }
+
+    private func isRetryable(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else {
+            if case SenderError.fallbackTooLarge = error { return true }
+            return false
+        }
+        return [
+            NSURLErrorTimedOut,
+            NSURLErrorCannotConnectToHost,
+            NSURLErrorNetworkConnectionLost,
+            NSURLErrorNotConnectedToInternet,
+            NSURLErrorCannotFindHost,
+        ].contains(nsError.code)
+    }
+
+    private func failureCode(for error: Error) -> String {
+        if isCertificateFailure(error) { return "certificate_mismatch" }
+        if isRetryable(error) { return "network_unavailable" }
+        if case SenderError.malformedResponse = error { return "invalid_peer_response" }
+        return "send_failed"
+    }
+
+    private func sendRemoteCancellation(_ remote: RemoteSession) async {
         do {
-            try process.run()
+            var components = URLComponents(
+                url: try endpointURL(device: remote.device, scheme: remote.scheme, path: "/api/localsend/v2/cancel"),
+                resolvingAgainstBaseURL: false
+            )!
+            components.queryItems = [URLQueryItem(name: "sessionId", value: remote.sessionID)]
+            guard let url = components.url else { return }
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 4
+            request.setValue("0", forHTTPHeaderField: "Content-Length")
+            let delegate = SessionDelegate(
+                expectedFingerprint: remote.device.https ? remote.device.id : nil,
+                host: remote.device.ip
+            )
+            let session = makeSession(delegate: delegate, timeout: 4)
+            defer { session.finishTasksAndInvalidate() }
+            _ = try await session.data(for: request)
         } catch {
-            logTransfer("❌ zip process failed to launch: \(error)")
-            return nil
+            logTransfer("⚠️ Could not notify peer about cancellation: \(error.localizedDescription)")
         }
-        process.waitUntilExit()
-        
-        let stderrData = pipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrStr = String(data: stderrData, encoding: .utf8) ?? ""
-        if !stderrStr.isEmpty {
-            logTransfer("⚠️ zip stderr: \(stderrStr)")
+    }
+
+    private func prepareFileContext(urls: [URL], source: TransferSource) async throws -> SendContext {
+        guard !urls.isEmpty, urls.count <= 512 else { throw SenderError.noFiles }
+        var files: [String: FileDto] = [:]
+        var fileURLs: [String: URL] = [:]
+        var temporaryURLs: [URL] = []
+        var securityScopedURLs: [URL] = []
+
+        do {
+            for sourceURL in urls {
+                if sourceURL.startAccessingSecurityScopedResource() {
+                    securityScopedURLs.append(sourceURL)
+                }
+                let values = try sourceURL.resourceValues(forKeys: [.isDirectoryKey])
+                let finalURL: URL
+                if values.isDirectory == true {
+                    finalURL = try await Self.archiveDirectory(sourceURL)
+                    temporaryURLs.append(finalURL)
+                } else {
+                    finalURL = sourceURL
+                }
+
+                let finalValues = try finalURL.resourceValues(forKeys: [.fileSizeKey, .nameKey, .contentTypeKey])
+                let fileID = UUID().uuidString
+                let fileName = finalValues.name ?? finalURL.lastPathComponent
+                let mimeType = finalURL.pathExtension.lowercased() == "zip"
+                    ? "application/zip"
+                    : (finalValues.contentType?.preferredMIMEType ?? "application/octet-stream")
+                let file = FileDto(
+                    id: fileID,
+                    fileName: fileName,
+                    size: Int64(finalValues.fileSize ?? 0),
+                    fileType: mimeType,
+                    sha256: nil,
+                    preview: nil
+                )
+                files[fileID] = file
+                fileURLs[fileID] = finalURL
+            }
+        } catch {
+            temporaryURLs.forEach { try? FileManager.default.removeItem(at: $0) }
+            securityScopedURLs.forEach { $0.stopAccessingSecurityScopedResource() }
+            throw error
         }
-        
-        if process.terminationStatus == 0 {
-            let attrs = try? fileManager.attributesOfItem(atPath: zipUrl.path)
-            let size = attrs?[.size] as? Int64 ?? 0
-            logTransfer("📦 zip exit: \(process.terminationStatus), output: \(zipUrl.path), size: \(size) bytes")
-            return zipUrl
-        }
-        logTransfer("❌ zip failed with exit code: \(process.terminationStatus)")
-        return nil
+
+        let retrySpec = TransferRetrySpec(
+            targetID: "",
+            source: source,
+            sourcePaths: urls.map(\.path)
+        )
+        return SendContext(
+            files: files,
+            fileURLs: fileURLs,
+            temporaryURLs: temporaryURLs,
+            securityScopedURLs: securityScopedURLs,
+            source: source,
+            previewText: nil,
+            retrySpec: retrySpec
+        )
+    }
+
+    nonisolated private static func archiveDirectory(_ sourceURL: URL) async throws -> URL {
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(sourceURL.lastPathComponent)-\(UUID().uuidString).zip")
+        return try await Task.detached(priority: .userInitiated) {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+            process.arguments = ["-c", "-k", "--sequesterRsrc", "--keepParent", sourceURL.path, destination.path]
+            let errorPipe = Pipe()
+            process.standardError = errorPipe
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                let message = String(data: data, encoding: .utf8) ?? "Directory archive failed"
+                throw SenderError.malformedResponse(message)
+            }
+            return destination
+        }.value
     }
 }

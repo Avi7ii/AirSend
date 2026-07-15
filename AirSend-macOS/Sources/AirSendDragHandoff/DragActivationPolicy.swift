@@ -124,15 +124,14 @@ public struct DragActivationPolicy {
         hasDragPasteboardEvidence: Bool,
         isWithinActivationBand: Bool
     ) -> DragActivationDecision {
-        let hasPointerDragMovement = observePointerDrag(location: location)
+        observePointerDrag(location: location)
         let isFirstRecognizedPayload = hasRecognizedPayload && observedPasteboardChangeCount != changeCount
         let hasMovedEnough = observe(
             changeCount: changeCount,
             location: location,
             hasRecognizedPayload: hasRecognizedPayload
         )
-        let canShowCandidatePreview = hasDragPasteboardEvidence && hasPointerDragMovement
-        let shouldActivate = isWithinActivationBand && (hasRecognizedPayload || canShowCandidatePreview)
+        let shouldActivate = isWithinActivationBand && (hasRecognizedPayload || hasDragPasteboardEvidence)
         return DragActivationDecision(
             shouldActivate: shouldActivate,
             allowsFallbackRecovery: shouldActivate && hasRecognizedPayload && (isFirstRecognizedPayload || hasMovedEnough)

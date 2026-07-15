@@ -87,6 +87,19 @@ impl Client {
     }
 }
 
+pub async fn register_device(
+    State(peers): State<PeerMap>,
+    Extension(client): Extension<DeviceInfo>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Json(device): Json<DeviceInfo>,
+) -> Json<DeviceInfo> {
+    let mut addr = addr;
+    addr.set_port(device.port);
+    let mut peers = peers.lock().await;
+    remember_peer_entry(&mut peers, addr, device.clone());
+    Json(client)
+}
+
 #[cfg(test)]
 mod tests {
     use super::announcement_port_candidates;
@@ -100,17 +113,4 @@ mod tests {
             vec![53317, 53318, 53319]
         );
     }
-}
-
-pub async fn register_device(
-    State(peers): State<PeerMap>,
-    Extension(client): Extension<DeviceInfo>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    Json(device): Json<DeviceInfo>,
-) -> Json<DeviceInfo> {
-    let mut addr = addr;
-    addr.set_port(device.port);
-    let mut peers = peers.lock().await;
-    remember_peer_entry(&mut peers, addr, device.clone());
-    Json(client)
 }

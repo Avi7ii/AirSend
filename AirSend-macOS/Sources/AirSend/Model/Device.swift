@@ -1,6 +1,6 @@
 import Foundation
 
-struct Device: Identifiable, Equatable, Hashable, Codable {
+struct Device: Identifiable, Equatable, Hashable, Codable, Sendable {
     let id: String // fingerprint
     let alias: String
     let ip: String

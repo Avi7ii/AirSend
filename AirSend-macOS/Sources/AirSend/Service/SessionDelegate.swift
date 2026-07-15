@@ -1,81 +1,130 @@
-import Foundation
 import CryptoKit
+import Foundation
 
 final class SessionDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    var onProgress: ((URLSessionTask, Int64, Int64) -> Void)?
-    var expectedFingerprints: [String: String] = [:] // host -> fingerprint
-    
-    // Calculate SHA-256 as required by LocalSend protocol
-    private func calculateFingerprint(for certificate: SecCertificate) -> String? {
-        guard let derData = SecCertificateCopyData(certificate) as Data? else { return nil }
-        let hash = SHA256.hash(data: derData)
-        return hash.map { String(format: "%02x", $0) }.joined()
+    typealias ProgressHandler = @Sendable (URLSessionTask, Int64, Int64) -> Void
+
+    private let lock = NSLock()
+    private var fingerprintsByHost: [String: String]
+    private var progressHandler: ProgressHandler?
+    private var lastCertificateFingerprint: String?
+
+    init(expectedFingerprint: String? = nil, host: String? = nil, onProgress: ProgressHandler? = nil) {
+        if let expectedFingerprint, let host {
+            self.fingerprintsByHost = [Self.normalizeHost(host): Self.normalizeFingerprint(expectedFingerprint)]
+        } else {
+            self.fingerprintsByHost = [:]
+        }
+        self.progressHandler = onProgress
+        super.init()
     }
-    
-    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
-        onProgress?(task, totalBytesSent, totalBytesExpectedToSend)
+
+    var expectedFingerprints: [String: String] {
+        get { lock.withLock { fingerprintsByHost } }
+        set {
+            lock.withLock {
+                fingerprintsByHost = Dictionary(uniqueKeysWithValues: newValue.map {
+                    (Self.normalizeHost($0.key), Self.normalizeFingerprint($0.value))
+                })
+            }
+        }
+    }
+
+    var onProgress: ProgressHandler? {
+        get { lock.withLock { progressHandler } }
+        set { lock.withLock { progressHandler = newValue } }
+    }
+
+    var presentedFingerprint: String? {
+        lock.withLock { lastCertificateFingerprint }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didSendBodyData bytesSent: Int64,
+        totalBytesSent: Int64,
+        totalBytesExpectedToSend: Int64
+    ) {
+        lock.withLock { progressHandler }?(task, totalBytesSent, totalBytesExpectedToSend)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error = error {
-            logTransfer("❌ [SessionDelegate] Task \(task.taskDescription ?? "") finished with error: \(error.localizedDescription) (Code: \((error as NSError).code))")
-        } else {
-            logTransfer("✅ [SessionDelegate] Task \(task.taskDescription ?? "") finished successfully.")
+        if let error {
+            logTransfer("❌ [SessionDelegate] \(task.taskDescription ?? "request") failed: \(error.localizedDescription)")
         }
     }
-    
-    // For session-level challenges
-    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        logTransfer("🔐 Session challenge: \(challenge.protectionSpace.authenticationMethod)")
-        handle(challenge: challenge, completionHandler: completionHandler)
-    }
-    
-    // For task-level challenges
-    func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        logTransfer("🔐 Task challenge for \(task.taskDescription ?? "unknown"): \(challenge.protectionSpace.authenticationMethod)")
-        handle(challenge: challenge, completionHandler: completionHandler)
-    }
-    
-    private func handle(challenge: URLAuthenticationChallenge, completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-           let serverTrust = challenge.protectionSpace.serverTrust {
-            
-            let host = challenge.protectionSpace.host
-            
-            // LocalSend Protocol: Verify fingerprint if known
-            if let expectedFingerprint = expectedFingerprints[host] {
-                // Robust Certificate Extraction
-                var leafCert: SecCertificate?
-                if let certs = SecTrustCopyCertificateChain(serverTrust) as? [SecCertificate], !certs.isEmpty {
-                    leafCert = certs.first
-                } else {
-                    // Fallback to older API or index 0 if chain copy fails
-                    leafCert = SecTrustGetCertificateAtIndex(serverTrust, 0)
-                }
 
-                if let cert = leafCert, let actualFingerprint = calculateFingerprint(for: cert) {
-                    if actualFingerprint.lowercased() == expectedFingerprint.lowercased() {
-                        logTransfer("✅ Fingerprint verified for \(host)")
-                        completionHandler(.useCredential, URLCredential(trust: serverTrust))
-                        return
-                    } else {
-                        logTransfer("❌ Fingerprint mismatch for \(host)! Expected: \(expectedFingerprint), Actual: \(actualFingerprint). Rejecting security risk.")
-                        // Strict security: Reject if we EXPECTED a fingerprint but got a different one.
-                        // This prevents MITM. If connection fails here, it's a legit security block.
-                        completionHandler(.cancelAuthenticationChallenge, nil)
-                        return
-                    }
-                }
-                logTransfer("⚠️ Could not extract certificate/fingerprint from \(host). Allowing connection (Soft Fail).")
-            } else {
-                logTransfer("🙌 Trusting \(host) (No expected fingerprint found)...")
-            }
-            
-            // Default: Trust
-            completionHandler(.useCredential, URLCredential(trust: serverTrust))
-        } else {
-            logTransfer("🤷 Default handling for \(challenge.protectionSpace.authenticationMethod)")
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        handle(challenge: challenge, completionHandler: completionHandler)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        handle(challenge: challenge, completionHandler: completionHandler)
+    }
+
+    private func handle(
+        challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let serverTrust = challenge.protectionSpace.serverTrust else {
             completionHandler(.performDefaultHandling, nil)
+            return
         }
+
+        let host = Self.normalizeHost(challenge.protectionSpace.host)
+        let expected = lock.withLock { fingerprintsByHost[host] }
+        guard let chain = SecTrustCopyCertificateChain(serverTrust) as? [SecCertificate],
+              let certificate = chain.first,
+              let actual = Self.calculateFingerprint(for: certificate) else {
+            logTransfer("❌ Unable to read the certificate presented by \(host)")
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        lock.withLock { lastCertificateFingerprint = actual }
+
+        guard let expected else {
+            completionHandler(.useCredential, URLCredential(trust: serverTrust))
+            return
+        }
+
+        guard actual == expected else {
+            logTransfer("❌ Certificate fingerprint mismatch for \(host). Expected \(expected), received \(actual)")
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+
+        completionHandler(.useCredential, URLCredential(trust: serverTrust))
+    }
+
+    private static func calculateFingerprint(for certificate: SecCertificate) -> String? {
+        let data = SecCertificateCopyData(certificate) as Data
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func normalizeFingerprint(_ value: String) -> String {
+        value.lowercased().filter(\.isHexDigit)
+    }
+
+    private static func normalizeHost(_ value: String) -> String {
+        value.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
+    }
+}
+
+private extension NSLock {
+    func withLock<T>(_ body: () throws -> T) rethrows -> T {
+        lock()
+        defer { unlock() }
+        return try body()
     }
 }

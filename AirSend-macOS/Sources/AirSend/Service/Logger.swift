@@ -23,6 +23,22 @@ enum FileLogger {
             await store.persist(logMessage)
         }
     }
+
+    static func tail(maxLines: Int = 120) async -> [String] {
+        await store.tail(maxLines: maxLines)
+    }
+
+    static func export(to destinationURL: URL) async throws {
+        try await store.export(to: destinationURL)
+    }
+
+    static func clear() async throws {
+        try await store.clear()
+    }
+
+    static func storageURL() async -> URL {
+        await store.storageURL()
+    }
 }
 
 private actor FileLogStore {
@@ -64,6 +80,47 @@ private actor FileLogStore {
         append(data: Data(message.utf8), to: currentLogURL)
         rotateCurrentLogIfNeeded()
         cleanupLogsIfNeeded(force: false)
+    }
+
+    func tail(maxLines: Int) -> [String] {
+        prepareStorageIfNeeded()
+        guard let data = try? Data(contentsOf: currentLogURL),
+              let text = String(data: data, encoding: .utf8) else { return [] }
+        let bounded = max(1, min(maxLines, 1_000))
+        return Array(text.split(whereSeparator: \.isNewline).suffix(bounded)).map(String.init)
+    }
+
+    func export(to destinationURL: URL) throws {
+        prepareStorageIfNeeded()
+        let files = existingLogFiles().sorted { lhs, rhs in
+            (fileTimestamp(for: lhs) ?? .distantPast) < (fileTimestamp(for: rhs) ?? .distantPast)
+        }
+        var output = Data()
+        for file in files {
+            output.append(Data("===== \(file.lastPathComponent) =====\n".utf8))
+            if let data = try? Data(contentsOf: file) {
+                output.append(data)
+                if data.last != 0x0A { output.append(0x0A) }
+            }
+        }
+        try output.write(to: destinationURL, options: .atomic)
+    }
+
+    func clear() throws {
+        prepareStorageIfNeeded()
+        for file in existingLogFiles() {
+            try? fileManager.removeItem(at: file)
+        }
+        fileManager.createFile(
+            atPath: currentLogURL.path,
+            contents: nil,
+            attributes: [.posixPermissions: 0o600]
+        )
+    }
+
+    func storageURL() -> URL {
+        prepareStorageIfNeeded()
+        return logDirectoryURL
     }
 
     private func prepareStorageIfNeeded() {

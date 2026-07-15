@@ -5,6 +5,7 @@ class DeviceMenuItemView: NSView {
         case idle
         case connecting
         case connected
+        case offline
     }
     
     private let iconView = NSImageView()
@@ -25,6 +26,7 @@ class DeviceMenuItemView: NSView {
     private var canForget: Bool = false
     private var displayTitleOverride: String?
     private var displaySubtitleOverride: String?
+    private var baseSubtitle = ""
     private let forgetButtonRect = NSRect(x: 186, y: 12, width: 16, height: 16)
     
     init(
@@ -89,6 +91,7 @@ class DeviceMenuItemView: NSView {
         
         // Subtitle (Increased gap to 5px, Y=4 for absolute center)
         subtitleLabel.stringValue = displaySubtitle
+        baseSubtitle = displaySubtitle
         subtitleLabel.font = .systemFont(ofSize: 10)
         subtitleLabel.textColor = .secondaryLabelColor
         subtitleLabel.frame = NSRect(x: 43, y: 4, width: 132, height: 12)
@@ -124,14 +127,26 @@ class DeviceMenuItemView: NSView {
             spinner.stopAnimation(nil)
             checkmarkView.isHidden = true
             titleLabel.textColor = .labelColor
+            subtitleLabel.stringValue = baseSubtitle
+            iconView.alphaValue = 1
         case .connecting:
             spinner.startAnimation(nil)
             checkmarkView.isHidden = true
             titleLabel.textColor = .labelColor
+            subtitleLabel.stringValue = baseSubtitle
+            iconView.alphaValue = 1
         case .connected:
             spinner.stopAnimation(nil)
             checkmarkView.isHidden = false
             titleLabel.textColor = .controlAccentColor
+            subtitleLabel.stringValue = baseSubtitle
+            iconView.alphaValue = 1
+        case .offline:
+            spinner.stopAnimation(nil)
+            checkmarkView.isHidden = true
+            titleLabel.textColor = .tertiaryLabelColor
+            subtitleLabel.stringValue = baseSubtitle.isEmpty ? "Offline" : "\(baseSubtitle) · Offline"
+            iconView.alphaValue = 0.45
         }
     }
     
@@ -149,9 +164,11 @@ class DeviceMenuItemView: NSView {
             checkmarkView.contentTintColor = .alternateSelectedControlTextColor
             forgetButton.contentTintColor = .alternateSelectedControlTextColor.withAlphaComponent(0.7)
         } else {
-            titleLabel.textColor = state == .connected ? .controlAccentColor : .labelColor
+            titleLabel.textColor = state == .connected
+                ? .controlAccentColor
+                : (state == .offline ? .tertiaryLabelColor : .labelColor)
             subtitleLabel.textColor = .secondaryLabelColor
-            iconView.contentTintColor = .labelColor
+            iconView.contentTintColor = state == .offline ? .tertiaryLabelColor : .labelColor
             checkmarkView.contentTintColor = .controlAccentColor
             forgetButton.contentTintColor = .secondaryLabelColor.withAlphaComponent(0.2)
         }
@@ -163,6 +180,7 @@ class DeviceMenuItemView: NSView {
 
     // Support clicking: When the view is clicked, trigger the connection flow directly
     override func mouseUp(with event: NSEvent) {
+        guard state != .offline else { return }
         let point = convert(event.locationInWindow, from: nil)
         
         // Check if click is on the Forget (X) button (only if it exists)

@@ -1,4 +1,5 @@
 import Foundation
+import AirSendRuntimeCore
 
 private enum CampusFallbackConstants {
     static let marker = 1
@@ -80,6 +81,8 @@ private struct OutgoingTransferState {
 }
 
 private struct IncomingTransferState {
+    let runtimeID: UUID
+    let fileID: String
     let senderId: String
     let senderAlias: String
     let sessionNonce: String
@@ -99,19 +102,21 @@ actor CampusFallbackCoordinator {
 
     private let alias = Host.current().localizedName ?? "AirSend"
     private let fingerprint: String
+    private let transferCoordinator: TransferCoordinator
 
     private var packetSender: (@Sendable (Data) -> Void)?
     private var onTextReceived: (@Sendable (String) -> Void)?
     private var onTransferRequest: (@Sendable (TransferRequest) async -> Bool)?
-    private var getSaveDirectory: (@Sendable () -> URL)?
+    private var getSaveDirectory: (@Sendable (String, String) -> URL)?
     private var onProgress: (@Sendable (Double) -> Void)?
     private var onTransferComplete: (@Sendable (Bool, String?) -> Void)?
 
     private var outgoing: [String: OutgoingTransferState] = [:]
     private var incoming: [String: IncomingTransferState] = [:]
 
-    init(fingerprint: String) {
+    init(fingerprint: String, transferCoordinator: TransferCoordinator) {
         self.fingerprint = fingerprint
+        self.transferCoordinator = transferCoordinator
     }
 
     nonisolated static func looksLikeCampusPacket(_ data: Data) -> Bool {
@@ -133,7 +138,7 @@ actor CampusFallbackCoordinator {
         self.onTransferRequest = callback
     }
 
-    func setGetSaveDirectory(_ callback: @escaping @Sendable () -> URL) {
+    func setGetSaveDirectory(_ callback: @escaping @Sendable (String, String) -> URL) {
         self.getSaveDirectory = callback
     }
 
@@ -145,7 +150,8 @@ actor CampusFallbackCoordinator {
         self.onTransferComplete = callback
     }
 
-    func sendText(_ text: String, to device: Device) async throws {
+    func sendText(_ text: String, to device: Device, transferID: String? = nil) async throws {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         guard let data = text.data(using: .utf8) else {
             throw NSError(domain: "CampusFallback", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unable to encode text"])
         }
@@ -154,6 +160,7 @@ actor CampusFallbackCoordinator {
             fileName: "clipboard.txt",
             fileType: "text/plain",
             to: device,
+            transferID: transferID,
             onAccepted: nil,
             onProgress: nil
         )
@@ -164,10 +171,29 @@ actor CampusFallbackCoordinator {
         fileName: String,
         fileType: String,
         to device: Device,
+        transferID: String? = nil,
         onAccepted: (@Sendable () -> Void)? = nil,
         onProgress: (@Sendable (Double) -> Void)? = nil
     ) async throws {
-        try await sendPayload(data, fileName: fileName, fileType: fileType, to: device, onAccepted: onAccepted, onProgress: onProgress)
+        try await sendPayload(
+            data,
+            fileName: fileName,
+            fileType: fileType,
+            to: device,
+            transferID: transferID,
+            onAccepted: onAccepted,
+            onProgress: onProgress
+        )
+    }
+
+    func cancelOutgoingTransfer(_ transferID: String) {
+        guard var state = outgoing[transferID] else { return }
+        state.cancelled = true
+        if state.completion == nil {
+            state.completion = .failure(CampusFailure(message: "Campus transfer cancelled"))
+        }
+        state.lastActivityAt = Date()
+        outgoing[transferID] = state
     }
 
     func cancelAllOutgoingTransfers() {
@@ -187,8 +213,43 @@ actor CampusFallbackCoordinator {
         FileLogger.log("🛑 Campus fallback cancelled \(transferIds.count) outgoing transfer(s)")
     }
 
+    func cancelIncomingTransfer(_ runtimeID: UUID) async -> Bool {
+        guard let entry = incoming.first(where: { $0.value.runtimeID == runtimeID }) else {
+            return false
+        }
+        let transferID = entry.key
+        let state = entry.value
+        incoming.removeValue(forKey: transferID)
+        _ = try? await transferCoordinator.finishCancelled(id: runtimeID)
+        let response = CampusEnvelope(
+            campusFallback: CampusFallbackConstants.marker,
+            type: "complete",
+            transferId: transferID,
+            sessionNonce: state.sessionNonce,
+            senderId: fingerprint,
+            targetId: state.senderId,
+            senderAlias: nil,
+            fileName: nil,
+            fileType: nil,
+            totalSize: nil,
+            chunkSize: nil,
+            totalChunks: nil,
+            windowSize: nil,
+            windowStart: nil,
+            count: nil,
+            index: nil,
+            payload: nil,
+            missing: nil,
+            success: false,
+            message: "Cancelled"
+        )
+        try? await sendRepeated(envelope: response)
+        onTransferComplete?(false, "Cancelled")
+        return true
+    }
+
     func handlePacket(_ data: Data, sourceIP: String) async {
-        pruneStaleTransfers()
+        await pruneStaleTransfers()
 
         guard let envelope = try? JSONDecoder().decode(CampusEnvelope.self, from: data),
               envelope.campusFallback == CampusFallbackConstants.marker else {
@@ -222,17 +283,18 @@ actor CampusFallbackCoordinator {
         fileName: String,
         fileType: String,
         to device: Device,
+        transferID requestedTransferID: String?,
         onAccepted: (@Sendable () -> Void)?,
         onProgress progressHandler: (@Sendable (Double) -> Void)?
     ) async throws {
-        pruneStaleTransfers()
+        await pruneStaleTransfers()
 
         guard !data.isEmpty else { return }
         guard data.count <= CampusFallbackConstants.maxBytes else {
             throw NSError(domain: "CampusFallback", code: -1, userInfo: [NSLocalizedDescriptionKey: "Campus fallback only supports files up to \(CampusFallbackConstants.maxBytes) bytes"])
         }
 
-        let transferId = UUID().uuidString
+        let transferId = requestedTransferID ?? UUID().uuidString
         let sessionNonce = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         let totalChunks = Int(ceil(Double(data.count) / Double(CampusFallbackConstants.chunkSize)))
         outgoing[transferId] = OutgoingTransferState(sessionNonce: sessionNonce)
@@ -389,14 +451,40 @@ actor CampusFallbackCoordinator {
         let request = TransferRequest(
             sessionId: envelope.transferId,
             senderAlias: envelope.senderAlias ?? "Campus Sender",
+            senderFingerprint: envelope.senderId,
             fileCount: 1,
             fileNames: [fileName],
             totalSize: Int64(totalSize)
         )
 
+        let runtimeID = UUID(uuidString: envelope.transferId) ?? UUID()
+        let fileID = "campus-file"
+        await transferCoordinator.register(
+            id: runtimeID,
+            direction: .incoming,
+            source: .remotePeer,
+            peer: PeerIdentity(
+                id: envelope.senderId,
+                alias: envelope.senderAlias ?? "Campus Sender",
+                fingerprint: envelope.senderId,
+                address: sourceIP
+            ),
+            files: [
+                TransferFileRecord(
+                    id: fileID,
+                    name: fileName,
+                    mimeType: fileType,
+                    size: Int64(totalSize)
+                )
+            ],
+            status: .awaitingAcceptance,
+            previewText: fileName == "clipboard.txt" && fileType == "text/plain" ? "Clipboard text" : nil
+        )
+
         if let onTransferRequest {
             let allowed = await onTransferRequest(request)
             if !allowed {
+                _ = try? await transferCoordinator.finishDeclined(id: runtimeID)
                 let denied = CampusEnvelope(
                     campusFallback: CampusFallbackConstants.marker,
                     type: "complete",
@@ -425,6 +513,8 @@ actor CampusFallbackCoordinator {
         }
 
         incoming[envelope.transferId] = IncomingTransferState(
+            runtimeID: runtimeID,
+            fileID: fileID,
             senderId: envelope.senderId,
             senderAlias: envelope.senderAlias ?? "Campus Sender",
             sessionNonce: envelope.sessionNonce,
@@ -437,6 +527,7 @@ actor CampusFallbackCoordinator {
             assembled: Data(capacity: totalSize),
             windowChunks: [:]
         )
+        _ = try? await transferCoordinator.transition(id: runtimeID, to: .preparing)
 
         try await sendRepeated(
             envelope: CampusEnvelope.base(
@@ -487,6 +578,12 @@ actor CampusFallbackCoordinator {
             }
             state.nextWindowStart = windowEnd
             onProgress?(Double(state.assembled.count) / Double(state.totalSize))
+            _ = try? await transferCoordinator.updateFileProgress(
+                transferID: state.runtimeID,
+                fileID: state.fileID,
+                transferredBytes: Int64(state.assembled.count),
+                forceEvent: state.assembled.count == state.totalSize
+            )
         }
 
         state.lastActivityAt = Date()
@@ -534,7 +631,12 @@ actor CampusFallbackCoordinator {
                   state.nextWindowStart == state.totalChunks else {
                 throw NSError(domain: "CampusFallback", code: -1, userInfo: [NSLocalizedDescriptionKey: "Transfer incomplete"])
             }
-            try persistIncoming(state)
+            let result = try persistIncoming(state)
+            _ = try await transferCoordinator.finishCompleted(
+                id: state.runtimeID,
+                savedPathsByFile: result.savedPath.map { [state.fileID: $0] } ?? [:],
+                previewPathsByFile: result.previewPath.map { [state.fileID: $0] } ?? [:]
+            )
             onTransferComplete?(true, nil)
             complete = CampusEnvelope(
                 campusFallback: CampusFallbackConstants.marker,
@@ -559,6 +661,12 @@ actor CampusFallbackCoordinator {
                 message: nil
             )
         } catch {
+            _ = try? await transferCoordinator.finishFailed(
+                id: state.runtimeID,
+                code: "campus_receive_failed",
+                message: error.localizedDescription,
+                retryable: false
+            )
             onTransferComplete?(false, error.localizedDescription)
             complete = CampusEnvelope(
                 campusFallback: CampusFallbackConstants.marker,
@@ -659,7 +767,7 @@ actor CampusFallbackCoordinator {
             try send(envelope: prepare)
             let deadline = Date().addingTimeInterval(1.5)
             while Date() < deadline {
-                pruneStaleTransfers()
+                await pruneStaleTransfers()
                 let state = try ensureOutgoingActive(transferId)
                 if state.accepted {
                     return true
@@ -673,7 +781,7 @@ actor CampusFallbackCoordinator {
     private func awaitWindowResult(transferId: String, windowStart: Int) async throws -> OutgoingWindowResult {
         let deadline = Date().addingTimeInterval(3.5)
         while Date() < deadline {
-            pruneStaleTransfers()
+            await pruneStaleTransfers()
             _ = try ensureOutgoingActive(transferId)
             if let result = outgoing[transferId]?.windowResults.removeValue(forKey: windowStart) {
                 return result
@@ -686,7 +794,7 @@ actor CampusFallbackCoordinator {
     private func awaitCompletion(transferId: String) async throws {
         let deadline = Date().addingTimeInterval(6.0)
         while Date() < deadline {
-            pruneStaleTransfers()
+            await pruneStaleTransfers()
             _ = try ensureOutgoingActive(transferId)
             if let result = outgoing[transferId]?.completion {
                 switch result {
@@ -701,18 +809,22 @@ actor CampusFallbackCoordinator {
         throw NSError(domain: "CampusFallback", code: -1, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for campus completion"])
     }
 
-    private func persistIncoming(_ state: IncomingTransferState) throws {
-        let baseDir = getSaveDirectory?() ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
-
-        if state.fileType == "text/plain",
-           let text = String(data: state.assembled, encoding: .utf8) {
-            onTextReceived?(text)
-            if state.fileName == "clipboard.txt" {
-                return
+    private func persistIncoming(_ state: IncomingTransferState) throws -> (savedPath: String?, previewPath: String?) {
+        if state.fileName == "clipboard.txt", state.fileType == "text/plain" {
+            guard let text = String(data: state.assembled, encoding: .utf8) else {
+                throw NSError(domain: "CampusFallback", code: -1, userInfo: [NSLocalizedDescriptionKey: "Clipboard text is not valid UTF-8"])
             }
+            onTextReceived?(text)
+            return (nil, nil)
         }
 
+        let baseDir = getSaveDirectory?(state.fileName, state.fileType)
+            ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+        try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
         let safeFileName = (state.fileName as NSString).lastPathComponent
+        guard !safeFileName.isEmpty, safeFileName != ".", safeFileName != ".." else {
+            throw NSError(domain: "CampusFallback", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid file name"])
+        }
         var destinationURL = baseDir.appendingPathComponent(safeFileName)
         let ext = destinationURL.pathExtension
         let nameWithoutExt = destinationURL.deletingPathExtension().lastPathComponent
@@ -723,7 +835,10 @@ actor CampusFallbackCoordinator {
             counter += 1
         }
 
-        try state.assembled.write(to: destinationURL)
+        try state.assembled.write(to: destinationURL, options: .atomic)
+        let mimeType = state.fileType.lowercased()
+        let previewPath = mimeType.hasPrefix("image/") || mimeType.hasPrefix("video/") ? destinationURL.path : nil
+        return (destinationURL.path, previewPath)
     }
 
     private func touchOutgoing(_ transferId: String) {
@@ -732,12 +847,19 @@ actor CampusFallbackCoordinator {
         outgoing[transferId] = state
     }
 
-    private func pruneStaleTransfers(now: Date = Date()) {
+    private func pruneStaleTransfers(now: Date = Date()) async {
         let staleIncoming = incoming.compactMap { transferId, state in
             now.timeIntervalSince(state.lastActivityAt) > CampusFallbackConstants.staleTransferTimeout ? transferId : nil
         }
         for transferId in staleIncoming {
-            incoming.removeValue(forKey: transferId)
+            if let state = incoming.removeValue(forKey: transferId) {
+                _ = try? await transferCoordinator.finishFailed(
+                    id: state.runtimeID,
+                    code: "campus_receive_timeout",
+                    message: "Campus fallback transfer timed out",
+                    retryable: false
+                )
+            }
         }
 
         let staleOutgoing = outgoing.compactMap { transferId, state in

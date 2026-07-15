@@ -1,4 +1,5 @@
 import Cocoa
+import AirSendConsoleSupport
 import SwiftUI
 
 struct AirSendSettingsDeviceSummary: Identifiable, Hashable {
@@ -14,6 +15,8 @@ struct AirSendSettingsDeviceSummary: Identifiable, Hashable {
     let statusLabel: String
     let peerCount: Int
     let isSelected: Bool
+    let isManual: Bool
+    let isOnline: Bool
 }
 
 enum AirSendConsoleHealthTone: String, Hashable {
@@ -26,19 +29,73 @@ struct AirSendActivitySummary: Identifiable, Hashable {
     let id: String
     let title: String
     let detail: String
-    let timeLabel: String
+    let createdAt: Date
+    let symbolName: String
+    let tone: AirSendConsoleHealthTone
+
+    var timeLabel: String {
+        AirSendRelativeTimeFormatter.label(since: createdAt)
+    }
+}
+
+struct AirSendTransferSummary: Identifiable, Hashable {
+    let id: String
+    let direction: String
+    let source: String
+    let peerTitle: String
+    let fileTitle: String
+    let detail: String
+    let status: String
+    let progress: Double
+    let byteProgress: String
+    let startedAt: Date
+    let savedPaths: [String]
+    let previewPath: String?
+    let previewText: String?
+    let failureMessage: String?
+    let canCancel: Bool
+    let canRetry: Bool
+    let hasAvailableFiles: Bool
+
+    var timeLabel: String {
+        AirSendRelativeTimeFormatter.label(since: startedAt)
+    }
+}
+
+struct AirSendManualPeerSummary: Identifiable, Hashable {
+    let id: String
+    let alias: String
+    let endpoint: String
+    let fingerprintSuffix: String?
+}
+
+struct AirSendTrustedPeerSummary: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let fingerprintSuffix: String
+    let isOnline: Bool
+}
+
+struct AirSendDiagnosticSummary: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let value: String
+    let detail: String?
     let symbolName: String
     let tone: AirSendConsoleHealthTone
 }
 
 struct AirSendSettingsSnapshot {
     var autoClipboardSyncEnabled: Bool
-    var autoScreenshotSyncEnabled: Bool
+    var autoClipboardImageSyncEnabled: Bool
+    var autoScreenshotFileSyncEnabled: Bool
     var autoUpdateEnabled: Bool
     var launchAtLoginEnabled: Bool
     var compatibilityModeEnabled: Bool
     var discoveredDeviceCount: Int
     var rememberedDeviceCount: Int
+    var isDiscoveryRefreshing: Bool
+    var discoveryRefreshSummary: String
     var selectedTargetTitle: String
     var selectedTargetSubtitle: String
     var selectedTargetIsBroadcast: Bool
@@ -51,17 +108,33 @@ struct AirSendSettingsSnapshot {
     var healthTone: AirSendConsoleHealthTone
     var preflightSummary: String
     var recentActivities: [AirSendActivitySummary]
+    var activeTransfers: [AirSendTransferSummary]
+    var sentHistory: [AirSendTransferSummary]
+    var receivedHistory: [AirSendTransferSummary]
+    var receivePolicy: String
+    var downloadDestination: String
+    var mediaDestination: String
+    var screenshotWatchFolder: String
+    var screenshotWatcherStatus: String
+    var historyLimitPerDirection: Int
+    var manualPeers: [AirSendManualPeerSummary]
+    var trustedPeers: [AirSendTrustedPeerSummary]
+    var diagnostics: [AirSendDiagnosticSummary]
+    var diagnosticsUpdatedAt: Date?
+    var logTail: [String]
 }
 
 @MainActor
 final class AirSendSettingsStore: ObservableObject {
     struct Actions {
         let setAutoClipboardSyncEnabled: (Bool) -> Void
-        let setAutoScreenshotSyncEnabled: (Bool) -> Void
+        let setAutoClipboardImageSyncEnabled: (Bool) -> Void
+        let setAutoScreenshotFileSyncEnabled: (Bool) -> Void
         let setAutoUpdateEnabled: (Bool) -> Void
         let setLaunchAtLoginEnabled: (Bool) -> Void
         let setCompatibilityModeEnabled: (Bool) -> Void
         let sendClipboardNow: () -> Void
+        let chooseFilesToSend: () -> Void
         let rescan: () -> Void
         let addDeviceByIP: () -> Void
         let clearDiscoveredDevices: () -> Void
@@ -71,6 +144,22 @@ final class AirSendSettingsStore: ObservableObject {
         let selectDeviceTarget: (String) -> Void
         let openAndroidRepository: () -> Void
         let runDiagnostics: () -> Void
+        let setReceivePolicy: (String) -> Void
+        let setHistoryLimitPerDirection: (Int) -> Void
+        let trustKnownDevice: () -> Void
+        let revokeTrustedPeer: (String) -> Void
+        let removeManualPeer: (String) -> Void
+        let selectDownloadDestination: () -> Void
+        let selectMediaDestination: () -> Void
+        let cancelTransfer: (String) -> Void
+        let retryTransfer: (String) -> Void
+        let deleteHistory: (String) -> Void
+        let clearHistory: (String) -> Void
+        let revealTransfer: (String) -> Void
+        let shareTransfer: (String) -> Void
+        let exportLogs: () -> Void
+        let clearLogs: () -> Void
+        let restartRuntime: () -> Void
     }
 
     @Published private(set) var snapshot: AirSendSettingsSnapshot
@@ -92,6 +181,7 @@ final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegat
     private static let minimumSize = NSSize(width: 760, height: 480)
 
     let store: AirSendSettingsStore
+    var onWindowVisibilityChanged: ((Bool) -> Void)?
     private let glassContainerView: AirSendSettingsGlassContainerView
     private let hostingView: AirSendSettingsHostingView<AirSendSettingsView>
 
@@ -128,6 +218,7 @@ final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegat
         window.isMovableByWindowBackground = false
         window.backgroundColor = .clear
         window.isOpaque = false
+        window.isReleasedWhenClosed = false
         window.minSize = Self.minimumSize
         window.setContentSize(Self.defaultSize)
         window.toolbarStyle = .unifiedCompact
@@ -145,6 +236,7 @@ final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegat
 
     func showSettingsWindow() {
         guard let window else { return }
+        onWindowVisibilityChanged?(true)
         if !window.isVisible {
             window.center()
         }
@@ -152,12 +244,17 @@ final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegat
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
+
+    func windowWillClose(_ notification: Notification) {
+        onWindowVisibilityChanged?(false)
+    }
 }
 
 private final class AirSendSettingsGlassContainerView: NSVisualEffectView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        material = .titlebar
+        appearance = NSAppearance(named: .vibrantDark)
+        material = .hudWindow
         blendingMode = .behindWindow
         state = .active
         isEmphasized = false

@@ -1,13 +1,63 @@
 import Cocoa
 import Network
+import AirSendRuntimeCore
+import Darwin
+
+private let maximumControlBodyBytes = 1_048_576
+private let receiverSessionIdleTimeout: TimeInterval = 300
+
+struct TransferServerHealthSnapshot: Sendable {
+    let isListening: Bool
+    let isHTTPS: Bool
+    let activeSessionCount: Int
+    let listenerState: String
+}
 
 // Data model for the request
 struct TransferRequest: Sendable {
     let sessionId: String
     let senderAlias: String
+    let senderFingerprint: String
     let fileCount: Int
     let fileNames: [String]
     let totalSize: Int64
+}
+
+private struct ReceiverSessionState: Sendable {
+    let id: String
+    let transferID: UUID
+    let files: [String: FileDto]
+    var availableTokens: [String: String]
+    var receivedBytesByFile: [String: Int64]
+    var completedFileIDs: Set<String>
+    var stagingURLsByFile: [String: URL]
+    let stagingDirectory: URL
+    let createdAt: Date
+    var lastActivityAt: Date
+
+    var totalSize: Int64 {
+        files.values.reduce(0) { $0 + max(0, $1.size) }
+    }
+
+    var receivedBytes: Int64 {
+        min(totalSize, receivedBytesByFile.values.reduce(0, +))
+    }
+}
+
+private struct ReceiverUploadClaim: Sendable {
+    let sessionID: String
+    let transferID: UUID
+    let fileID: String
+    let file: FileDto
+    let stagingURL: URL
+}
+
+private struct CompletedReceiverSession: Sendable {
+    let id: String
+    let transferID: UUID
+    let files: [String: FileDto]
+    let stagingDirectory: URL
+    let stagingURLsByFile: [String: URL]
 }
 
 actor HTTPTransferServer {
@@ -22,34 +72,30 @@ actor HTTPTransferServer {
     private var plainCompatServer: PlainHTTPCompatServer?
     private var port: UInt16
     private var isHTTPS: Bool = false
+    private let transferCoordinator: TransferCoordinator
     
     // Dedicated queue for the listener and general management
     private let listenerQueue = DispatchQueue(label: "com.localsend.server.listener", qos: .userInteractive)
     
-    // Session state
-    private var currentSessionId: String?
-    private var fileTokens: [String: String] = [:] // fileId -> token
-    private var filesToReceive: [String: FileDto] = [:] // fileId -> FileDto
-    private var activeConnections: [ObjectIdentifier: NWConnection] = [:] // Connection pool for concurrent transfers
-    private var activeCompatConnections: [Int32: PlainHTTPCompatConnection] = [:]
-
-    // Transfer State
-    private var totalSessionSize: Int64 = 0
-    private var sessionBytesReceived: Int64 = 0
-    private var receivedFileCount: Int = 0
+    private var receiverSessions: [String: ReceiverSessionState] = [:]
+    private var receiverSessionExpiryTasks: [String: Task<Void, Never>] = [:]
+    private var activeConnections: [ObjectIdentifier: (sessionID: String, connection: NWConnection)] = [:]
+    private var activeCompatConnections: [Int32: (sessionID: String, connection: PlainHTTPCompatConnection)] = [:]
     
     // Callbacks
     var onDeviceRegistered: (@Sendable (Device) -> Void)?
     var onTextReceived: (@Sendable (String) -> Void)?
-    var onCancelReceived: (@Sendable () -> Void)?
+    var onCancelReceived: (@Sendable (String) -> Void)?
+    private var onHealthChanged: (@Sendable (TransferServerHealthSnapshot) -> Void)?
     
     // Receiver Interception Callbacks
     var onTransferRequest: (@Sendable (TransferRequest) async -> Bool)?
-    var getSaveDirectory: (@Sendable () -> URL)? // Handler to get current save destination
+    var getSaveDirectory: (@Sendable (FileDto) -> URL)?
+    private var listenerState = "stopped"
     
     // Receiver Progress Callbacks
-    var onProgress: (@Sendable (Double) -> Void)?
-    var onTransferComplete: (@Sendable (Bool, String?) -> Void)?
+    var onProgress: (@Sendable (String, Double) -> Void)?
+    var onTransferComplete: (@Sendable (String, Bool, String?) -> Void)?
 
     func setOnDeviceRegistered(_ callback: @escaping @Sendable (Device) -> Void) {
         self.onDeviceRegistered = callback
@@ -59,15 +105,15 @@ actor HTTPTransferServer {
         self.onTransferRequest = callback
     }
     
-    func setGetSaveDirectory(_ callback: @escaping @Sendable () -> URL) {
+    func setGetSaveDirectory(_ callback: @escaping @Sendable (FileDto) -> URL) {
         self.getSaveDirectory = callback
     }
     
-    func setOnProgress(_ callback: @escaping @Sendable (Double) -> Void) {
+    func setOnProgress(_ callback: @escaping @Sendable (String, Double) -> Void) {
         self.onProgress = callback
     }
     
-    func setOnTransferComplete(_ callback: @escaping @Sendable (Bool, String?) -> Void) {
+    func setOnTransferComplete(_ callback: @escaping @Sendable (String, Bool, String?) -> Void) {
         self.onTransferComplete = callback
     }
 
@@ -75,85 +121,220 @@ actor HTTPTransferServer {
         self.onTextReceived = callback
     }
     
-    func setOnCancelReceived(_ callback: @escaping @Sendable () -> Void) {
+    func setOnCancelReceived(_ callback: @escaping @Sendable (String) -> Void) {
         self.onCancelReceived = callback
     }
 
-    init(port: UInt16 = NetworkPorts.transferPort, fingerprint: String) {
+    func setOnHealthChanged(_ callback: @escaping @Sendable (TransferServerHealthSnapshot) -> Void) {
+        onHealthChanged = callback
+        callback(healthSnapshot())
+    }
+
+    init(
+        port: UInt16 = NetworkPorts.transferPort,
+        fingerprint: String,
+        transferCoordinator: TransferCoordinator = TransferCoordinator()
+    ) {
         self.port = port
         self.fingerprint = fingerprint
+        self.transferCoordinator = transferCoordinator
     }
     
     // --- Actor Isolated Logic ---
     
-    func triggerProgress(_ progress: Double) {
-        self.onProgress?(progress)
+    func triggerProgress(sessionID: String, _ progress: Double) {
+        self.onProgress?(sessionID, progress)
     }
     
-    func triggerTransferComplete(success: Bool, message: String?) {
-        self.onTransferComplete?(success, message)
+    func triggerTransferComplete(sessionID: String, success: Bool, message: String?) {
+        self.onTransferComplete?(sessionID, success, message)
     }
     
     func triggerTextReceived(_ text: String) {
         self.onTextReceived?(text)
     }
     
-    func triggerCancelReceived() {
-        self.onCancelReceived?()
+    func triggerCancelReceived(sessionID: String) {
+        self.onCancelReceived?(sessionID)
     }
     
-    func getBaseDirectory() -> URL {
-        return self.getSaveDirectory?() ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+    func getBaseDirectory(for file: FileDto) -> URL {
+        getSaveDirectory?(file) ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
     }
-    func getSessionState() -> (id: String?, tokens: [String: String], files: [String: FileDto]) {
-        return (currentSessionId, fileTokens, filesToReceive)
+
+    func healthSnapshot() -> TransferServerHealthSnapshot {
+        TransferServerHealthSnapshot(
+            isListening: listener != nil || plainCompatServer != nil,
+            isHTTPS: isHTTPS,
+            activeSessionCount: receiverSessions.count,
+            listenerState: listenerState
+        )
     }
-    
-    func updateIncrementProgress(bytes: Int64) -> (received: Int64, total: Int64) {
-        self.sessionBytesReceived += bytes
-        return (self.sessionBytesReceived, self.totalSessionSize)
+
+    func cancelTransfer(id transferID: UUID) async -> Bool {
+        guard let session = receiverSessions.values.first(where: { $0.transferID == transferID }),
+              let cancelled = performSessionCancellation(sessionID: session.id) else { return false }
+        try? FileManager.default.removeItem(at: cancelled.stagingDirectory)
+        _ = try? await transferCoordinator.finishCancelled(id: transferID)
+        triggerTransferComplete(sessionID: session.id, success: false, message: "Cancelled locally")
+        return true
     }
-    
-    func incrementFileCount() -> (current: Int, expected: Int) {
-        self.receivedFileCount += 1
-        return (self.receivedFileCount, self.filesToReceive.count)
+
+    private func updateListenerState(_ state: String) {
+        listenerState = state
+        publishHealthSnapshot()
     }
-    
-    func addUploadConnection(_ connection: NWConnection) {
-        self.activeConnections[ObjectIdentifier(connection)] = connection
+
+    private func publishHealthSnapshot() {
+        onHealthChanged?(healthSnapshot())
+    }
+
+    private func stagingDirectory(for sessionID: String) -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("AirSend-macOS", isDirectory: true)
+            .appendingPathComponent(".incoming-staging", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+    }
+    func addUploadConnection(_ connection: NWConnection, sessionID: String) {
+        self.activeConnections[ObjectIdentifier(connection)] = (sessionID, connection)
     }
     
     func removeUploadConnection(_ connection: NWConnection) {
         self.activeConnections.removeValue(forKey: ObjectIdentifier(connection))
     }
 
-    func addUploadConnection(_ connection: PlainHTTPCompatConnection) {
-        self.activeCompatConnections[connection.socket] = connection
+    func addUploadConnection(_ connection: PlainHTTPCompatConnection, sessionID: String) {
+        self.activeCompatConnections[connection.socket] = (sessionID, connection)
     }
 
     func removeUploadConnection(_ connection: PlainHTTPCompatConnection) {
         self.activeCompatConnections.removeValue(forKey: connection.socket)
     }
     
-    func getSessionSizeInfo() -> (received: Int64, total: Int64) {
-        return (self.sessionBytesReceived, self.totalSessionSize)
+    func createReceiverSession(
+        id: String,
+        transferID: UUID,
+        files: [String: FileDto],
+        tokens: [String: String],
+        stagingDirectory: URL
+    ) throws {
+        try FileManager.default.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+        receiverSessions[id] = ReceiverSessionState(
+            id: id,
+            transferID: transferID,
+            files: files,
+            availableTokens: tokens,
+            receivedBytesByFile: [:],
+            completedFileIDs: [],
+            stagingURLsByFile: [:],
+            stagingDirectory: stagingDirectory,
+            createdAt: Date(),
+            lastActivityAt: Date()
+        )
+        scheduleReceiverSessionExpiry(sessionID: id, after: receiverSessionIdleTimeout)
     }
-    
-    /// Returns true if a session was active, and kills the actual connection
-    func performSessionCancellation() -> Bool {
-        let wasActive = (self.currentSessionId != nil)
-        self.currentSessionId = nil
-        self.fileTokens.removeAll()
-        self.filesToReceive.removeAll()
-        
-        let conns = self.activeConnections.values
-        let compatConns = self.activeCompatConnections.values
-        self.activeConnections.removeAll()
-        self.activeCompatConnections.removeAll()
-        conns.forEach { $0.cancel() }
-        compatConns.forEach { $0.close() }
-        
-        return wasActive
+
+    private func claimUpload(sessionID: String, fileID: String, token: String) -> ReceiverUploadClaim? {
+        guard var session = receiverSessions[sessionID],
+              session.availableTokens[fileID] == token,
+              let file = session.files[fileID],
+              !session.completedFileIDs.contains(fileID) else {
+            return nil
+        }
+        session.availableTokens.removeValue(forKey: fileID)
+        session.lastActivityAt = Date()
+        let safeFileID = fileID.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+        let stagingURL = session.stagingDirectory.appendingPathComponent("\(safeFileID.isEmpty ? UUID().uuidString : safeFileID).part")
+        session.stagingURLsByFile[fileID] = stagingURL
+        receiverSessions[sessionID] = session
+        return ReceiverUploadClaim(
+            sessionID: sessionID,
+            transferID: session.transferID,
+            fileID: fileID,
+            file: file,
+            stagingURL: stagingURL
+        )
+    }
+
+    func updateProgress(sessionID: String, fileID: String, receivedBytes: Int64) -> (received: Int64, total: Int64, transferID: UUID)? {
+        guard var session = receiverSessions[sessionID], let file = session.files[fileID] else { return nil }
+        let previous = session.receivedBytesByFile[fileID] ?? 0
+        session.receivedBytesByFile[fileID] = min(file.size, max(previous, receivedBytes))
+        session.lastActivityAt = Date()
+        receiverSessions[sessionID] = session
+        return (session.receivedBytes, session.totalSize, session.transferID)
+    }
+
+    private func completeUpload(sessionID: String, fileID: String) -> CompletedReceiverSession? {
+        guard var session = receiverSessions[sessionID], session.files[fileID] != nil else { return nil }
+        session.completedFileIDs.insert(fileID)
+        receiverSessions[sessionID] = session
+        guard session.completedFileIDs.count == session.files.count else { return nil }
+        receiverSessions.removeValue(forKey: sessionID)
+        receiverSessionExpiryTasks.removeValue(forKey: sessionID)?.cancel()
+        return CompletedReceiverSession(
+            id: session.id,
+            transferID: session.transferID,
+            files: session.files,
+            stagingDirectory: session.stagingDirectory,
+            stagingURLsByFile: session.stagingURLsByFile
+        )
+    }
+
+    private func failReceiverSession(sessionID: String) -> ReceiverSessionState? {
+        receiverSessionExpiryTasks.removeValue(forKey: sessionID)?.cancel()
+        return receiverSessions.removeValue(forKey: sessionID)
+    }
+
+    private func performSessionCancellation(sessionID: String) -> ReceiverSessionState? {
+        guard let session = receiverSessions.removeValue(forKey: sessionID) else { return nil }
+        receiverSessionExpiryTasks.removeValue(forKey: sessionID)?.cancel()
+        let connections = activeConnections.filter { $0.value.sessionID == sessionID }
+        let compatConnections = activeCompatConnections.filter { $0.value.sessionID == sessionID }
+        for key in connections.keys { activeConnections.removeValue(forKey: key) }
+        for key in compatConnections.keys { activeCompatConnections.removeValue(forKey: key) }
+        connections.values.forEach { $0.connection.cancel() }
+        compatConnections.values.forEach { $0.connection.close() }
+        return session
+    }
+
+    private func scheduleReceiverSessionExpiry(sessionID: String, after delay: TimeInterval) {
+        receiverSessionExpiryTasks.removeValue(forKey: sessionID)?.cancel()
+        let nanoseconds = UInt64(max(1, delay) * 1_000_000_000)
+        receiverSessionExpiryTasks[sessionID] = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: nanoseconds)
+            guard !Task.isCancelled else { return }
+            await self?.expireReceiverSessionIfIdle(sessionID: sessionID)
+        }
+    }
+
+    private func expireReceiverSessionIfIdle(sessionID: String) async {
+        guard let session = receiverSessions[sessionID] else {
+            receiverSessionExpiryTasks.removeValue(forKey: sessionID)?.cancel()
+            return
+        }
+        let idleDuration = Date().timeIntervalSince(session.lastActivityAt)
+        if idleDuration < receiverSessionIdleTimeout {
+            scheduleReceiverSessionExpiry(
+                sessionID: sessionID,
+                after: receiverSessionIdleTimeout - idleDuration
+            )
+            return
+        }
+
+        guard let expiredSession = performSessionCancellation(sessionID: sessionID) else { return }
+        try? FileManager.default.removeItem(at: expiredSession.stagingDirectory)
+        _ = try? await transferCoordinator.finishFailed(
+            id: expiredSession.transferID,
+            code: "receive_session_timeout",
+            message: "Incoming transfer session expired after five minutes without activity",
+            retryable: true
+        )
+        triggerTransferComplete(
+            sessionID: sessionID,
+            success: false,
+            message: "Transfer timed out"
+        )
     }
     
     func start(p12Data: Data? = nil) async throws {
@@ -161,6 +342,8 @@ actor HTTPTransferServer {
         listener = nil
         plainCompatServer?.stop()
         plainCompatServer = nil
+        listenerState = "starting"
+        publishHealthSnapshot()
 
         guard let p12Data = p12Data else {
             self.isHTTPS = false
@@ -173,6 +356,8 @@ actor HTTPTransferServer {
             }
             try plainServer.start()
             self.plainCompatServer = plainServer
+            listenerState = "ready"
+            publishHealthSnapshot()
             return
         }
 
@@ -281,8 +466,9 @@ actor HTTPTransferServer {
                 }
             }
             
-            listener.stateUpdateHandler = { state in
+            listener.stateUpdateHandler = { [weak self] state in
                 logTransfer("🌐 Server (NWListener) state: \(state)")
+                Task { await self?.updateListenerState(String(describing: state)) }
                 if case .failed(let error) = state {
                     logTransfer("❌ Server CRASHED: \(error)")
                 }
@@ -290,9 +476,12 @@ actor HTTPTransferServer {
             
             listener.start(queue: self.listenerQueue)
             self.listener = listener
+            publishHealthSnapshot()
         } catch {
             listener?.cancel()
             listener = nil
+            listenerState = "failed: \(error.localizedDescription)"
+            publishHealthSnapshot()
             throw error
         }
     }
@@ -303,6 +492,8 @@ actor HTTPTransferServer {
         listener = nil
         plainCompatServer?.stop()
         plainCompatServer = nil
+        listenerState = "stopped"
+        publishHealthSnapshot()
     }
     
     /// Processes the request in a NONISOLATED context to prevent blocking the actor.
@@ -334,6 +525,11 @@ actor HTTPTransferServer {
                 }
             }
             
+            guard !accumulatedData.isEmpty else {
+                connection.cancel()
+                return
+            }
+
             guard let header = headerData, let requestInfo = HTTPRequestParser.parseHeader(header) else {
                 let bytesStr = accumulatedData.prefix(16).map { String(format: "%02hhx", $0) }.joined(separator: " ")
                 logTransfer("⚠️ Malformed HTTP header. First bytes: [\(bytesStr)]. Probable protocol mismatch (e.g. TLS on HTTP port).")
@@ -342,7 +538,14 @@ actor HTTPTransferServer {
             }
             
             let bodyPrefix = accumulatedData.subdata(in: bodyOffset..<accumulatedData.count)
-            let contentLength = Int(requestInfo.headers["content-length"] ?? "0") ?? 0
+            let rawContentLength = requestInfo.headers["content-length"]
+            guard rawContentLength == nil || (Int(rawContentLength!) != nil && Int(rawContentLength!)! >= 0) else {
+                connection.send(content: HTTPRawResponse(statusCode: 400, body: Data()).serialize(), completion: .contentProcessed { _ in
+                    connection.cancel()
+                })
+                return
+            }
+            let contentLength = Int(rawContentLength ?? "0") ?? 0
             
             let connHeader = requestInfo.headers["connection"]?.lowercased()
             let shouldKeepAlive = (connHeader != "close")
@@ -370,14 +573,26 @@ actor HTTPTransferServer {
                 }))
                 return
             }
+
+            guard isChunked || contentLength <= maximumControlBodyBytes,
+                  bodyPrefix.count <= maximumControlBodyBytes else {
+                connection.send(content: HTTPRawResponse(statusCode: 413, body: Data()).serialize(), completion: .contentProcessed { _ in
+                    connection.cancel()
+                })
+                return
+            }
             
             // 3. For all other paths: accumulate body in memory (small payloads)
             var body: Data
             var mutablePrefix = bodyPrefix
             if isChunked {
-                body = try await receiveChunkedBody(from: connection, buffer: &mutablePrefix)
+                body = try await receiveChunkedBody(
+                    from: connection,
+                    buffer: &mutablePrefix,
+                    maximumLength: maximumControlBodyBytes
+                )
             } else {
-                body = bodyPrefix
+                body = Data(bodyPrefix.prefix(contentLength))
                 if contentLength > 0 {
                     while body.count < contentLength {
                         let remaining = contentLength - body.count
@@ -465,7 +680,12 @@ actor HTTPTransferServer {
             }
 
             let bodyPrefix = accumulatedData.subdata(in: bodyOffset..<accumulatedData.count)
-            let contentLength = Int(requestInfo.headers["content-length"] ?? "0") ?? 0
+            let rawContentLength = requestInfo.headers["content-length"]
+            guard rawContentLength == nil || (Int(rawContentLength!) != nil && Int(rawContentLength!)! >= 0) else {
+                try connection.sendAll(HTTPRawResponse(statusCode: 400, body: Data()).serialize())
+                return
+            }
+            let contentLength = Int(rawContentLength ?? "0") ?? 0
             let isChunked = requestInfo.headers["transfer-encoding"]?.lowercased() == "chunked"
             let requestedKeepAlive = requestInfo.headers["connection"]?.lowercased() == "keep-alive"
 
@@ -483,12 +703,22 @@ actor HTTPTransferServer {
                 return
             }
 
+            guard isChunked || contentLength <= maximumControlBodyBytes,
+                  bodyPrefix.count <= maximumControlBodyBytes else {
+                try connection.sendAll(HTTPRawResponse(statusCode: 413, body: Data()).serialize())
+                return
+            }
+
             var body: Data
             var mutablePrefix = bodyPrefix
             if isChunked {
-                body = try receiveSocketChunkedBody(from: connection, buffer: &mutablePrefix)
+                body = try receiveSocketChunkedBody(
+                    from: connection,
+                    buffer: &mutablePrefix,
+                    maximumLength: maximumControlBodyBytes
+                )
             } else {
-                body = bodyPrefix
+                body = Data(bodyPrefix.prefix(contentLength))
                 if contentLength > 0 {
                     while body.count < contentLength {
                         let remaining = contentLength - body.count
@@ -584,15 +814,24 @@ actor HTTPTransferServer {
         return ""
     }
     
-    nonisolated private func receiveChunkedBody(from connection: NWConnection, buffer: inout Data) async throws -> Data {
+    nonisolated private func receiveChunkedBody(
+        from connection: NWConnection,
+        buffer: inout Data,
+        maximumLength: Int
+    ) async throws -> Data {
         var body = Data()
         while true {
             let sizeLine = try await self.readLine(from: connection, buffer: &buffer)
             let trimmedSize = sizeLine.trimmingCharacters(in: .whitespaces)
-            guard !trimmedSize.isEmpty, let size = Int(trimmedSize, radix: 16) else { break }
+            guard !trimmedSize.isEmpty, let size = Int(trimmedSize, radix: 16), size >= 0 else {
+                throw NSError(domain: "HTTPTransferServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid chunk size"])
+            }
             if size == 0 { 
                 _ = try await self.readLine(from: connection, buffer: &buffer) // Final CRLF
                 break 
+            }
+            guard size <= maximumLength - body.count else {
+                throw NSError(domain: "HTTPTransferServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Control request body is too large"])
             }
             
             var chunkData = Data()
@@ -603,7 +842,9 @@ actor HTTPTransferServer {
                     buffer.removeSubrange(0..<toTake)
                 } else {
                     let next = try await self.receiveChunk(from: connection, maxLength: size - chunkData.count)
-                    if next.isEmpty { break }
+                    if next.isEmpty {
+                        throw NSError(domain: "HTTPTransferServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Truncated chunked body"])
+                    }
                     buffer.append(next)
                 }
             }
@@ -613,15 +854,24 @@ actor HTTPTransferServer {
         return body
     }
 
-    nonisolated private func receiveSocketChunkedBody(from connection: PlainHTTPCompatConnection, buffer: inout Data) throws -> Data {
+    nonisolated private func receiveSocketChunkedBody(
+        from connection: PlainHTTPCompatConnection,
+        buffer: inout Data,
+        maximumLength: Int
+    ) throws -> Data {
         var body = Data()
         while true {
             let sizeLine = try readSocketLine(from: connection, buffer: &buffer)
             let trimmedSize = sizeLine.trimmingCharacters(in: .whitespaces)
-            guard !trimmedSize.isEmpty, let size = Int(trimmedSize, radix: 16) else { break }
+            guard !trimmedSize.isEmpty, let size = Int(trimmedSize, radix: 16), size >= 0 else {
+                throw NSError(domain: "HTTPTransferServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid chunk size"])
+            }
             if size == 0 {
                 _ = try readSocketLine(from: connection, buffer: &buffer)
                 break
+            }
+            guard size <= maximumLength - body.count else {
+                throw NSError(domain: "HTTPTransferServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Control request body is too large"])
             }
 
             var chunkData = Data()
@@ -632,7 +882,9 @@ actor HTTPTransferServer {
                     buffer.removeSubrange(0..<toTake)
                 } else {
                     let next = try receiveSocketChunk(from: connection, maxLength: size - chunkData.count)
-                    if next.isEmpty { break }
+                    if next.isEmpty {
+                        throw NSError(domain: "HTTPTransferServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Truncated chunked body"])
+                    }
                     buffer.append(next)
                 }
             }
@@ -666,7 +918,7 @@ actor HTTPTransferServer {
         do {
             let responseDto = RegisterDto(
                 alias: alias,
-                version: "3.5.0",
+                version: AirSendAppMetadata.version,
                 deviceModel: deviceModel,
                 deviceType: deviceType.rawValue,
                 fingerprint: fingerprint,
@@ -706,7 +958,7 @@ actor HTTPTransferServer {
             
             let responseDto = RegisterDto(
                 alias: alias,
-                version: "3.5.0",
+                version: AirSendAppMetadata.version,
                 deviceModel: deviceModel,
                 deviceType: deviceType.rawValue,
                 fingerprint: fingerprint,
@@ -739,50 +991,88 @@ actor HTTPTransferServer {
     private func handlePrepareUpload(request: HTTPRawRequest) async -> HTTPRawResponse {
         do {
             let dto = try JSONDecoder().decode(PrepareUploadRequestDto.self, from: request.body)
-            
-            // 0. Construct Transfer Request for Callback
+            guard !dto.files.isEmpty, dto.files.count <= 512 else {
+                return HTTPRawResponse(statusCode: 413, body: "Invalid file count".data(using: .utf8)!)
+            }
+            guard dto.files.values.allSatisfy({ $0.size >= 0 && $0.fileName.utf8.count <= 1_024 }) else {
+                return HTTPRawResponse(statusCode: 413, body: "Invalid file metadata".data(using: .utf8)!)
+            }
             let senderAlias = dto.info.alias
             let fileCount = dto.files.count
             let totalSize = dto.files.values.reduce(0) { $0 + $1.size }
-            let fileNames = dto.files.values.map { $0.fileName }
-            
+            guard totalSize >= 0, totalSize <= 4 * 1_024 * 1_024 * 1_024 * 1_024 else {
+                return HTTPRawResponse(statusCode: 413, body: "Transfer too large".data(using: .utf8)!)
+            }
+            let fileNames = dto.files.values.map(\.fileName).sorted()
+            let transferID = UUID()
+            let sessionId = transferID.uuidString
+            let senderFingerprint = dto.info.fingerprint.trimmingCharacters(in: .whitespacesAndNewlines)
+            let peer = PeerIdentity(
+                id: dto.info.fingerprint.isEmpty ? "incoming-\(sessionId)" : dto.info.fingerprint,
+                alias: senderAlias,
+                fingerprint: senderFingerprint.isEmpty ? nil : senderFingerprint
+            )
+            let coreFiles = dto.files.values.map {
+                TransferFileRecord(
+                    id: $0.id,
+                    name: $0.fileName,
+                    mimeType: $0.fileType,
+                    size: $0.size
+                )
+            }.sorted { $0.id < $1.id }
+            await transferCoordinator.register(
+                id: transferID,
+                direction: .incoming,
+                source: .remotePeer,
+                peer: peer,
+                files: coreFiles,
+                status: .awaitingAcceptance,
+                previewText: dto.files.count == 1 ? dto.files.values.first?.preview : nil
+            )
+
             let transferRequest = TransferRequest(
-                sessionId: UUID().uuidString, 
+                sessionId: sessionId,
                 senderAlias: senderAlias,
+                senderFingerprint: dto.info.fingerprint,
                 fileCount: fileCount,
-                fileNames: Array(fileNames),
+                fileNames: fileNames,
                 totalSize: totalSize
             )
-            
-            // 1. Intercept: Ask user for permission
-            if let onTransferRequest = onTransferRequest {
-                logTransfer("🛑 Intercepting transfer request from \(senderAlias)...")
-                let allowed = await onTransferRequest(transferRequest)
-                if !allowed {
-                    logTransfer("🚫 User declined transfer from \(senderAlias).")
-                    return HTTPRawResponse(statusCode: 403, body: "Forbidden".data(using: .utf8)!)
-                }
-                logTransfer("✅ User accepted transfer from \(senderAlias).")
+
+            logTransfer("🛑 Intercepting transfer request from \(senderAlias)...")
+            let allowed = await onTransferRequest?(transferRequest) ?? false
+            if !allowed {
+                logTransfer("🚫 Transfer declined from \(senderAlias).")
+                _ = try? await transferCoordinator.finishDeclined(id: transferID)
+                return HTTPRawResponse(statusCode: 403, body: "Forbidden".data(using: .utf8)!)
             }
-            
-            // 2. Proceed if allowed
-            let sessionId = UUID().uuidString
-            self.currentSessionId = sessionId
-            self.fileTokens.removeAll()
-            self.filesToReceive = dto.files
-            
-            // Reset Progress State
-            self.totalSessionSize = totalSize
-            self.sessionBytesReceived = 0
-            self.receivedFileCount = 0
-            
+            logTransfer("✅ Transfer accepted from \(senderAlias).")
+
             var responseFiles: [String: String] = [:]
             for (fileId, _) in dto.files {
-                let token = UUID().uuidString
-                self.fileTokens[fileId] = token
-                responseFiles[fileId] = token
+                responseFiles[fileId] = UUID().uuidString
             }
-            
+            let stagingDirectory = stagingDirectory(for: sessionId)
+            do {
+                try createReceiverSession(
+                    id: sessionId,
+                    transferID: transferID,
+                    files: dto.files,
+                    tokens: responseFiles,
+                    stagingDirectory: stagingDirectory
+                )
+                _ = try await transferCoordinator.transition(id: transferID, to: .preparing)
+            } catch {
+                _ = try? await transferCoordinator.finishFailed(
+                    id: transferID,
+                    code: "receive_prepare_failed",
+                    message: error.localizedDescription,
+                    retryable: false
+                )
+                try? FileManager.default.removeItem(at: stagingDirectory)
+                throw error
+            }
+
             let responseDto = PrepareUploadResponseDto(
                 sessionId: sessionId,
                 files: responseFiles
@@ -809,188 +1099,107 @@ actor HTTPTransferServer {
               let token = query["token"] else {
             return HTTPRawResponse(statusCode: 400, body: "Bad Request".data(using: .utf8)!)
         }
-        
-        let sessionState = await self.getSessionState()
-        
-        if sessionId != sessionState.id || sessionState.tokens[fileId] != token {
+
+        guard let claim = await self.claimUpload(sessionID: sessionId, fileID: fileId, token: token) else {
             return HTTPRawResponse(statusCode: 403, body: "Forbidden".data(using: .utf8)!)
         }
-        
-        guard let fileDto = sessionState.files[fileId] else {
-            return HTTPRawResponse(statusCode: 404, body: "Not Found".data(using: .utf8)!)
+        if !isChunked && Int64(contentLength) != claim.file.size {
+            await self.failUploadSession(claim: claim, code: "size_mismatch", message: "Declared upload size does not match prepared file size")
+            return HTTPRawResponse(statusCode: 400, body: "Size Mismatch".data(using: .utf8)!)
         }
-        
-        // Store active connection for cancellation
-        await self.addUploadConnection(connection)
-        
-        defer { 
+
+        await self.addUploadConnection(connection, sessionID: sessionId)
+        defer {
             Task { await self.removeUploadConnection(connection) }
         }
 
-        // --- PATH LOGIC START ---
-        
-        // 1. Get Base Directory (Custom or Downloads)
-        let baseDir = await self.getBaseDirectory()
-        let safeFileName = (fileDto.fileName as NSString).lastPathComponent
-        var destinationUrl = baseDir.appendingPathComponent(safeFileName)
-        
-        // 2. Conflict Resolution: Rename if exists (e.g. "file (1).txt")
-        var counter = 1
-        let ext = destinationUrl.pathExtension
-        let nameWithoutExt = destinationUrl.deletingPathExtension().lastPathComponent
-        
-        while FileManager.default.fileExists(atPath: destinationUrl.path) {
-            let newName = "\(nameWithoutExt) (\(counter))"
-            destinationUrl = baseDir.appendingPathComponent(newName).appendingPathExtension(ext)
-            counter += 1
-        }
-        
-        // --- PATH LOGIC END ---
-        
+        let destinationUrl = claim.stagingURL
         do {
-            // Create empty file and open for writing
             let fileManager = FileManager.default
+            try? fileManager.removeItem(at: destinationUrl)
             fileManager.createFile(atPath: destinationUrl.path, contents: nil)
             let fileHandle = try FileHandle(forWritingTo: destinationUrl)
             defer { try? fileHandle.close() }
-            
-            var receivedBytes = 0
+
+            var receivedBytes: Int64 = 0
             var mutableBuffer = bodyPrefix
-            let bufferSize = 65536 
+            let bufferSize = 65_536
             var lastProgressUpdate = Date()
-            var lastReportedProgress: Double = 0
-            
             var chunkStreamEndedNormally = false
-            
+
             if isChunked {
                 while true {
                     let sizeLine = try await readLine(from: connection, buffer: &mutableBuffer)
                     let hexStr = sizeLine.components(separatedBy: ";")[0].trimmingCharacters(in: .whitespaces)
-                    guard !hexStr.isEmpty, let size = Int(hexStr, radix: 16) else { break }
-                    
-                    if size == 0 { 
-                        _ = try await readLine(from: connection, buffer: &mutableBuffer) // Final CRLF
-                        chunkStreamEndedNormally = true
-                        break 
+                    guard !hexStr.isEmpty, let size = Int(hexStr, radix: 16) else {
+                        throw NSError(domain: "HTTPTransferServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid chunk size"])
                     }
-                    
+                    if size == 0 {
+                        _ = try await readLine(from: connection, buffer: &mutableBuffer)
+                        chunkStreamEndedNormally = true
+                        break
+                    }
+
                     var totalReadThisChunk = 0
                     while totalReadThisChunk < size {
                         let toTake = min(mutableBuffer.count, size - totalReadThisChunk)
                         if toTake > 0 {
                             let chunk = mutableBuffer.subdata(in: 0..<toTake)
-                            try await Task.detached(priority: .medium) { try fileHandle.write(contentsOf: chunk) }.value
+                            try fileHandle.write(contentsOf: chunk)
                             mutableBuffer.removeSubrange(0..<toTake)
                             totalReadThisChunk += toTake
-                            receivedBytes += toTake
-                            let progressInfo = await self.updateIncrementProgress(bytes: Int64(toTake))
-                            if progressInfo.total > 0 {
-                                let progress = Double(progressInfo.received) / Double(progressInfo.total)
-                                let timeSinceLast = Date().timeIntervalSince(lastProgressUpdate)
-                                if timeSinceLast > 0.1 || (progress - lastReportedProgress) > 0.01 || progress >= 1.0 {
-                                    await self.triggerProgress(progress)
-                                    lastProgressUpdate = Date(); lastReportedProgress = progress
-                                }
+                            receivedBytes += Int64(toTake)
+                            guard receivedBytes <= claim.file.size else {
+                                throw NSError(domain: "HTTPTransferServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Upload exceeded prepared file size"])
+                            }
+                            if Date().timeIntervalSince(lastProgressUpdate) >= 0.1 {
+                                await self.reportUploadProgress(claim: claim, receivedBytes: receivedBytes, forceEvent: false)
+                                lastProgressUpdate = Date()
                             }
                         } else {
                             let next = try await self.receiveChunk(from: connection, maxLength: min(size - totalReadThisChunk, bufferSize))
-                            if next.isEmpty { throw NSError(domain: "HTTPTransferServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Stream ended in chunk"]) }
+                            if next.isEmpty {
+                                throw NSError(domain: "HTTPTransferServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Stream ended in chunk"])
+                            }
                             mutableBuffer.append(next)
                         }
                     }
-                    _ = try await readLine(from: connection, buffer: &mutableBuffer) // Skip trailing CRLF
+                    _ = try await readLine(from: connection, buffer: &mutableBuffer)
                 }
             } else {
-                // Write initial bodyPrefix first
                 if !mutableBuffer.isEmpty {
-                    let prefixCount = mutableBuffer.count
-                    try fileHandle.write(contentsOf: mutableBuffer)
-                    receivedBytes += prefixCount
-                    _ = await self.updateIncrementProgress(bytes: Int64(prefixCount))
+                    let allowedPrefixCount = min(mutableBuffer.count, contentLength)
+                    let prefix = mutableBuffer.prefix(allowedPrefixCount)
+                    try fileHandle.write(contentsOf: prefix)
+                    receivedBytes += Int64(allowedPrefixCount)
                     mutableBuffer.removeAll()
                 }
-                
-                while receivedBytes < contentLength {
-                    let remaining = contentLength - receivedBytes
-                    let chunk = try await receiveChunk(from: connection, maxLength: min(remaining, bufferSize))
+
+                while receivedBytes < Int64(contentLength) {
+                    let remaining = Int64(contentLength) - receivedBytes
+                    let chunk = try await receiveChunk(from: connection, maxLength: Int(min(remaining, Int64(bufferSize))))
                     if chunk.isEmpty { break }
-                    
-                    try await Task.detached(priority: .medium) { try fileHandle.write(contentsOf: chunk) }.value
-                    receivedBytes += chunk.count
-                    let progressInfo = await self.updateIncrementProgress(bytes: Int64(chunk.count))
-                    
-                    if progressInfo.total > 0 {
-                        let progress = Double(progressInfo.received) / Double(progressInfo.total)
-                        let timeSinceLast = Date().timeIntervalSince(lastProgressUpdate)
-                        if timeSinceLast > 0.1 || (progress - lastReportedProgress) > 0.01 || progress >= 1.0 {
-                            await self.triggerProgress(progress)
-                            lastProgressUpdate = Date(); lastReportedProgress = progress
-                        }
+                    try fileHandle.write(contentsOf: chunk)
+                    receivedBytes += Int64(chunk.count)
+                    if Date().timeIntervalSince(lastProgressUpdate) >= 0.1 {
+                        await self.reportUploadProgress(claim: claim, receivedBytes: receivedBytes, forceEvent: false)
+                        lastProgressUpdate = Date()
                     }
                 }
             }
-            
-            logTransfer("✅ File saved to \(destinationUrl.path) (\(receivedBytes) bytes, streamed)")
-            
-            // Check if it's a text file for clipboard handling
-            let isText = fileDto.fileName.hasSuffix(".txt") || fileDto.fileType == "text/plain"
-            if isText, receivedBytes < 1_000_000 {
-                if let textContent = try? String(contentsOf: destinationUrl, encoding: .utf8) {
-                    // 1. 把文本打入 Mac 系统剪贴板
-                    await self.triggerTextReceived(textContent)
-                    
-                    // ==========================================
-                    // 🚀 核心改造：阅后即焚，实现绝对的无痕流转
-                    // ==========================================
-                    if fileDto.fileName == "clipboard.txt" {
-                        do {
-                            try FileManager.default.removeItem(at: destinationUrl)
-                            logTransfer("🧹 [AirSend 中枢] 剪贴板临时文件 \(fileDto.fileName) 已被抹除，无痕同步完成")
-                        } catch {
-                            logTransfer("⚠️ 抹除临时文件失败: \(error)")
-                        }
-                    }
-                }
+
+            guard receivedBytes == claim.file.size, !isChunked || chunkStreamEndedNormally else {
+                throw NSError(domain: "HTTPTransferServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Transfer truncated"])
             }
-            
-            // Report Final Progress (100%) ensures UI hits 100% even for small files
-            let finalProgress = await self.getSessionSizeInfo()
-            if finalProgress.total > 0 {
-                await self.triggerProgress(1.0)
-            }
-            
-            // Check for Session Completion
-            let counts = await self.incrementFileCount()
-            
-            // CRITICAL FIX: Verify we received the full file
-            if (!isChunked && receivedBytes < contentLength) || (isChunked && !chunkStreamEndedNormally) {
-                logTransfer("❌ [HTTPTransferServer] File incomplete or chunk stream aborted! Expected \(contentLength), got \(receivedBytes). Transfer truncated.")
-                await self.triggerTransferComplete(success: false, message: "Transfer truncated")
-                return HTTPRawResponse(statusCode: 400, body: Data())
-            }
-            
-            if counts.current >= counts.expected {
-                await self.triggerTransferComplete(success: true, message: nil as String?)
-            }
-            
-            return HTTPRawResponse(statusCode: 200, body: Data())
+            try fileHandle.synchronize()
+            await self.reportUploadProgress(claim: claim, receivedBytes: receivedBytes, forceEvent: true)
+            logTransfer("✅ File staged at \(destinationUrl.path) (\(receivedBytes) bytes)")
+
+            return await self.finishStagedUpload(claim: claim)
         } catch {
             logTransfer("❌ [HTTPTransferServer] Upload Failed: \(error.localizedDescription)")
-            
-            // Cleanup on error (including timeout)
-            let fileManager = FileManager.default
-            try? fileManager.removeItem(at: destinationUrl)
-            
-            // Check for timeout error
-            let nsError = error as NSError
-            if nsError.code == -2 {
-                logTransfer("🚨 [HTTPTransferServer] Read Timeout detected. Assuming peer cancelled silently.")
-                // Notify Cancel
-                await triggerCancelReceived()
-            } else {
-                await triggerTransferComplete(success: false, message: error.localizedDescription)
-            }
-            
+            try? FileManager.default.removeItem(at: destinationUrl)
+            await self.failUploadSession(claim: claim, code: "receive_upload_failed", message: error.localizedDescription)
             return HTTPRawResponse(statusCode: 500, body: "Internal Server Error".data(using: .utf8)!)
         }
     }
@@ -1009,52 +1218,40 @@ actor HTTPTransferServer {
             return HTTPRawResponse(statusCode: 400, body: "Bad Request".data(using: .utf8)!)
         }
 
-        let sessionState = await self.getSessionState()
-        if sessionId != sessionState.id || sessionState.tokens[fileId] != token {
+        guard let claim = await self.claimUpload(sessionID: sessionId, fileID: fileId, token: token) else {
             return HTTPRawResponse(statusCode: 403, body: "Forbidden".data(using: .utf8)!)
         }
-
-        guard let fileDto = sessionState.files[fileId] else {
-            return HTTPRawResponse(statusCode: 404, body: "Not Found".data(using: .utf8)!)
+        if !isChunked && Int64(contentLength) != claim.file.size {
+            await self.failUploadSession(claim: claim, code: "size_mismatch", message: "Declared upload size does not match prepared file size")
+            return HTTPRawResponse(statusCode: 400, body: "Size Mismatch".data(using: .utf8)!)
         }
 
-        await self.addUploadConnection(connection)
+        await self.addUploadConnection(connection, sessionID: sessionId)
         defer {
             Task { await self.removeUploadConnection(connection) }
         }
 
-        let baseDir = await self.getBaseDirectory()
-        let safeFileName = (fileDto.fileName as NSString).lastPathComponent
-        var destinationUrl = baseDir.appendingPathComponent(safeFileName)
-
-        var counter = 1
-        let ext = destinationUrl.pathExtension
-        let nameWithoutExt = destinationUrl.deletingPathExtension().lastPathComponent
-
-        while FileManager.default.fileExists(atPath: destinationUrl.path) {
-            let newName = "\(nameWithoutExt) (\(counter))"
-            destinationUrl = baseDir.appendingPathComponent(newName).appendingPathExtension(ext)
-            counter += 1
-        }
-
+        let destinationURL = claim.stagingURL
         do {
             let fileManager = FileManager.default
-            fileManager.createFile(atPath: destinationUrl.path, contents: nil)
-            let fileHandle = try FileHandle(forWritingTo: destinationUrl)
+            try? fileManager.removeItem(at: destinationURL)
+            fileManager.createFile(atPath: destinationURL.path, contents: nil)
+            let fileHandle = try FileHandle(forWritingTo: destinationURL)
             defer { try? fileHandle.close() }
 
-            var receivedBytes = 0
+            var receivedBytes: Int64 = 0
             var mutableBuffer = bodyPrefix
-            let bufferSize = 65536
+            let bufferSize = 65_536
             var lastProgressUpdate = Date()
-            var lastReportedProgress: Double = 0
             var chunkStreamEndedNormally = false
 
             if isChunked {
                 while true {
                     let sizeLine = try readSocketLine(from: connection, buffer: &mutableBuffer)
                     let hexStr = sizeLine.components(separatedBy: ";")[0].trimmingCharacters(in: .whitespaces)
-                    guard !hexStr.isEmpty, let size = Int(hexStr, radix: 16) else { break }
+                    guard !hexStr.isEmpty, let size = Int(hexStr, radix: 16) else {
+                        throw NSError(domain: "HTTPTransferServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid chunk size"])
+                    }
 
                     if size == 0 {
                         _ = try readSocketLine(from: connection, buffer: &mutableBuffer)
@@ -1070,16 +1267,13 @@ actor HTTPTransferServer {
                             try fileHandle.write(contentsOf: chunk)
                             mutableBuffer.removeSubrange(0..<toTake)
                             totalReadThisChunk += toTake
-                            receivedBytes += toTake
-                            let progressInfo = await self.updateIncrementProgress(bytes: Int64(toTake))
-                            if progressInfo.total > 0 {
-                                let progress = Double(progressInfo.received) / Double(progressInfo.total)
-                                let timeSinceLast = Date().timeIntervalSince(lastProgressUpdate)
-                                if timeSinceLast > 0.1 || (progress - lastReportedProgress) > 0.01 || progress >= 1.0 {
-                                    await self.triggerProgress(progress)
-                                    lastProgressUpdate = Date()
-                                    lastReportedProgress = progress
-                                }
+                            receivedBytes += Int64(toTake)
+                            guard receivedBytes <= claim.file.size else {
+                                throw NSError(domain: "HTTPTransferServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Upload exceeded prepared file size"])
+                            }
+                            if Date().timeIntervalSince(lastProgressUpdate) >= 0.1 {
+                                await self.reportUploadProgress(claim: claim, receivedBytes: receivedBytes, forceEvent: false)
+                                lastProgressUpdate = Date()
                             }
                         } else {
                             let next = try receiveSocketChunk(from: connection, maxLength: min(size - totalReadThisChunk, bufferSize))
@@ -1093,95 +1287,272 @@ actor HTTPTransferServer {
                 }
             } else {
                 if !mutableBuffer.isEmpty {
-                    let prefixCount = mutableBuffer.count
-                    try fileHandle.write(contentsOf: mutableBuffer)
-                    receivedBytes += prefixCount
-                    _ = await self.updateIncrementProgress(bytes: Int64(prefixCount))
+                    let allowedPrefixCount = min(mutableBuffer.count, contentLength)
+                    let prefix = mutableBuffer.prefix(allowedPrefixCount)
+                    try fileHandle.write(contentsOf: prefix)
+                    receivedBytes += Int64(allowedPrefixCount)
                     mutableBuffer.removeAll()
                 }
 
-                while receivedBytes < contentLength {
-                    let remaining = contentLength - receivedBytes
-                    let chunk = try receiveSocketChunk(from: connection, maxLength: min(remaining, bufferSize))
+                while receivedBytes < Int64(contentLength) {
+                    let remaining = Int64(contentLength) - receivedBytes
+                    let chunk = try receiveSocketChunk(from: connection, maxLength: Int(min(remaining, Int64(bufferSize))))
                     if chunk.isEmpty { break }
 
                     try fileHandle.write(contentsOf: chunk)
-                    receivedBytes += chunk.count
-                    let progressInfo = await self.updateIncrementProgress(bytes: Int64(chunk.count))
-                    if progressInfo.total > 0 {
-                        let progress = Double(progressInfo.received) / Double(progressInfo.total)
-                        let timeSinceLast = Date().timeIntervalSince(lastProgressUpdate)
-                        if timeSinceLast > 0.1 || (progress - lastReportedProgress) > 0.01 || progress >= 1.0 {
-                            await self.triggerProgress(progress)
-                            lastProgressUpdate = Date()
-                            lastReportedProgress = progress
-                        }
+                    receivedBytes += Int64(chunk.count)
+                    if Date().timeIntervalSince(lastProgressUpdate) >= 0.1 {
+                        await self.reportUploadProgress(claim: claim, receivedBytes: receivedBytes, forceEvent: false)
+                        lastProgressUpdate = Date()
                     }
                 }
             }
 
-            logTransfer("✅ [Compat] File saved to \(destinationUrl.path) (\(receivedBytes) bytes, streamed)")
-
-            let isText = fileDto.fileName.hasSuffix(".txt") || fileDto.fileType == "text/plain"
-            if isText, receivedBytes < 1_000_000, let textContent = try? String(contentsOf: destinationUrl, encoding: .utf8) {
-                await self.triggerTextReceived(textContent)
-                if fileDto.fileName == "clipboard.txt" {
-                    do {
-                        try FileManager.default.removeItem(at: destinationUrl)
-                        logTransfer("🧹 [AirSend 中枢] 剪贴板临时文件 \(fileDto.fileName) 已被抹除，无痕同步完成")
-                    } catch {
-                        logTransfer("⚠️ 抹除临时文件失败: \(error)")
-                    }
-                }
+            guard receivedBytes == claim.file.size, !isChunked || chunkStreamEndedNormally else {
+                throw NSError(domain: "HTTPTransferServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Transfer truncated"])
             }
-
-            let finalProgress = await self.getSessionSizeInfo()
-            if finalProgress.total > 0 {
-                await self.triggerProgress(1.0)
-            }
-
-            let counts = await self.incrementFileCount()
-            if (!isChunked && receivedBytes < contentLength) || (isChunked && !chunkStreamEndedNormally) {
-                logTransfer("❌ [Compat] File incomplete or chunk stream aborted! Expected \(contentLength), got \(receivedBytes). Transfer truncated.")
-                await self.triggerTransferComplete(success: false, message: "Transfer truncated")
-                return HTTPRawResponse(statusCode: 400, body: Data())
-            }
-
-            if counts.current >= counts.expected {
-                await self.triggerTransferComplete(success: true, message: nil as String?)
-            }
-
-            return HTTPRawResponse(statusCode: 200, body: Data())
+            try fileHandle.synchronize()
+            await self.reportUploadProgress(claim: claim, receivedBytes: receivedBytes, forceEvent: true)
+            logTransfer("✅ [Compat] File staged at \(destinationURL.path) (\(receivedBytes) bytes)")
+            return await self.finishStagedUpload(claim: claim)
         } catch {
             logTransfer("❌ [Compat] Upload Failed: \(error.localizedDescription)")
-            try? FileManager.default.removeItem(at: destinationUrl)
-
-            let nsError = error as NSError
-            if nsError.domain == NSPOSIXErrorDomain && (nsError.code == Int(ETIMEDOUT) || nsError.code == Int(ECONNRESET)) {
-                logTransfer("🚨 [Compat] Socket timeout/reset detected. Assuming peer cancelled silently.")
-                await triggerCancelReceived()
-            } else {
-                await triggerTransferComplete(success: false, message: error.localizedDescription)
-            }
-
+            try? FileManager.default.removeItem(at: destinationURL)
+            await self.failUploadSession(claim: claim, code: "receive_upload_failed", message: error.localizedDescription)
             return HTTPRawResponse(statusCode: 500, body: "Internal Server Error".data(using: .utf8)!)
         }
+    }
+
+    nonisolated private func reportUploadProgress(
+        claim: ReceiverUploadClaim,
+        receivedBytes: Int64,
+        forceEvent: Bool
+    ) async {
+        guard let progress = await self.updateProgress(
+            sessionID: claim.sessionID,
+            fileID: claim.fileID,
+            receivedBytes: receivedBytes
+        ) else { return }
+        _ = try? await self.transferCoordinator.updateFileProgress(
+            transferID: progress.transferID,
+            fileID: claim.file.id,
+            transferredBytes: receivedBytes,
+            forceEvent: forceEvent
+        )
+        let fraction = progress.total > 0
+            ? min(1, Double(progress.received) / Double(progress.total))
+            : 1
+        await self.triggerProgress(sessionID: claim.sessionID, fraction)
+    }
+
+    nonisolated private func failUploadSession(
+        claim: ReceiverUploadClaim,
+        code: String,
+        message: String
+    ) async {
+        guard let session = await self.failReceiverSession(sessionID: claim.sessionID) else { return }
+        try? FileManager.default.removeItem(at: session.stagingDirectory)
+        _ = try? await self.transferCoordinator.finishFailed(
+            id: session.transferID,
+            code: code,
+            message: message,
+            retryable: true
+        )
+        await self.triggerTransferComplete(sessionID: claim.sessionID, success: false, message: message)
+    }
+
+    nonisolated private func finishStagedUpload(claim: ReceiverUploadClaim) async -> HTTPRawResponse {
+        guard let completedSession = await self.completeUpload(
+            sessionID: claim.sessionID,
+            fileID: claim.fileID
+        ) else {
+            return HTTPRawResponse(statusCode: 200, body: Data())
+        }
+
+        do {
+            let savedPathsByFile = try await self.finalizeReceiverSession(completedSession)
+            let previewPathsByFile = completedSession.files.reduce(into: [String: String]()) { result, entry in
+                let mimeType = entry.value.fileType.lowercased()
+                if (mimeType.hasPrefix("image/") || mimeType.hasPrefix("video/")),
+                   let path = savedPathsByFile[entry.key] {
+                    result[entry.key] = path
+                }
+            }
+            _ = try await self.transferCoordinator.finishCompleted(
+                id: completedSession.transferID,
+                savedPathsByFile: savedPathsByFile,
+                previewPathsByFile: previewPathsByFile
+            )
+            await self.triggerTransferComplete(sessionID: completedSession.id, success: true, message: nil)
+            return HTTPRawResponse(statusCode: 200, body: Data())
+        } catch {
+            try? FileManager.default.removeItem(at: completedSession.stagingDirectory)
+            _ = try? await self.transferCoordinator.finishFailed(
+                id: completedSession.transferID,
+                code: "receive_save_failed",
+                message: error.localizedDescription,
+                retryable: false
+            )
+            await self.triggerTransferComplete(
+                sessionID: completedSession.id,
+                success: false,
+                message: error.localizedDescription
+            )
+            return HTTPRawResponse(statusCode: 500, body: "Save Failed".data(using: .utf8)!)
+        }
+    }
+
+    nonisolated private func finalizeReceiverSession(
+        _ session: CompletedReceiverSession
+    ) async throws -> [String: String] {
+        var savedPathsByFile: [String: String] = [:]
+        for fileID in session.files.keys.sorted() {
+            guard let file = session.files[fileID],
+                  let stagingURL = session.stagingURLsByFile[fileID] else {
+                throw NSError(
+                    domain: "HTTPTransferServer",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Missing staged file metadata"]
+                )
+            }
+
+            if isClipboardPayload(file) {
+                let data = try Data(contentsOf: stagingURL, options: .mappedIfSafe)
+                guard let text = String(data: data, encoding: .utf8) else {
+                    throw NSError(
+                        domain: "HTTPTransferServer",
+                        code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "Clipboard payload is not valid UTF-8"]
+                    )
+                }
+                await self.triggerTextReceived(text)
+                try FileManager.default.removeItem(at: stagingURL)
+                continue
+            }
+
+            let baseDirectory = await self.getBaseDirectory(for: file)
+            try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+            let destinationURL = try publishWithoutOverwrite(
+                stagingURL: stagingURL,
+                requestedName: file.fileName,
+                baseDirectory: baseDirectory
+            )
+            savedPathsByFile[file.id] = destinationURL.path
+        }
+
+        try? FileManager.default.removeItem(at: session.stagingDirectory)
+        return savedPathsByFile
+    }
+
+    nonisolated private func isClipboardPayload(_ file: FileDto) -> Bool {
+        guard file.size > 0, file.size <= 1_000_000 else { return false }
+        let mimeType = file.fileType
+            .split(separator: ";", maxSplits: 1)
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard mimeType == "text/plain" else { return false }
+
+        let fileName = (file.fileName as NSString).lastPathComponent.lowercased()
+        if fileName == "clipboard.txt" { return true }
+        guard fileName.hasSuffix(".txt") else { return false }
+        let stem = String(fileName.dropLast(4))
+        guard (10...13).contains(stem.utf8.count) else { return false }
+        return stem.utf8.allSatisfy { (48...57).contains($0) }
+    }
+
+    nonisolated private func publishWithoutOverwrite(
+        stagingURL: URL,
+        requestedName: String,
+        baseDirectory: URL
+    ) throws -> URL {
+        let lastComponent = (requestedName as NSString).lastPathComponent
+        let safeName = lastComponent.isEmpty || lastComponent == "." || lastComponent == ".."
+            ? "Received File"
+            : lastComponent
+        let nameURL = URL(fileURLWithPath: safeName)
+        let pathExtension = nameURL.pathExtension
+        let baseName = nameURL.deletingPathExtension().lastPathComponent
+
+        var linkSourceURL = stagingURL
+        var destinationVolumeCopy: URL?
+        defer {
+            if let destinationVolumeCopy {
+                try? FileManager.default.removeItem(at: destinationVolumeCopy)
+            }
+        }
+
+        for suffix in 0..<10_000 {
+            let candidateName = suffix == 0 ? baseName : "\(baseName) (\(suffix))"
+            var candidateURL = baseDirectory.appendingPathComponent(candidateName, isDirectory: false)
+            if !pathExtension.isEmpty {
+                candidateURL.appendPathExtension(pathExtension)
+            }
+
+            let result = linkSourceURL.path.withCString { sourcePath in
+                candidateURL.path.withCString { destinationPath in
+                    Darwin.link(sourcePath, destinationPath)
+                }
+            }
+            if result == 0 {
+                try FileManager.default.removeItem(at: stagingURL)
+                synchronizeDirectory(baseDirectory)
+                return candidateURL
+            }
+            if errno == EXDEV, destinationVolumeCopy == nil {
+                let temporaryURL = baseDirectory.appendingPathComponent(
+                    ".airsend-\(UUID().uuidString).partial",
+                    isDirectory: false
+                )
+                let copyResult = stagingURL.path.withCString { sourcePath in
+                    temporaryURL.path.withCString { destinationPath in
+                        copyfile(sourcePath, destinationPath, nil, copyfile_flags_t(COPYFILE_ALL | COPYFILE_EXCL))
+                    }
+                }
+                guard copyResult == 0 else {
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                }
+                if let handle = try? FileHandle(forWritingTo: temporaryURL) {
+                    try? handle.synchronize()
+                    try? handle.close()
+                }
+                destinationVolumeCopy = temporaryURL
+                linkSourceURL = temporaryURL
+                continue
+            }
+            if errno != EEXIST {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+        }
+
+        throw NSError(
+            domain: "HTTPTransferServer",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey: "Could not allocate a unique destination file name"]
+        )
+    }
+
+    nonisolated private func synchronizeDirectory(_ directory: URL) {
+        let descriptor = directory.path.withCString { Darwin.open($0, O_RDONLY) }
+        guard descriptor >= 0 else { return }
+        defer { Darwin.close(descriptor) }
+        _ = Darwin.fsync(descriptor)
     }
     
     nonisolated private func handleCancel(request: HTTPRawRequest) async -> HTTPRawResponse {
         logTransfer("🛑 [HTTPTransferServer] Cancel request received from peer. Query: \(request.queryParams)")
-        
-        let wasActive = await performSessionCancellation()
-        
-        logTransfer("🛑 [HTTPTransferServer] Invoking onCancelReceived callback...")
-        await triggerCancelReceived()
-        logTransfer("🛑 [HTTPTransferServer] onCancelReceived callback invoked.")
-        
-        if wasActive {
-            logTransfer("🛑 [HTTPTransferServer] Notifying onTransferComplete(false, Cancelled by peer)")
-            await triggerTransferComplete(success: false, message: "Cancelled by peer")
+
+        guard let sessionID = request.queryParams["sessionId"], !sessionID.isEmpty else {
+            return HTTPRawResponse(statusCode: 400, body: "Missing sessionId".data(using: .utf8)!)
         }
-        
+        guard let session = await performSessionCancellation(sessionID: sessionID) else {
+            return HTTPRawResponse(statusCode: 404, body: "Unknown session".data(using: .utf8)!)
+        }
+
+        try? FileManager.default.removeItem(at: session.stagingDirectory)
+        _ = try? await transferCoordinator.finishCancelled(id: session.transferID)
+        await triggerCancelReceived(sessionID: sessionID)
+        await triggerTransferComplete(sessionID: sessionID, success: false, message: "Cancelled by peer")
         return HTTPRawResponse(statusCode: 200, body: Data())
     }
     
@@ -1280,6 +1651,7 @@ struct HTTPRawResponse {
         switch statusCode {
         case 200: return "OK"
         case 400: return "Bad Request"
+        case 413: return "Payload Too Large"
         case 403: return "Forbidden"
         case 404: return "Not Found"
         default: return "Internal Server Error"

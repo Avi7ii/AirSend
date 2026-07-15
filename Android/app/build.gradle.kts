@@ -113,6 +113,11 @@ android {
     androidResources {
         generateLocaleConfig = true
     }
+
+    lint {
+        baseline = file("lint-baseline.xml")
+        abortOnError = true
+    }
 }
 
 tasks.configureEach {

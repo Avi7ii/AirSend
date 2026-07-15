@@ -9,6 +9,7 @@ DIST_DIR="dist"
 SPARKLE_FRAMEWORK_NAME="Sparkle.framework"
 CODESIGN_ARGS=()
 ARTIFACT_ZIP="${AIRSEND_ARTIFACT_ZIP:-}"
+BUILD_CONFIGURATION="${AIRSEND_BUILD_CONFIGURATION:-release}"
 
 clean_bundle_xattrs() {
     local bundle_path="$1"
@@ -97,9 +98,9 @@ sign_sparkle_framework() {
     sign_path "$version_dir"
 }
 
-echo "🚀 Building $APP_NAME (Debug Mode)..."
-swift build -c debug
-BUILD_DIR="${BUILD_DIR:-$(swift build -c debug --show-bin-path)}"
+echo "🚀 Building $APP_NAME ($BUILD_CONFIGURATION mode)..."
+swift build -c "$BUILD_CONFIGURATION"
+BUILD_DIR="${BUILD_DIR:-$(swift build -c "$BUILD_CONFIGURATION" --show-bin-path)}"
 
 TMP_ROOT=$(mktemp -d /tmp/airsend-build.XXXXXX)
 APP_BUNDLE="$TMP_ROOT/$APP_NAME.app"

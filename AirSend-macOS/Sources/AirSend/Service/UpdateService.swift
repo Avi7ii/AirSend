@@ -216,7 +216,7 @@ private enum InstallOrigin {
     }
 }
 
-private func isDeveloperIDSigned(bundleURL: URL) -> Bool {
+private func hasCertificateBackedSignature(bundleURL: URL) -> Bool {
     var staticCode: SecStaticCode?
     guard SecStaticCodeCreateWithPath(bundleURL as CFURL, SecCSFlags(), &staticCode) == errSecSuccess,
           let code = staticCode else { return false }
@@ -224,13 +224,8 @@ private func isDeveloperIDSigned(bundleURL: URL) -> Bool {
     var infoCF: CFDictionary?
     guard SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &infoCF) == errSecSuccess,
           let info = infoCF as? [String: Any],
-          let certs = info[kSecCodeInfoCertificates as String] as? [SecCertificate],
-          let leaf = certs.first else { return false }
-
-    if let summary = SecCertificateCopySubjectSummary(leaf) as String? {
-        return summary.hasPrefix("Developer ID Application:")
-    }
-    return false
+          let certs = info[kSecCodeInfoCertificates as String] as? [SecCertificate] else { return false }
+    return !certs.isEmpty
 }
 
 @MainActor
@@ -245,7 +240,7 @@ private func makeUpdaterController(savedAutoUpdate: Bool) -> any UpdaterProvidin
         return DisabledUpdaterController(unavailableReason: "Updates are managed by Homebrew for this installation.")
     }
 
-    guard isDeveloperIDSigned(bundleURL: bundleURL) else {
+    guard hasCertificateBackedSignature(bundleURL: bundleURL) else {
         return DisabledUpdaterController(unavailableReason: "Updates unavailable in this build.")
     }
 

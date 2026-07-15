@@ -1,5 +1,28 @@
 import Foundation
 import Network
+import AirSendDiscoverySupport
+
+enum ManualPeerProbeError: LocalizedError {
+    case invalidAddress
+    case invalidResponse
+    case rejectedStatus(Int)
+    case missingFingerprint
+    case fingerprintMismatch(expected: String, received: String)
+    case certificateMismatch
+    case localIdentity
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidAddress: "The address could not be used."
+        case .invalidResponse: "The endpoint did not return valid AirSend device information."
+        case .rejectedStatus(let status): "The endpoint returned HTTP \(status)."
+        case .missingFingerprint: "The endpoint did not provide a device fingerprint."
+        case .fingerprintMismatch(let expected, let received): "Fingerprint mismatch: expected \(expected), received \(received)."
+        case .certificateMismatch: "The HTTPS certificate does not match the advertised device fingerprint."
+        case .localIdentity: "This endpoint is this Mac."
+        }
+    }
+}
 
 final class UDPDiscoveryService: @unchecked Sendable {
     private var group: NWConnectionGroup?
@@ -9,7 +32,6 @@ final class UDPDiscoveryService: @unchecked Sendable {
     var onDeviceFound: ((Device) -> Void)?
     var onTransportFailure: ((String) -> Void)?
     var onCampusFallbackPacket: ((Data, String) -> Void)?
-    var prioritizedProbeHostsProvider: (() -> [String])?
     
     private let fingerprint: String
     private let alias = Host.current().localizedName ?? "AirSend"
@@ -32,26 +54,22 @@ final class UDPDiscoveryService: @unchecked Sendable {
     private var isSubnetProbeRunning = false
     private let preferredProbeQueue = DispatchQueue(label: "com.airsend.discovery.preferred-probe", qos: .utility)
     private let preferredProbeStateQueue = DispatchQueue(label: "com.airsend.discovery.preferred-probe-state")
+    private let preferredProbeHostsStore = PreferredDiscoveryHostsStore()
     private var isPreferredProbeRunning = false
-    private let subnetProbeConcurrency = 320
+    private let subnetProbeConcurrency = 48
     private let preferredProbeConcurrency = 16
     private let largeSubnetProbeTimeout: TimeInterval = 0.35
     private let preferredProbeTimeout: TimeInterval = 0.45
-    private let curlPath = "/usr/bin/curl"
-    private lazy var discoverySession: URLSession = {
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 1.2
-        config.timeoutIntervalForResource = 1.2
-        config.waitsForConnectivity = false
-        return URLSession(configuration: config, delegate: SessionDelegate(), delegateQueue: nil)
-    }()
+    private var lastSubnetProbeAt = Date.distantPast
+    private let subnetProbeCooldown: TimeInterval = 60
 
-    private func makeDiscoverySession(timeout: TimeInterval) -> URLSession {
+    private func makeDiscoverySession(timeout: TimeInterval, delegate: SessionDelegate) -> URLSession {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = timeout
         config.timeoutIntervalForResource = timeout
         config.waitsForConnectivity = false
-        return URLSession(configuration: config, delegate: SessionDelegate(), delegateQueue: nil)
+        config.connectionProxyDictionary = [:]
+        return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
     }
     
     private func reportTransportFailure(_ reason: String) {
@@ -92,7 +110,6 @@ final class UDPDiscoveryService: @unchecked Sendable {
             case .ready:
                  FileLogger.log("✅ UDP Discovery (Multicast) Ready")
                  self?.sendAnnouncement()
-                 self?.startSubnetProbe(reason: "multicast-ready")
             case .failed(let error):
                 FileLogger.log("❌ UDP Discovery (Multicast) Failed: \(error)")
                 self?.reportTransportFailure("multicast failed: \(error)")
@@ -151,7 +168,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
     func sendAnnouncement(isAnnouncement: Bool = true) {
         let dto = MulticastDto(
             alias: alias,
-            version: "3.5.0",
+            version: AirSendAppMetadata.version,
             deviceModel: deviceModel,
             deviceType: deviceType.rawValue,
             fingerprint: fingerprint,
@@ -185,7 +202,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
     }
     
     // Explicit Scan for external triggers
-    func triggerScan() {
+    func triggerScan(allowSubnetSweep: Bool = true) {
         FileLogger.log("📡 Triggering manual discovery scan (Step Burst)...")
         // Official LocalSend pattern: [100ms, 500ms, 2000ms]
         let intervals = [0.1, 0.5, 2.0]
@@ -195,7 +212,9 @@ final class UDPDiscoveryService: @unchecked Sendable {
             }
         }
         probePreferredHosts(reason: "manual-scan-preferred")
-        startSubnetProbe(reason: "manual-scan")
+        if allowSubnetSweep {
+            startSubnetProbe(reason: "manual-scan")
+        }
     }
 
     func probePreferredHosts(reason: String) {
@@ -217,25 +236,109 @@ final class UDPDiscoveryService: @unchecked Sendable {
                         self.isPreferredProbeRunning = false
                     }
                 }
-                if self.protocolType == .http {
-                    await self.probeHostsWithCurl(
-                        hosts,
-                        reason: reason,
-                        timeout: self.preferredProbeTimeout,
-                        concurrency: min(self.preferredProbeConcurrency, hosts.count),
-                        logPrefix: "🎯 Discovery: Preferred host probe"
-                    )
-                } else {
-                    await self.probeHosts(
-                        hosts,
-                        reason: reason,
-                        timeout: self.preferredProbeTimeout,
-                        concurrency: min(self.preferredProbeConcurrency, hosts.count),
-                        logPrefix: "🎯 Discovery: Preferred host probe"
-                    )
-                }
+                await self.probeHosts(
+                    hosts,
+                    reason: reason,
+                    timeout: self.preferredProbeTimeout,
+                    concurrency: min(self.preferredProbeConcurrency, hosts.count),
+                    logPrefix: "🎯 Discovery: Preferred host probe"
+                )
             }
         }
+    }
+
+    func updatePreferredProbeHosts(_ rawHosts: [String]) {
+        var validatedHosts: [String] = []
+        var seen = Set<String>()
+
+        for rawHost in rawHosts {
+            let host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !host.isEmpty,
+                  host != "unknown",
+                  IPv4Subnet.parse(host) != nil,
+                  seen.insert(host).inserted else {
+                continue
+            }
+            validatedHosts.append(host)
+        }
+
+        preferredProbeHostsStore.replace(with: validatedHosts)
+    }
+
+    func resolveManualPeer(
+        alias requestedAlias: String,
+        address rawAddress: String,
+        port: Int,
+        expectedFingerprint: String?,
+        timeout: TimeInterval = 5
+    ) async throws -> Device {
+        let address = rawAddress.trimmingCharacters(in: CharacterSet(charactersIn: "[]").union(.whitespacesAndNewlines))
+        guard !address.isEmpty, (1...65_535).contains(port) else {
+            throw ManualPeerProbeError.invalidAddress
+        }
+        let host = address.contains(":") ? "[\(address)]" : address
+        guard let url = URL(string: "\(protocolType.rawValue)://\(host):\(port)/api/localsend/v2/info") else {
+            throw ManualPeerProbeError.invalidAddress
+        }
+
+        let normalizedExpected = expectedFingerprint?
+            .lowercased()
+            .filter(\.isHexDigit)
+        let delegate = SessionDelegate(
+            expectedFingerprint: protocolType == .https ? normalizedExpected : nil,
+            host: protocolType == .https && normalizedExpected?.isEmpty == false ? address : nil
+        )
+        let session = makeDiscoverySession(timeout: timeout, delegate: delegate)
+        defer { session.finishTasksAndInvalidate() }
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = "GET"
+        request.setValue("close", forHTTPHeaderField: "Connection")
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw ManualPeerProbeError.invalidResponse
+        }
+        guard 200..<300 ~= http.statusCode else {
+            throw ManualPeerProbeError.rejectedStatus(http.statusCode)
+        }
+        guard data.count <= 1_048_576,
+              let dto = try? JSONDecoder().decode(RegisterDto.self, from: data) else {
+            throw ManualPeerProbeError.invalidResponse
+        }
+        let advertisedFingerprint = dto.fingerprint.lowercased().filter(\.isHexDigit)
+        guard !advertisedFingerprint.isEmpty else {
+            throw ManualPeerProbeError.missingFingerprint
+        }
+        if let normalizedExpected, !normalizedExpected.isEmpty,
+           !DiscoveryIdentity.fingerprintsMatch(normalizedExpected, advertisedFingerprint) {
+            throw ManualPeerProbeError.fingerprintMismatch(
+                expected: normalizedExpected,
+                received: advertisedFingerprint
+            )
+        }
+        if protocolType == .https {
+            guard let certificateFingerprint = delegate.presentedFingerprint,
+                  DiscoveryIdentity.fingerprintsMatch(certificateFingerprint, advertisedFingerprint) else {
+                throw ManualPeerProbeError.certificateMismatch
+            }
+        }
+        guard !DiscoveryIdentity.fingerprintsMatch(advertisedFingerprint, fingerprint) else {
+            throw ManualPeerProbeError.localIdentity
+        }
+
+        let alias = requestedAlias.trimmingCharacters(in: .whitespacesAndNewlines)
+        return Device(
+            id: advertisedFingerprint,
+            alias: alias.isEmpty ? dto.alias : alias,
+            ip: address,
+            port: port,
+            deviceModel: dto.deviceModel,
+            deviceType: dto.deviceType,
+            version: dto.version ?? "",
+            https: protocolType == .https,
+            download: dto.download ?? true,
+            lastSeen: Date()
+        )
     }
     
     private func handleMessage(content: Data, source: NWEndpoint) {
@@ -312,8 +415,11 @@ final class UDPDiscoveryService: @unchecked Sendable {
 
     private func startSubnetProbe(reason: String) {
         let shouldStart = subnetProbeStateQueue.sync { () -> Bool in
-            guard !isSubnetProbeRunning else { return false }
+            let now = Date()
+            guard !isSubnetProbeRunning,
+                  now.timeIntervalSince(lastSubnetProbeAt) >= subnetProbeCooldown else { return false }
             isSubnetProbeRunning = true
+            lastSubnetProbeAt = now
             return true
         }
         guard shouldStart else { return }
@@ -335,21 +441,14 @@ final class UDPDiscoveryService: @unchecked Sendable {
         let candidates = subnetProbeCandidates()
         guard !candidates.isEmpty else { return }
         let requestTimeout = candidates.count > 1024 ? largeSubnetProbeTimeout : 1.2
-        let session = requestTimeout == 1.2 ? discoverySession : makeDiscoverySession(timeout: requestTimeout)
         let concurrency = min(subnetProbeConcurrency, candidates.count)
-        defer {
-            if session !== discoverySession {
-                session.invalidateAndCancel()
-            }
-        }
 
         await probeHosts(
             candidates,
             reason: reason,
             timeout: requestTimeout,
             concurrency: concurrency,
-            logPrefix: "🔎 Discovery: Subnet probe",
-            session: session
+            logPrefix: "🔎 Discovery: Subnet probe"
         )
     }
 
@@ -358,75 +457,10 @@ final class UDPDiscoveryService: @unchecked Sendable {
         reason: String,
         timeout: TimeInterval,
         concurrency: Int,
-        logPrefix: String,
-        session: URLSession? = nil
-    ) async {
-        guard !hosts.isEmpty else { return }
-
-        let activeSession = session ?? makeDiscoverySession(timeout: timeout)
-        let shouldInvalidateSession = (session == nil)
-        defer {
-            if shouldInvalidateSession {
-                activeSession.invalidateAndCancel()
-            }
-        }
-
-        FileLogger.log("\(logPrefix) [\(reason)] scanning \(hosts.count) host(s) (timeout \(String(format: "%.2f", timeout))s)")
-
-        await withTaskGroup(of: Void.self) { group in
-            var iterator = hosts.makeIterator()
-            let initialTasks = min(max(1, concurrency), hosts.count)
-
-            for _ in 0..<initialTasks {
-                guard let host = iterator.next() else { break }
-                group.addTask { [weak self] in
-                    guard let self = self else { return }
-                    await self.probeHost(host, timeout: timeout, session: activeSession)
-                }
-            }
-
-            while await group.next() != nil {
-                guard let host = iterator.next() else { continue }
-                group.addTask { [weak self] in
-                    guard let self = self else { return }
-                    await self.probeHost(host, timeout: timeout, session: activeSession)
-                }
-            }
-        }
-    }
-
-    private func probeHostsWithCurl(
-        _ hosts: [String],
-        reason: String,
-        timeout: TimeInterval,
-        concurrency: Int,
         logPrefix: String
     ) async {
         guard !hosts.isEmpty else { return }
 
-        let registerDto = RegisterDto(
-            alias: alias,
-            version: "3.5.0",
-            deviceModel: deviceModel,
-            deviceType: deviceType.rawValue,
-            fingerprint: fingerprint,
-            macAddress: macAddress,
-            port: Int(NetworkPorts.transferPort),
-            protocolType: protocolType.rawValue,
-            download: true
-        )
-
-        let requestBodyFile = FileManager.default.temporaryDirectory
-            .appendingPathComponent("airsend-discovery-\(UUID().uuidString).json")
-
-        do {
-            try JSONEncoder().encode(registerDto).write(to: requestBodyFile)
-        } catch {
-            FileLogger.log("❌ Discovery: Failed to prepare preferred probe payload: \(error)")
-            return
-        }
-        defer { try? FileManager.default.removeItem(at: requestBodyFile) }
-
         FileLogger.log("\(logPrefix) [\(reason)] scanning \(hosts.count) host(s) (timeout \(String(format: "%.2f", timeout))s)")
 
         await withTaskGroup(of: Void.self) { group in
@@ -437,7 +471,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
                 guard let host = iterator.next() else { break }
                 group.addTask { [weak self] in
                     guard let self = self else { return }
-                    await self.probeHostWithCurl(host, timeout: timeout, requestBodyFile: requestBodyFile)
+                    await self.probeHost(host, timeout: timeout)
                 }
             }
 
@@ -445,16 +479,16 @@ final class UDPDiscoveryService: @unchecked Sendable {
                 guard let host = iterator.next() else { continue }
                 group.addTask { [weak self] in
                     guard let self = self else { return }
-                    await self.probeHostWithCurl(host, timeout: timeout, requestBodyFile: requestBodyFile)
+                    await self.probeHost(host, timeout: timeout)
                 }
             }
         }
     }
 
-    private func probeHost(_ host: String, timeout: TimeInterval, session: URLSession) async {
+    private func probeHost(_ host: String, timeout: TimeInterval) async {
         let registerDto = RegisterDto(
             alias: alias,
-            version: "3.5.0",
+            version: AirSendAppMetadata.version,
             deviceModel: deviceModel,
             deviceType: deviceType.rawValue,
             fingerprint: fingerprint,
@@ -470,6 +504,9 @@ final class UDPDiscoveryService: @unchecked Sendable {
             }
 
             do {
+                let delegate = SessionDelegate()
+                let session = makeDiscoverySession(timeout: timeout, delegate: delegate)
+                defer { session.finishTasksAndInvalidate() }
                 var request = URLRequest(url: url, timeoutInterval: timeout)
                 request.httpMethod = "POST"
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -479,10 +516,18 @@ final class UDPDiscoveryService: @unchecked Sendable {
                 guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
                     continue
                 }
+                guard data.count <= 1_048_576 else { continue }
 
                 let dto = try JSONDecoder().decode(RegisterDto.self, from: data)
                 guard !DiscoveryIdentity.fingerprintsMatch(dto.fingerprint, fingerprint) else {
                     return
+                }
+                if protocolType == .https {
+                    guard let certificateFingerprint = delegate.presentedFingerprint,
+                          DiscoveryIdentity.fingerprintsMatch(certificateFingerprint, dto.fingerprint) else {
+                        FileLogger.log("❌ Discovery rejected \(host): certificate and device fingerprints differ")
+                        continue
+                    }
                 }
                 let device = Device(
                     id: dto.fingerprint,
@@ -491,7 +536,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
                     port: dto.port ?? candidatePort,
                     deviceModel: dto.deviceModel,
                     deviceType: dto.deviceType,
-                    version: dto.version ?? "3.5.0",
+                    version: dto.version ?? "",
                     https: dto.protocolType == ProtocolType.https.rawValue,
                     download: dto.download ?? false,
                     lastSeen: Date()
@@ -503,105 +548,6 @@ final class UDPDiscoveryService: @unchecked Sendable {
                 // Keep subnet probing quiet; UDP remains the primary discovery mechanism.
             }
         }
-    }
-
-    private func probeHostWithCurl(_ host: String, timeout: TimeInterval, requestBodyFile: URL) async {
-        for candidatePort in candidateProbePorts() {
-            guard let url = URL(string: "\(protocolType.rawValue)://\(host):\(candidatePort)/api/localsend/v2/register") else {
-                continue
-            }
-
-            do {
-                let result = try await performCurlProbe(url: url, requestBodyFile: requestBodyFile, timeout: timeout)
-                guard 200..<300 ~= result.statusCode else { continue }
-
-                let dto = try JSONDecoder().decode(RegisterDto.self, from: result.body)
-                guard !DiscoveryIdentity.fingerprintsMatch(dto.fingerprint, fingerprint) else {
-                    return
-                }
-                let device = Device(
-                    id: dto.fingerprint,
-                    alias: dto.alias,
-                    ip: host,
-                    port: dto.port ?? candidatePort,
-                    deviceModel: dto.deviceModel,
-                    deviceType: dto.deviceType,
-                    version: dto.version ?? "3.5.0",
-                    https: dto.protocolType == ProtocolType.https.rawValue,
-                    download: dto.download ?? false,
-                    lastSeen: Date()
-                )
-                FileLogger.log("✅ Discovery: HTTP subnet probe found [\(device.alias)] at \(device.ip):\(device.port)")
-                onDeviceFound?(device)
-                return
-            } catch {
-                continue
-            }
-        }
-    }
-
-    private func performCurlProbe(url: URL, requestBodyFile: URL, timeout: TimeInterval) async throws -> CurlProbeResult {
-        let responseFile = FileManager.default.temporaryDirectory
-            .appendingPathComponent("airsend-discovery-response-\(UUID().uuidString).tmp")
-        defer { try? FileManager.default.removeItem(at: responseFile) }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: curlPath)
-
-        var arguments = [
-            "-sS",
-            "--http1.1",
-            "--connect-timeout", String(format: "%.2f", max(0.2, timeout)),
-            "--max-time", String(format: "%.2f", max(0.2, timeout)),
-            "--output", responseFile.path,
-            "--write-out", "%{http_code}",
-            "-X", "POST",
-            "-H", "Content-Type: application/json",
-            "-H", "Connection: close",
-            "--data-binary", "@\(requestBodyFile.path)"
-        ]
-        if protocolType == .https {
-            arguments.append("-k")
-        }
-        arguments.append(url.absoluteString)
-        process.arguments = arguments
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        let terminationStatus: Int32 = try await withCheckedThrowingContinuation { continuation in
-            process.terminationHandler = { proc in
-                continuation.resume(returning: proc.terminationStatus)
-            }
-
-            do {
-                try process.run()
-            } catch {
-                continuation.resume(throwing: error)
-            }
-        }
-
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        let responseBody = (try? Data(contentsOf: responseFile)) ?? Data()
-
-        guard terminationStatus == 0 else {
-            let stderr = String(data: stderrData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? "curl failed"
-            throw NSError(
-                domain: "UDPDiscoveryServiceCurl",
-                code: Int(terminationStatus),
-                userInfo: [NSLocalizedDescriptionKey: stderr]
-            )
-        }
-
-        let statusCode = Int(
-            String(data: stdoutData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        ) ?? -1
-        return CurlProbeResult(statusCode: statusCode, body: responseBody)
     }
 
     private func candidateProbePorts() -> [Int] {
@@ -643,23 +589,7 @@ final class UDPDiscoveryService: @unchecked Sendable {
     }
 
     private func preferredProbeHosts() -> [String] {
-        guard let provider = prioritizedProbeHostsProvider else { return [] }
-
-        var orderedHosts: [String] = []
-        var seen = Set<String>()
-
-        for rawHost in provider() {
-            let host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !host.isEmpty,
-                  host != "unknown",
-                  IPv4Subnet.parse(host) != nil,
-                  seen.insert(host).inserted else {
-                continue
-            }
-            orderedHosts.append(host)
-        }
-
-        return orderedHosts
+        preferredProbeHostsStore.snapshot()
     }
 
     private func currentPrivateIPv4Subnets() -> [IPv4Subnet] {
@@ -742,11 +672,6 @@ final class UDPDiscoveryService: @unchecked Sendable {
     }
 }
 
-private struct CurlProbeResult {
-    let statusCode: Int
-    let body: Data
-}
-
 // Helper to decode MulticastDto correctly since we have custom keys
 extension MulticastDto {
      static var decode: MulticastDto.Type {
@@ -755,7 +680,7 @@ extension MulticastDto {
 }
 
 private struct IPv4Subnet {
-    private static let largeSubnetHostLimit = 9_216
+    private static let largeSubnetHostLimit = 1_024
 
     let address: String
     let hosts: [String]

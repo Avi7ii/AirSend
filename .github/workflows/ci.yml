@@ -39,6 +39,7 @@ jobs:
           bash -n tools/test_magisk_service_version_guard.sh
           bash -n tools/prepare_release_assets.sh
           bash -n tools/test_prepare_release_assets.sh
+          bash -n tools/test_airsend_parity_matrix.sh
 
       - name: Check required project files
         run: |
@@ -54,12 +55,16 @@ jobs:
           test -x tools/prepare_release_assets.sh
           test -x tools/test_prepare_release_assets.sh
           test -x tools/test_magisk_service_version_guard.sh
+          test -x tools/test_airsend_parity_matrix.sh
 
       - name: Test release asset completeness guard
         run: tools/test_prepare_release_assets.sh
 
       - name: Test Magisk APK version guard
         run: tools/test_magisk_service_version_guard.sh
+
+      - name: Test Android to macOS capability matrix
+        run: tools/test_airsend_parity_matrix.sh
 
   macos-swift:
     name: macOS Swift build and app bundle
@@ -99,29 +104,53 @@ jobs:
         working-directory: AirSend-macOS
         run: swift run AirSendDragHandoffSelfTests
 
-      - name: Build Swift package
+      - name: Run automation support self-tests
         working-directory: AirSend-macOS
-        run: swift build
+        run: swift run AirSendAutomationSupportSelfTests
+
+      - name: Run Console support self-tests
+        working-directory: AirSend-macOS
+        run: swift run AirSendConsoleSupportSelfTests
+
+      - name: Run discovery support self-tests
+        working-directory: AirSend-macOS
+        run: swift run AirSendDiscoverySupportSelfTests
+
+      - name: Run runtime core self-tests
+        working-directory: AirSend-macOS
+        run: swift run AirSendRuntimeCoreSelfTests
+
+      - name: Run sender and receiver loopback integration
+        working-directory: AirSend-macOS
+        env:
+          AIRSEND_SELFTEST: "1"
+          AIRSEND_SELFTEST_LOOPBACK: "1"
+        run: swift run AirSend
+
+      - name: Build release Swift package
+        working-directory: AirSend-macOS
+        run: swift build -c release -Xswiftc -warnings-as-errors
 
       - name: Package and verify AirSend.app
         working-directory: AirSend-macOS
         env:
           CI: "true"
-          AIRSEND_ARTIFACT_ZIP: AirSend-macOS-debug.zip
+          AIRSEND_BUILD_CONFIGURATION: release
+          AIRSEND_ARTIFACT_ZIP: AirSend-macOS-release.zip
         run: |
           ./build.sh
-          test -f AirSend-macOS-debug.zip
+          test -f AirSend-macOS-release.zip
           rm -rf /tmp/airsend-ci-verify
           mkdir -p /tmp/airsend-ci-verify
-          /usr/bin/ditto -x -k AirSend-macOS-debug.zip /tmp/airsend-ci-verify
+          /usr/bin/ditto -x -k AirSend-macOS-release.zip /tmp/airsend-ci-verify
           test -d /tmp/airsend-ci-verify/AirSend.app/Contents/Frameworks/Sparkle.framework
           codesign --verify --deep --strict --verbose=2 /tmp/airsend-ci-verify/AirSend.app
 
       - name: Upload macOS app artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AirSend-macOS-debug
-          path: AirSend-macOS/AirSend-macOS-debug.zip
+          name: AirSend-macOS-release
+          path: AirSend-macOS/AirSend-macOS-release.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -154,7 +183,7 @@ jobs:
 
       - name: Clippy patched LocalSend
         working-directory: Android/patches/localsend
-        run: cargo clippy --locked --all-targets
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Test daemon
         working-directory: Android/airsend_daemon
@@ -162,7 +191,7 @@ jobs:
 
       - name: Clippy daemon
         working-directory: Android/airsend_daemon
-        run: cargo clippy --locked --all-targets
+        run: cargo clippy --locked --all-targets -- -D warnings
 
   android:
     name: Android lint, tests, and assembleDebug

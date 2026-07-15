@@ -3,23 +3,66 @@
 
 import Cocoa
 import AirSendDragHandoff
+import AirSendConsoleSupport
+import AirSendDiscoverySupport
+import AirSendRuntimeCore
 import ServiceManagement
 import IOKit.pwr_mgt
+import Network
+import UniformTypeIdentifiers
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMenuDelegate {
     var statusItem: NSStatusItem!
+    private let appStartedAt = Date()
     
     // Persistent Fingerprint
     // Persistent Fingerprint (Will be overwritten by real cert fingerprint)
     var fingerprint: String = UUID().uuidString
     
     lazy var discoveryService = UDPDiscoveryService(fingerprint: fingerprint, protocolType: preferredLocalProtocol)
-    lazy var campusFallback = CampusFallbackCoordinator(fingerprint: fingerprint)
-    lazy var transferServer = HTTPTransferServer(fingerprint: fingerprint)
-    lazy var clipboardSender = ClipboardSender(fingerprint: fingerprint, localProtocol: preferredLocalProtocol, campusFallback: campusFallback)
-    lazy var fileSender = FileSender(fingerprint: fingerprint, localProtocol: preferredLocalProtocol, campusFallback: campusFallback)
+    let runtimeEvents = RuntimeEventHub()
+    lazy var transferCoordinator = TransferCoordinator(events: runtimeEvents)
+    lazy var campusFallback = CampusFallbackCoordinator(
+        fingerprint: fingerprint,
+        transferCoordinator: transferCoordinator
+    )
+    let runtimeConfigurationStore = RuntimeConfigurationStore(
+        fileURL: RuntimeConfigurationStore.defaultFileURL()
+    )
+    lazy var transferHistoryStore: TransferHistoryStore? = try? TransferHistoryStore(
+        fileURL: TransferHistoryStore.defaultFileURL()
+    )
+    private var runtimeConfiguration = AirSendRuntimeConfiguration()
+    private var hasBootstrappedRuntimePersistence = false
+    private var runtimeEventTask: Task<Void, Never>?
+    private var runtimeConfigurationSaveTask: Task<Void, Never>?
+    private var runtimeTransfersByID: [UUID: TransferRecord] = [:]
+    private var runtimeHistory: [TransferRecord] = []
+    private var runtimeLogTail: [String] = []
+    private var transferServerHealth = TransferServerHealthSnapshot(
+        isListening: false,
+        isHTTPS: false,
+        activeSessionCount: 0,
+        listenerState: "stopped"
+    )
+    private var isNetworkPathSatisfied = true
+    private var lastDiagnosticsAt: Date?
+    private var diagnosticsError: String?
+    private var activePowerAssertionReasons: Set<String> = []
+    lazy var transferServer = HTTPTransferServer(
+        fingerprint: fingerprint,
+        transferCoordinator: transferCoordinator
+    )
+    lazy var fileSender = FileSender(
+        fingerprint: fingerprint,
+        localProtocol: preferredLocalProtocol,
+        campusFallback: campusFallback,
+        transferCoordinator: transferCoordinator
+    )
+    lazy var clipboardSender = ClipboardSender(fileSender: fileSender)
     let clipboardService = ClipboardService()
+    let screenshotWatcher = ScreenshotWatcher()
     
     // UI Components
     var dropZoneWindow: DropZoneWindow!
@@ -29,10 +72,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private var currentTransferProgress: Double = 0
     private var currentTransferTarget: String = ""
     private var transferProgressMenuItem: NSMenuItem?
-    private var menuScanTimer: Timer?
+    private var runtimeTransferMenuViews: [UUID: RuntimeTransferMenuItemView] = [:]
     private var isStatusMenuOpen = false
     private var pendingStatusMenuRefresh = false
     private var settingsWindowController: AirSendSettingsWindowController?
+    private var sharingServicePicker: NSSharingServicePicker?
+    private var settingsWindowRelativeTimeTimer: Timer?
     private var recentConsoleActivities: [AirSendActivitySummary] = []
     private let maxRecentConsoleActivities = 5
     private let connectivityConsoleActivityTitles: Set<String> = [
@@ -41,13 +86,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         "Device discovered",
         "Device updated",
     ]
-    private var lastConsoleWarningAt: Date?
+    private var isQuitting = false
     
     // 🔋 功耗优化：广播与清理定时器（连接设备后停止）
     private var broadcastTimer: Timer?
     private var cleanupTimer: Timer?
+    private var selectedTargetFreshnessTimer: Timer?
+    private var selectedTargetRecoveryTimer: Timer?
+    private var discoveryRefreshCompletionWorkItem: DispatchWorkItem?
+    private var isDiscoveryRefreshing = false
+    private var discoveryRefreshSummary = "Ready to refresh devices"
+    private let networkPathMonitor = NWPathMonitor()
+    private let networkPathMonitorQueue = DispatchQueue(label: "com.airsend.network-path", qos: .utility)
+    private var lastNetworkPathSignature: String?
+    private var wakeObserver: NSObjectProtocol?
     private var hasStartedNetworkingStack = false
+    private var isPublishingPreferredDiscoveryHosts = false
     private var isRestartingDiscovery = false
+    private var manualPeerProbeTask: Task<Void, Never>?
     private var lastDiscoveryRestartAt: Date = .distantPast
     private let discoveryRestartCooldown: TimeInterval = 2.0
     
@@ -77,6 +133,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         get { UserDefaults.standard.bool(forKey: "auto_clipboard_sync_enabled") }
         set {
             UserDefaults.standard.set(newValue, forKey: "auto_clipboard_sync_enabled")
+            if hasBootstrappedRuntimePersistence {
+                runtimeConfiguration.clipboardSyncEnabled = newValue
+                persistRuntimeConfiguration()
+            }
             updateMenu()
         }
     }
@@ -92,8 +152,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
         set {
             UserDefaults.standard.set(newValue, forKey: autoScreenshotSyncStorage)
+            if hasBootstrappedRuntimePersistence {
+                runtimeConfiguration.clipboardImageSyncEnabled = newValue
+                persistRuntimeConfiguration()
+            }
             updateMenu()
         }
+    }
+
+    private var isScreenshotFileSyncEnabled: Bool {
+        runtimeConfiguration.screenshotSyncEnabled
     }
 
     private var preferredLocalProtocol: ProtocolType {
@@ -110,6 +178,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: localProtocolPreferenceStorage)
+            if hasBootstrappedRuntimePersistence {
+                runtimeConfiguration.transportPreference = newValue == .http ? .httpCompatibility : .https
+                persistRuntimeConfiguration()
+            }
             updateMenu()
         }
     }
@@ -121,9 +193,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private let localProtocolPreferenceStorage = "local_protocol_preference_v2"
     private let knownDiscoveryHostsStorage = "known_discovery_hosts_v1"
     private let deviceConflictOnlineWindow: TimeInterval = 90.0
+    private let deviceOnlineTimeout: TimeInterval = 75.0
     private let offlineDeviceTimeout: TimeInterval = 120.0
+    private let selectedTargetRecoveryInterval: TimeInterval = 30.0
+    private let maximumPreferredDiscoveryHosts = 12
     private let knownHostRetentionInterval: TimeInterval = 900.0
-    private let freshKnownHostWindow: TimeInterval = 75.0
     private let androidAirSendRepository = "https://github.com/Avi7ii/AirSend"
     
     private struct DeviceGroupViewModel {
@@ -137,6 +211,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         didSet {
             saveDevices()
             dropStalePreferredDeviceIds()
+            publishPreferredDiscoveryHostsIfActive()
+            updateDiscoveryTimers()
+            refreshSettingsWindowIfNeeded()
         }
     }
     
@@ -175,6 +252,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
         set {
             UserDefaults.standard.set(newValue, forKey: knownDiscoveryHostsStorage)
+            publishPreferredDiscoveryHostsIfActive()
         }
     }
     
@@ -190,9 +268,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 current.insert(selectedDeviceGroupKey)
                 historyDeviceGroupKeys = current
             }
+            if hasBootstrappedRuntimePersistence {
+                runtimeConfiguration.preferredTargetID = selectedDeviceGroupKey
+                persistRuntimeConfiguration()
+            }
             updateMenu()
             updateWindowStatus()
             updateDiscoveryTimers()
+            refreshSettingsWindowIfNeeded()
         }
     }
     
@@ -256,38 +339,55 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         var ordered: [String] = []
         var seen = Set<String>()
 
+        let selectedHosts = devices.values
+            .filter { deviceGroupKey(for: $0) == selectedDeviceGroupKey }
+            .sorted { $0.lastSeen > $1.lastSeen }
+            .map(\.ip)
         let liveHosts = devices.values
             .sorted { $0.lastSeen > $1.lastSeen }
             .map(\.ip)
+        let gatewayHosts = LocalNetworkIdentity.defaultIPv4Gateway().map { [$0] } ?? []
 
-        for host in liveHosts + knownDiscoveryHosts {
+        for host in selectedHosts + gatewayHosts + liveHosts + knownDiscoveryHosts {
             let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !normalized.isEmpty, seen.insert(normalized).inserted else { continue }
             ordered.append(normalized)
+            if ordered.count == maximumPreferredDiscoveryHosts {
+                break
+            }
         }
 
         return ordered
     }
 
-    private func hasFreshKnownDiscoveryDevice(now: Date = Date()) -> Bool {
-        let knownHosts = Set(knownDiscoveryHosts)
-        guard !knownHosts.isEmpty else { return false }
-
-        return devices.values.contains { device in
-            knownHosts.contains(device.ip) && now.timeIntervalSince(device.lastSeen) <= freshKnownHostWindow
-        }
+    private func publishPreferredDiscoveryHostsIfActive() {
+        guard isPublishingPreferredDiscoveryHosts else { return }
+        discoveryService.updatePreferredProbeHosts(prioritizedDiscoveryHosts())
     }
 
-    private func shouldProbeKnownHosts(now: Date = Date()) -> Bool {
-        guard !knownDiscoveryHosts.isEmpty else { return false }
-        return !hasFreshKnownDiscoveryDevice(now: now)
+    private func probePreferredDiscoveryHosts(
+        trigger: PreferredHostProbeTrigger,
+        reason: String
+    ) {
+        guard PreferredHostProbePolicy.shouldProbe(for: trigger) else { return }
+        discoveryService.probePreferredHosts(reason: reason)
     }
 
     private func retentionInterval(for device: Device) -> TimeInterval {
+        if isConfiguredManualDevice(device) {
+            return .infinity
+        }
         if preferredLocalProtocol == .http && knownDiscoveryHosts.contains(device.ip) {
             return knownHostRetentionInterval
         }
         return offlineDeviceTimeout
+    }
+
+    private func isConfiguredManualDevice(_ device: Device) -> Bool {
+        runtimeConfiguration.manualPeers.contains { peer in
+            let configured = manualDevice(for: peer)
+            return configured.id == device.id || (configured.ip == device.ip && configured.port == device.port)
+        }
     }
     
     private func isAndroidModuleDevice(_ device: Device) -> Bool {
@@ -395,9 +495,144 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 fingerprintSuffix: shortFingerprint(primary.id),
                 statusLabel: settingsLastSeenLabel(for: primary),
                 peerCount: group.candidates.count,
-                isSelected: selectedDeviceGroupKey == group.key
+                isSelected: selectedDeviceGroupKey == group.key,
+                isManual: group.candidates.contains(where: isConfiguredManualDevice),
+                isOnline: isDeviceOnline(primary)
             )
         }
+    }
+
+    private func makeTrustedPeerSummaries(from groups: [DeviceGroupViewModel]) -> [AirSendTrustedPeerSummary] {
+        runtimeConfiguration.trustedPeerFingerprints.map { trustedFingerprint in
+            let matchedGroup = groups.first { group in
+                group.candidates.contains {
+                    DiscoveryIdentity.fingerprintsMatch($0.id, trustedFingerprint)
+                }
+            }
+            let matchedDevice = matchedGroup?.candidates.first {
+                DiscoveryIdentity.fingerprintsMatch($0.id, trustedFingerprint)
+            }
+            return AirSendTrustedPeerSummary(
+                id: trustedFingerprint,
+                title: matchedGroup.map { displayTitle(for: $0) } ?? "Unknown device",
+                fingerprintSuffix: shortFingerprint(trustedFingerprint),
+                isOnline: matchedDevice.map { isDeviceOnline($0) } ?? false
+            )
+        }
+        .sorted {
+            if $0.isOnline != $1.isOnline {
+                return $0.isOnline && !$1.isOnline
+            }
+            return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+        }
+    }
+
+    private func transferSummary(_ record: TransferRecord) -> AirSendTransferSummary {
+        let fileTitle: String
+        if record.files.count == 1 {
+            fileTitle = record.files[0].name
+        } else {
+            fileTitle = "\(record.files.count) items"
+        }
+        let transferred = ByteCountFormatter.string(fromByteCount: record.transferredBytes, countStyle: .file)
+        let total = ByteCountFormatter.string(fromByteCount: record.totalBytes, countStyle: .file)
+        return AirSendTransferSummary(
+            id: record.id.uuidString,
+            direction: record.direction.rawValue,
+            source: record.source.rawValue,
+            peerTitle: record.peer.alias,
+            fileTitle: fileTitle,
+            detail: record.files.prefix(3).map(\.name).joined(separator: ", "),
+            status: record.status.rawValue,
+            progress: record.progress,
+            byteProgress: "\(transferred) of \(total)",
+            startedAt: record.startedAt,
+            savedPaths: record.files.compactMap(\.savedPath),
+            previewPath: record.files.compactMap(\.previewPath).first,
+            previewText: record.previewText,
+            failureMessage: record.failure?.message,
+            canCancel: !record.status.isTerminal,
+            canRetry: record.isRetryable,
+            hasAvailableFiles: record.files.contains {
+                [$0.savedPath, $0.sourcePath].compactMap { $0 }.contains {
+                    FileManager.default.fileExists(atPath: $0)
+                }
+            }
+        )
+    }
+
+    private func makeDiagnosticSummaries() -> [AirSendDiagnosticSummary] {
+        let downloadReady = FileManager.default.isWritableFile(atPath: configuredDownloadDirectory.path)
+        let mediaReady = FileManager.default.isWritableFile(atPath: configuredMediaDirectory.path)
+        let automationRunning = clipboardService.isRunning || isScreenshotFileSyncEnabled
+        let screenshotStatus: (String, AirSendConsoleHealthTone)
+        switch screenshotWatcher.state {
+        case .stopped:
+            screenshotStatus = (isScreenshotFileSyncEnabled ? "Unavailable" : "Off", isScreenshotFileSyncEnabled ? .warning : .neutral)
+        case .watching:
+            screenshotStatus = ("Watching", .good)
+        case .failed:
+            screenshotStatus = ("Unavailable", .warning)
+        }
+
+        return [
+            AirSendDiagnosticSummary(
+                id: "network",
+                title: "Network path",
+                value: isNetworkPathSatisfied ? "Available" : "Unavailable",
+                detail: lastNetworkPathSignature,
+                symbolName: isNetworkPathSatisfied ? "network" : "wifi.exclamationmark",
+                tone: isNetworkPathSatisfied ? .good : .warning
+            ),
+            AirSendDiagnosticSummary(
+                id: "receiver",
+                title: "Receiver",
+                value: transferServerHealth.isListening ? "Listening" : "Stopped",
+                detail: "\(transferServerHealth.isHTTPS ? "HTTPS" : "HTTP") · \(transferServerHealth.listenerState)",
+                symbolName: "antenna.radiowaves.left.and.right",
+                tone: transferServerHealth.isListening ? .good : .warning
+            ),
+            AirSendDiagnosticSummary(
+                id: "tls",
+                title: "TLS identity",
+                value: transferServerHealth.isHTTPS && !fingerprint.isEmpty ? "Ready" : (preferredLocalProtocol == .http ? "Compatibility mode" : "Unavailable"),
+                detail: shortFingerprint(fingerprint),
+                symbolName: "checkmark.shield",
+                tone: transferServerHealth.isHTTPS && !fingerprint.isEmpty ? .good : (preferredLocalProtocol == .http ? .neutral : .warning)
+            ),
+            AirSendDiagnosticSummary(
+                id: "storage",
+                title: "Storage",
+                value: downloadReady && mediaReady ? "Writable" : "Needs attention",
+                detail: "Downloads and media destinations",
+                symbolName: "externaldrive",
+                tone: downloadReady && mediaReady ? .good : .warning
+            ),
+            AirSendDiagnosticSummary(
+                id: "automation",
+                title: "Automation",
+                value: automationRunning ? "Active" : "Idle",
+                detail: "Clipboard \(clipboardService.isRunning ? "on" : "off") · Screenshots \(screenshotStatus.0.lowercased())",
+                symbolName: "bolt.horizontal.circle",
+                tone: screenshotStatus.1
+            ),
+            AirSendDiagnosticSummary(
+                id: "runtime",
+                title: "Runtime",
+                value: "Protocol v\(AirSendRuntimeCapabilities.protocolVersion) · Config v\(airSendConfigurationVersion) · History v\(TransferHistoryStore.schemaVersion)",
+                detail: "Ports \(NetworkPorts.discoveryPort) / \(NetworkPorts.transferPort) · up \(AirSendRelativeTimeFormatter.label(since: appStartedAt))",
+                symbolName: "memorychip",
+                tone: .good
+            ),
+            AirSendDiagnosticSummary(
+                id: "capabilities",
+                title: "Capabilities",
+                value: "\(AirSendRuntimeCapabilities.current.count) available",
+                detail: AirSendRuntimeCapabilities.current.sorted().joined(separator: ", "),
+                symbolName: "checklist.checked",
+                tone: .good
+            ),
+        ]
     }
 
     private func recordConsoleActivity(
@@ -410,7 +645,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             id: UUID().uuidString,
             title: title,
             detail: detail,
-            timeLabel: "just now",
+            createdAt: Date(),
             symbolName: symbolName,
             tone: tone
         )
@@ -424,30 +659,44 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         if recentConsoleActivities.count > maxRecentConsoleActivities {
             recentConsoleActivities.removeLast(recentConsoleActivities.count - maxRecentConsoleActivities)
         }
-        if tone == .warning {
-            lastConsoleWarningAt = Date()
-        }
         refreshSettingsWindowIfNeeded()
+        scheduleNextSettingsWindowRelativeTimeRefresh()
     }
 
     private func consoleHealth(for visibleCount: Int) -> (title: String, detail: String, tone: AirSendConsoleHealthTone) {
-        if let lastConsoleWarningAt, Date().timeIntervalSince(lastConsoleWarningAt) < 300 {
-            return ("Needs attention", "Recent transfer or discovery issue", .warning)
+        let state = AirSendLiveConnectionHealthPolicy.evaluate(
+            networkAvailable: isNetworkPathSatisfied,
+            receiverReady: transferServerHealth.isListening,
+            activeTransferCount: runtimeTransfersByID.values.filter { !$0.status.isTerminal }.count,
+            visibleDeviceCount: visibleCount
+        )
+
+        switch state {
+        case .networkUnavailable:
+            return ("Network unavailable", "Waiting for a usable network path", .warning)
+        case .receiverStopped:
+            return ("Receiver stopped", transferServerHealth.listenerState, .warning)
+        case let .transferring(activeCount):
+            return ("Transferring", "\(activeCount) active transfer\(activeCount == 1 ? "" : "s")", .good)
+        case let .ready(visibleDeviceCount):
+            if visibleDeviceCount > 0 {
+                return ("Ready", "\(visibleDeviceCount) device\(visibleDeviceCount == 1 ? "" : "s") visible", .good)
+            }
+            return ("Ready", "Waiting for devices", .good)
         }
-        if visibleCount > 0 {
-            return ("Ready", "\(visibleCount) device visible", .good)
-        }
-        return ("Searching", "No visible LAN devices", .neutral)
     }
 
     private var consolePreflightSummary: String {
-        preferredLocalProtocol == .http
-            ? "Last check: HTTP compatibility ready"
-            : "Last check: HTTPS preflight OK"
+        let mode = transferServerHealth.isHTTPS ? "HTTPS" : "HTTP compatibility"
+        guard let lastDiagnosticsAt else { return "\(mode) · live state pending" }
+        return "\(mode) · checked \(AirSendRelativeTimeFormatter.label(since: lastDiagnosticsAt))"
     }
 
     private func makeSettingsSnapshot() -> AirSendSettingsSnapshot {
         let groups = buildDeviceGroups()
+        let visibleGroupCount = groups.filter { group in
+            group.candidates.contains { isDeviceOnline($0) }
+        }.count
         let selectedGroup = groups.first(where: { $0.key == selectedDeviceGroupKey })
         let selectedTitle: String
         let selectedSubtitle: String
@@ -462,16 +711,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             selectedTitle = "Target Offline"
             selectedSubtitle = "Choose another device or rescan"
         }
-        let health = consoleHealth(for: groups.count)
+        let health = consoleHealth(for: visibleGroupCount)
+        let activeRecords = runtimeTransfersByID.values
+            .filter { !$0.status.isTerminal }
+            .sorted { $0.startedAt > $1.startedAt }
+            .map(transferSummary)
+        let sentHistory = runtimeHistory.filter { $0.direction == .outgoing }.map(transferSummary)
+        let receivedHistory = runtimeHistory.filter { $0.direction == .incoming }.map(transferSummary)
+        let screenshotStatus: String
+        switch screenshotWatcher.state {
+        case .stopped: screenshotStatus = "Off"
+        case .watching: screenshotStatus = "Watching"
+        case let .failed(message): screenshotStatus = message
+        }
 
         return AirSendSettingsSnapshot(
             autoClipboardSyncEnabled: isAutoClipboardSyncEnabled,
-            autoScreenshotSyncEnabled: isAutoScreenshotSyncEnabled,
+            autoClipboardImageSyncEnabled: isAutoScreenshotSyncEnabled,
+            autoScreenshotFileSyncEnabled: isScreenshotFileSyncEnabled,
             autoUpdateEnabled: isAutoUpdateEnabled,
             launchAtLoginEnabled: isLaunchAtLoginEnabled,
             compatibilityModeEnabled: preferredLocalProtocol == .http,
-            discoveredDeviceCount: groups.count,
+            discoveredDeviceCount: visibleGroupCount,
             rememberedDeviceCount: historyDeviceGroupKeys.count,
+            isDiscoveryRefreshing: isDiscoveryRefreshing,
+            discoveryRefreshSummary: discoveryRefreshSummary,
             selectedTargetTitle: selectedTitle,
             selectedTargetSubtitle: selectedSubtitle,
             selectedTargetIsBroadcast: selectedDeviceGroupKey == broadcastSelectionKey,
@@ -483,7 +747,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             healthDetail: health.detail,
             healthTone: health.tone,
             preflightSummary: consolePreflightSummary,
-            recentActivities: recentConsoleActivities
+            recentActivities: recentConsoleActivities,
+            activeTransfers: activeRecords,
+            sentHistory: sentHistory,
+            receivedHistory: receivedHistory,
+            receivePolicy: runtimeConfiguration.receivePolicy.rawValue,
+            downloadDestination: configuredDownloadDirectory.path,
+            mediaDestination: configuredMediaDirectory.path,
+            screenshotWatchFolder: ScreenshotWatcher.defaultCaptureDirectory().path,
+            screenshotWatcherStatus: screenshotStatus,
+            historyLimitPerDirection: runtimeConfiguration.historyLimitPerDirection,
+            manualPeers: runtimeConfiguration.manualPeers.map {
+                AirSendManualPeerSummary(
+                    id: $0.id,
+                    alias: $0.alias,
+                    endpoint: "\($0.address):\($0.port)",
+                    fingerprintSuffix: $0.fingerprint.map(shortFingerprint)
+                )
+            },
+            trustedPeers: makeTrustedPeerSummaries(from: groups),
+            diagnostics: makeDiagnosticSummaries(),
+            diagnosticsUpdatedAt: lastDiagnosticsAt,
+            logTail: runtimeLogTail
         )
     }
 
@@ -499,8 +784,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 setAutoClipboardSyncEnabled: { [weak self] enabled in
                     self?.setAutoClipboardSyncEnabled(enabled, showInfoIfEnabling: true)
                 },
-                setAutoScreenshotSyncEnabled: { [weak self] enabled in
+                setAutoClipboardImageSyncEnabled: { [weak self] enabled in
                     self?.setAutoScreenshotSyncEnabled(enabled, showInfoIfEnabling: true)
+                },
+                setAutoScreenshotFileSyncEnabled: { [weak self] enabled in
+                    self?.setScreenshotFileSyncEnabled(enabled)
                 },
                 setAutoUpdateEnabled: { [weak self] enabled in
                     self?.setAutoUpdateEnabled(enabled)
@@ -513,6 +801,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 },
                 sendClipboardNow: { [weak self] in
                     self?.sendClipboard()
+                },
+                chooseFilesToSend: { [weak self] in
+                    self?.chooseFilesToSend()
                 },
                 rescan: { [weak self] in
                     self?.performManualRescan(reopenMenu: false)
@@ -540,12 +831,103 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 },
                 runDiagnostics: { [weak self] in
                     self?.runDiagnosticsFromConsole()
+                },
+                setReceivePolicy: { [weak self] policy in
+                    self?.setReceivePolicy(policy)
+                },
+                setHistoryLimitPerDirection: { [weak self] limit in
+                    self?.setHistoryLimitPerDirection(limit)
+                },
+                trustKnownDevice: { [weak self] in
+                    self?.showTrustDeviceDialog()
+                },
+                revokeTrustedPeer: { [weak self] fingerprint in
+                    self?.revokeTrustedFingerprint(fingerprint)
+                },
+                removeManualPeer: { [weak self] id in
+                    self?.removeManualPeer(id: id)
+                },
+                selectDownloadDestination: { [weak self] in
+                    self?.selectDestination(kind: .downloads)
+                },
+                selectMediaDestination: { [weak self] in
+                    self?.selectDestination(kind: .media)
+                },
+                cancelTransfer: { [weak self] id in
+                    self?.cancelTransfer(id: id)
+                },
+                retryTransfer: { [weak self] id in
+                    self?.retryTransfer(id: id)
+                },
+                deleteHistory: { [weak self] id in
+                    self?.deleteHistory(id: id)
+                },
+                clearHistory: { [weak self] direction in
+                    self?.clearHistory(direction: direction)
+                },
+                revealTransfer: { [weak self] id in
+                    self?.revealTransfer(id: id)
+                },
+                shareTransfer: { [weak self] id in
+                    self?.shareTransfer(id: id)
+                },
+                exportLogs: { [weak self] in
+                    self?.exportLogs()
+                },
+                clearLogs: { [weak self] in
+                    self?.clearLogs()
+                },
+                restartRuntime: { [weak self] in
+                    self?.restartRuntimeFromConsole()
                 }
             )
         )
         let controller = AirSendSettingsWindowController(store: store)
+        controller.onWindowVisibilityChanged = { [weak self] isVisible in
+            self?.setDockIconVisibleForSettingsWindow(isVisible)
+            self?.updateSettingsWindowRelativeTimeTimer(isVisible: isVisible)
+        }
         settingsWindowController = controller
         return controller
+    }
+
+    private func setDockIconVisibleForSettingsWindow(_ isVisible: Bool) {
+        NSApp.setActivationPolicy(isVisible ? .regular : .accessory)
+    }
+
+    private func updateSettingsWindowRelativeTimeTimer(isVisible: Bool) {
+        settingsWindowRelativeTimeTimer?.invalidate()
+        settingsWindowRelativeTimeTimer = nil
+
+        guard isVisible else { return }
+
+        refreshSettingsWindowIfNeeded()
+        scheduleNextSettingsWindowRelativeTimeRefresh()
+    }
+
+    private func scheduleNextSettingsWindowRelativeTimeRefresh(now: Date = Date()) {
+        settingsWindowRelativeTimeTimer?.invalidate()
+        settingsWindowRelativeTimeTimer = nil
+
+        guard settingsWindowController?.window?.isVisible == true,
+              let nextRefreshDate = AirSendRelativeTimeFormatter.nextLabelChangeDate(
+                for: recentConsoleActivities.map(\.createdAt)
+                    + runtimeTransfersByID.values.map(\.startedAt)
+                    + runtimeHistory.map(\.startedAt),
+                now: now
+              ) else {
+            return
+        }
+
+        let interval = max(1, nextRefreshDate.timeIntervalSince(now))
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshSettingsWindowIfNeeded()
+                self?.scheduleNextSettingsWindowRelativeTimeRefresh()
+            }
+        }
+        timer.tolerance = min(3, interval * 0.2)
+        settingsWindowRelativeTimeTimer = timer
     }
 
     private func refreshSettingsWindowIfNeeded() {
@@ -588,6 +970,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             }
             return lhsName < rhsName
         }
+    }
+
+    private func isDeviceOnline(_ device: Device, now: Date = Date()) -> Bool {
+        now.timeIntervalSince(device.lastSeen) <= deviceOnlineTimeout
     }
     
     private func groupMap() -> [String: DeviceGroupViewModel] {
@@ -632,7 +1018,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
     
     private func targetGroupsForCurrentSelection() -> [DeviceGroupViewModel] {
-        let groups = buildDeviceGroups()
+        let groups = buildDeviceGroups().filter { group in
+            group.candidates.contains { isDeviceOnline($0) }
+        }
         recoverSelectedGroupIfPossible(from: groups, reason: "send-targets")
         if selectedDeviceGroupKey == broadcastSelectionKey {
             return groups
@@ -756,6 +1144,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         button.image = newImage
     }
 
+    private func refreshStatusItemActivityIndicator() {
+        let hasActiveTransfer = runtimeTransfersByID.values.contains { !$0.status.isTerminal }
+        updateStatusItemIcon(showDot: isRequestingInBackground || hasActiveTransfer)
+    }
+
     func saveDevices() {
         if let data = try? JSONEncoder().encode(devices) {
             UserDefaults.standard.set(data, forKey: "saved_devices")
@@ -840,49 +1233,120 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         UserDefaults.standard.set(broadcastSelectionKey, forKey: selectedGroupKeyStorage)
         UserDefaults.standard.removeObject(forKey: preferredGroupCandidateStorage)
         UserDefaults.standard.removeObject(forKey: knownDiscoveryHostsStorage)
+
+        materializeManualPeers()
         
         updateMenu()
         updateWindowStatus()
     }
 
     // Drag Handoff
-    private var dragProximityMonitorTimer: Timer?
+    private var globalDragEventMonitor: Any?
+    private var localDragEventMonitor: Any?
+    private var dragEvaluationWorkItem: DispatchWorkItem?
+    private var lastDragEvaluationUptime: TimeInterval = 0
     private var dragReleaseMonitorTimer: Timer?
-    private var dragReleaseMouseUpMonitor: Any?
     private var dragReleaseRecoveryWorkItem: DispatchWorkItem?
     private var pendingDragPayloadURLs: [URL] = []
     private var activeDragSessionID: UUID?
     private var resolvedDragSessionID: UUID?
     private var lastIdleDragPasteboardChangeCount: Int?
-    private var dragPressInitialWindowFrames: [CGWindowID: CGRect]?
-    private var dragPressInitialPointerLocation: CGPoint?
-    private var dragPressIsMovingWindow = false
+    private var dragGestureRejected = false
     private var dragActivationPolicy = DragActivationPolicy()
     private var currentDragAllowsFallbackRecovery = false
-    private let dragProximityPollInterval: TimeInterval = 0.05
+    private let dragEvaluationInterval: TimeInterval = 0.05
     private let dragActivationBandHeight: CGFloat = 132
     private let dragActivationLeftReach: CGFloat = 250
     private let dragActivationFallbackWidth: CGFloat = 320
-    private let dragActivationPreviewKeepaliveInset: CGFloat = 28
+    private let dragActivationPreviewKeepaliveInset: CGFloat = 18
     private let dragReleasePollInterval: TimeInterval = 0.05
     private let dragReleaseGraceDelay: TimeInterval = 0.18
-    private let dragReleaseFallbackInset: CGFloat = 60
+    private let dragReleaseFallbackInset: CGFloat = 36
 
     private func filterValidLocalDropURLs(_ urls: [URL]) -> [URL] {
         LocalFileDrag.filterExistingLocalFileURLs(urls)
     }
 
     private func startDragProximityMonitoring() {
-        guard dragProximityMonitorTimer == nil else { return }
+        guard globalDragEventMonitor == nil, localDragEventMonitor == nil else { return }
         lastIdleDragPasteboardChangeCount = NSPasteboard(name: .drag).changeCount
-        let timer = Timer(timeInterval: dragProximityPollInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.checkForNearbyFileDragTrigger()
+
+        globalDragEventMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
+        ) { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.handleObservedDragEvent(event, isLocal: false)
             }
         }
-        timer.tolerance = dragProximityPollInterval * 0.5
-        RunLoop.main.add(timer, forMode: .common)
-        dragProximityMonitorTimer = timer
+
+        localDragEventMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
+        ) { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.handleObservedDragEvent(event, isLocal: true)
+            }
+            return event
+        }
+    }
+
+    private func stopDragProximityMonitoring() {
+        dragEvaluationWorkItem?.cancel()
+        dragEvaluationWorkItem = nil
+        if let globalDragEventMonitor {
+            NSEvent.removeMonitor(globalDragEventMonitor)
+            self.globalDragEventMonitor = nil
+        }
+        if let localDragEventMonitor {
+            NSEvent.removeMonitor(localDragEventMonitor)
+            self.localDragEventMonitor = nil
+        }
+    }
+
+    private func handleObservedDragEvent(_ event: NSEvent, isLocal: Bool) {
+        switch event.type {
+        case .leftMouseDown:
+            guard activeDragSessionID == nil else { return }
+            dragGestureRejected = isLocal && event.window === settingsWindowController?.window
+            dragActivationPolicy.reset()
+        case .leftMouseDragged:
+            if isLocal && event.window === settingsWindowController?.window {
+                dragGestureRejected = true
+            }
+            requestDragEvaluation()
+        case .leftMouseUp:
+            lastIdleDragPasteboardChangeCount = NSPasteboard(name: .drag).changeCount
+            dragEvaluationWorkItem?.cancel()
+            dragEvaluationWorkItem = nil
+            dragGestureRejected = false
+            dragActivationPolicy.reset()
+            handleDragReleaseIfNeeded(trigger: isLocal ? "local-mouse-up" : "global-mouse-up")
+        default:
+            break
+        }
+    }
+
+    private func requestDragEvaluation() {
+        let now = ProcessInfo.processInfo.systemUptime
+        let elapsed = now - lastDragEvaluationUptime
+        if elapsed >= dragEvaluationInterval {
+            dragEvaluationWorkItem?.cancel()
+            dragEvaluationWorkItem = nil
+            lastDragEvaluationUptime = now
+            checkForNearbyFileDragTrigger()
+            return
+        }
+        guard dragEvaluationWorkItem == nil else { return }
+        let delay = dragEvaluationInterval - elapsed
+        let workItem = DispatchWorkItem { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.dragEvaluationWorkItem = nil
+                self.lastDragEvaluationUptime = ProcessInfo.processInfo.systemUptime
+                self.checkForNearbyFileDragTrigger()
+            }
+        }
+        dragEvaluationWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
     private func isReasonableStatusAnchorFrame(_ frame: NSRect, within screenFrame: NSRect) -> Bool {
@@ -937,85 +1401,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         )
     }
 
-    private func visibleApplicationWindowFrames() -> [CGWindowID: CGRect] {
-        guard let windowInfo = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements],
-            kCGNullWindowID
-        ) as? [[String: Any]] else {
-            return [:]
-        }
-
-        var frames: [CGWindowID: CGRect] = [:]
-        for entry in windowInfo {
-            guard (entry[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
-                  (entry[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 0 > 0,
-                  let windowNumber = entry[kCGWindowNumber as String] as? NSNumber,
-                  let boundsDictionary = entry[kCGWindowBounds as String] as? NSDictionary,
-                  let frame = CGRect(dictionaryRepresentation: boundsDictionary),
-                  frame.width >= 120,
-                  frame.height >= 80 else {
-                continue
-            }
-            frames[CGWindowID(windowNumber.uint32Value)] = frame
-        }
-        return frames
-    }
-
     private func checkForNearbyFileDragTrigger() {
         let dragPasteboard = NSPasteboard(name: .drag)
         guard (NSEvent.pressedMouseButtons & 0x1) != 0 else {
             lastIdleDragPasteboardChangeCount = dragPasteboard.changeCount
-            dragPressInitialWindowFrames = nil
-            dragPressInitialPointerLocation = nil
-            dragPressIsMovingWindow = false
+            dragGestureRejected = false
             dragActivationPolicy.reset()
             return
         }
 
-        let currentWindowFrames = visibleApplicationWindowFrames()
-        let currentPointerLocation = CGEvent(source: nil)?.location
-        if dragPressInitialWindowFrames == nil {
-            dragPressInitialWindowFrames = currentWindowFrames
-        }
-        if dragPressInitialPointerLocation == nil {
-            dragPressInitialPointerLocation = currentPointerLocation
-        }
-        if !dragPressIsMovingWindow,
-           let initialWindowFrames = dragPressInitialWindowFrames,
-           let dragStartPointerLocation = dragPressInitialPointerLocation {
-            let detectedWindowDrag = WindowDragEvidence.hasMovedWindowFromDragStart(
-                initialFrames: initialWindowFrames,
-                currentFrames: currentWindowFrames,
-                dragStartPointerLocation: dragStartPointerLocation
-            )
-            if detectedWindowDrag {
-                dragPressIsMovingWindow = true
-                FileLogger.log("🪟 [DragProximity] Moving window detected from drag start; suppressing DropZone for this gesture.")
-            }
-        }
-
         let mouseLocation = NSEvent.mouseLocation
         guard let triggerFrame = statusBarActivationFrame() else { return }
-        let inspection = LocalFileDrag.inspectLocalFileDrag(from: dragPasteboard)
-        let hasFreshDragPasteboardPayload = lastIdleDragPasteboardChangeCount.map {
-            dragPasteboard.changeCount != $0
-        } ?? true
-        let hasReadableDragPayloadMetadata = !inspection.typeNames.isEmpty
-            || dragPasteboard.pasteboardItems?.isEmpty == false
-        let hasDragPasteboardEvidence = DragPasteboardEvidence.hasPotentialDragSession(
-            hasFreshChangeCount: hasFreshDragPasteboardPayload,
-            hasReadablePayloadMetadata: hasReadableDragPayloadMetadata
-        ) && !dragPressIsMovingWindow
-        let urls = (inspection.looksLikeStrictLocalFileDrag && hasFreshDragPasteboardPayload) ? inspection.urls : []
-        let isRecognizedLocalFileDrag = !urls.isEmpty
         let isWithinActivationBand = triggerFrame.contains(mouseLocation)
-        let activationDecision = dragActivationPolicy.decision(
-            changeCount: dragPasteboard.changeCount,
-            location: CGPoint(x: mouseLocation.x, y: mouseLocation.y),
-            hasRecognizedPayload: isRecognizedLocalFileDrag,
-            hasDragPasteboardEvidence: hasDragPasteboardEvidence,
-            isWithinActivationBand: isWithinActivationBand
-        )
         let isWithinDropZoneKeepalive = dropZoneWindow.dragReleaseFallbackFrame(inset: dragActivationPreviewKeepaliveInset).contains(mouseLocation)
         let shouldKeepPreviewVisible = DragPreviewVisibilityPolicy.shouldKeepPreviewVisible(
             isWithinDropZoneKeepalive: isWithinDropZoneKeepalive,
@@ -1028,6 +1425,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                   !dropZoneWindow.isShowingSuccess,
                   !dropZoneWindow.isShowingError else { return }
 
+            let hasFreshPayload = lastIdleDragPasteboardChangeCount.map {
+                dragPasteboard.changeCount != $0
+            } ?? false
+            if hasFreshPayload,
+               LocalFileDrag.metadataEvidence(from: dragPasteboard).canBeLocalFileDrag {
+                let urls = LocalFileDrag.stageValidLocalFileURLs(from: dragPasteboard)
+                if !urls.isEmpty {
+                    pendingDragPayloadURLs = urls
+                    currentDragAllowsFallbackRecovery = true
+                }
+            }
+
             if !shouldKeepPreviewVisible {
                 FileLogger.log("🧭 [DragProximity] Drag left preview keepalive region; dismissing preview. activationBand=\(isWithinActivationBand) keepalive=\(isWithinDropZoneKeepalive) accepting=\(dropZoneWindow.isAcceptingDragSession)")
                 clearTransientDragState()
@@ -1035,6 +1444,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             }
             return
         }
+
+        guard !dragGestureRejected else { return }
+        let hasFreshDragPasteboardPayload = lastIdleDragPasteboardChangeCount.map {
+            dragPasteboard.changeCount != $0
+        } ?? false
+        let metadata = LocalFileDrag.metadataEvidence(from: dragPasteboard)
+        guard hasFreshDragPasteboardPayload, metadata.canBeLocalFileDrag else { return }
+
+        let inspection = isWithinActivationBand
+            ? LocalFileDrag.inspectLocalFileDrag(from: dragPasteboard)
+            : nil
+        let urls = inspection?.looksLikeStrictLocalFileDrag == true ? inspection?.urls ?? [] : []
+        let activationDecision = dragActivationPolicy.decision(
+            changeCount: dragPasteboard.changeCount,
+            location: CGPoint(x: mouseLocation.x, y: mouseLocation.y),
+            hasRecognizedPayload: !urls.isEmpty,
+            hasDragPasteboardEvidence: true,
+            isWithinActivationBand: isWithinActivationBand
+        )
 
         guard activationDecision.shouldActivate else { return }
 
@@ -1048,13 +1476,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
 
     private func startDragReleaseMonitoring() {
-        if dragReleaseMouseUpMonitor == nil {
-            dragReleaseMouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] _ in
-                Task { @MainActor in
-                    self?.handleDragReleaseIfNeeded(trigger: "global-mouse-up")
-                }
-            }
-        }
         guard dragReleaseMonitorTimer == nil else { return }
         let timer = Timer(timeInterval: dragReleasePollInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -1069,10 +1490,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private func stopDragReleaseMonitoring() {
         dragReleaseMonitorTimer?.invalidate()
         dragReleaseMonitorTimer = nil
-        if let dragReleaseMouseUpMonitor {
-            NSEvent.removeMonitor(dragReleaseMouseUpMonitor)
-            self.dragReleaseMouseUpMonitor = nil
-        }
     }
 
     private func beginDragSession(with urls: [URL]) {
@@ -1105,6 +1522,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
     private func handleDragReleaseIfNeeded(trigger: String) {
         guard NSEvent.pressedMouseButtons == 0 else { return }
+        let hasDragWork = activeDragSessionID != nil
+            || !pendingDragPayloadURLs.isEmpty
+            || dragReleaseMonitorTimer != nil
+            || dropZoneWindow.isPreviewActive
+            || dropZoneWindow.isAcceptingDragSession
+            || dropZoneWindow.isHoveringDropTarget
+        guard hasDragWork else { return }
         stopDragReleaseMonitoring()
 
         if let activeDragSessionID, resolvedDragSessionID == activeDragSessionID {
@@ -1170,6 +1594,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         dragReleaseRecoveryWorkItem = nil
         pendingDragPayloadURLs = []
         currentDragAllowsFallbackRecovery = false
+        dragGestureRejected = false
         dragActivationPolicy.reset()
         dropZoneWindow.setPreviewDragActive(false)
         dropZoneWindow.setPreviewHoverActive(false)
@@ -1235,6 +1660,298 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         dropZoneWindow.setPreviewHoverActive(false)
         FileLogger.log("🚪 [DragHandoff] Drag exited drop zone window; proximity monitor will decide whether preview stays visible")
     }
+
+    private func migratedRuntimeConfiguration() -> AirSendRuntimeConfiguration {
+        AirSendRuntimeConfiguration(
+            preferredTargetID: selectedDeviceGroupKey,
+            clipboardSyncEnabled: isAutoClipboardSyncEnabled,
+            clipboardImageSyncEnabled: isAutoScreenshotSyncEnabled,
+            screenshotSyncEnabled: false,
+            launchAtLoginEnabled: isLaunchAtLoginEnabled,
+            downloadDestination: FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!.path,
+            mediaDestination: FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask).first!.path,
+            transportPreference: preferredLocalProtocol == .http ? .httpCompatibility : .https
+        )
+    }
+
+    private func bootstrapRuntimePersistence() async {
+        defer { hasBootstrappedRuntimePersistence = true }
+        do {
+            let outcome = try await runtimeConfigurationStore.load(defaults: migratedRuntimeConfiguration())
+            runtimeConfiguration = outcome.configuration
+            selectedDeviceGroupKey = outcome.configuration.preferredTargetID ?? broadcastSelectionKey
+            UserDefaults.standard.set(
+                outcome.configuration.clipboardSyncEnabled,
+                forKey: "auto_clipboard_sync_enabled"
+            )
+            UserDefaults.standard.set(
+                outcome.configuration.clipboardImageSyncEnabled,
+                forKey: autoScreenshotSyncStorage
+            )
+            UserDefaults.standard.set(
+                outcome.configuration.transportPreference == .httpCompatibility
+                    ? ProtocolType.http.rawValue
+                    : ProtocolType.https.rawValue,
+                forKey: localProtocolPreferenceStorage
+            )
+            if runtimeConfiguration.launchAtLoginEnabled != isLaunchAtLoginEnabled {
+                runtimeConfiguration.launchAtLoginEnabled = isLaunchAtLoginEnabled
+                try await runtimeConfigurationStore.save(runtimeConfiguration)
+            }
+            try await transferHistoryStore?.setRetentionLimitPerDirection(
+                runtimeConfiguration.historyLimitPerDirection
+            )
+            if let warning = outcome.warning {
+                recordConsoleActivity(
+                    title: "Configuration recovered",
+                    detail: warning,
+                    symbolName: "wrench.and.screwdriver.fill",
+                    tone: .warning
+                )
+            }
+        } catch {
+            recordConsoleActivity(
+                title: "Configuration unavailable",
+                detail: error.localizedDescription,
+                symbolName: "exclamationmark.triangle.fill",
+                tone: .warning
+            )
+        }
+        startRuntimeEventBridge()
+        materializeManualPeers()
+        updateAutomationServices()
+        await reloadRuntimeHistory()
+        await refreshDiagnosticsState(includeLogs: true)
+        updateMenu()
+    }
+
+    private func persistRuntimeConfiguration() {
+        let configuration = runtimeConfiguration
+        let previousSave = runtimeConfigurationSaveTask
+        runtimeConfigurationSaveTask = Task { [weak self] in
+            _ = await previousSave?.value
+            guard let self else { return }
+            do {
+                try await runtimeConfigurationStore.save(configuration)
+                await runtimeEvents.publish(kind: .configurationChanged)
+            } catch {
+                self.recordConsoleActivity(
+                    title: "Settings not saved",
+                    detail: error.localizedDescription,
+                    symbolName: "exclamationmark.triangle.fill",
+                    tone: .warning
+                )
+            }
+        }
+    }
+
+    private func startRuntimeEventBridge() {
+        runtimeEventTask?.cancel()
+        runtimeEventTask = Task { [weak self] in
+            guard let self else { return }
+            let stream = await self.runtimeEvents.stream()
+            for await event in stream {
+                guard !Task.isCancelled else { break }
+                self.handleRuntimeEvent(event)
+            }
+        }
+    }
+
+    private func handleRuntimeEvent(_ event: RuntimeEvent) {
+        guard let transfer = event.transfer else {
+            refreshSettingsWindowIfNeeded()
+            return
+        }
+
+        runtimeTransfersByID[transfer.id] = transfer
+        runtimeTransferMenuViews[transfer.id]?.update(record: transfer)
+        refreshStatusItemActivityIndicator()
+
+        if transfer.direction == .incoming, dropZoneWindow.isPerformingDrop {
+            dropZoneWindow.setProgress(transfer.progress)
+        }
+
+        let powerReason = "transfer:\(transfer.id.uuidString)"
+        switch transfer.status {
+        case .preparing, .transferring, .paused:
+            enableWakelock(reasonID: powerReason)
+        default:
+            disableWakelock(reasonID: powerReason)
+        }
+
+        if transfer.status.isTerminal, let transferHistoryStore {
+            Task {
+                do {
+                    try await transferHistoryStore.persist(transfer)
+                    await self.reloadRuntimeHistory()
+                } catch {
+                    logTransfer("⚠️ Failed to persist transfer history: \(error.localizedDescription)")
+                }
+            }
+        }
+        refreshSettingsWindowIfNeeded()
+        updateMenu()
+    }
+
+    private func reloadRuntimeHistory() async {
+        guard let transferHistoryStore else {
+            runtimeHistory = []
+            return
+        }
+        do {
+            runtimeHistory = try await transferHistoryStore.list(
+                limit: runtimeConfiguration.historyLimitPerDirection * 2
+            )
+        } catch {
+            diagnosticsError = error.localizedDescription
+            logTransfer("⚠️ Failed to load transfer history: \(error.localizedDescription)")
+        }
+        refreshSettingsWindowIfNeeded()
+    }
+
+    private func refreshDiagnosticsState(includeLogs: Bool) async {
+        transferServerHealth = await transferServer.healthSnapshot()
+        if includeLogs {
+            runtimeLogTail = await FileLogger.tail(maxLines: 120)
+        }
+        lastDiagnosticsAt = Date()
+        refreshSettingsWindowIfNeeded()
+    }
+
+    private var configuredDownloadDirectory: URL {
+        URL(
+            fileURLWithPath: (runtimeConfiguration.downloadDestination as NSString).expandingTildeInPath,
+            isDirectory: true
+        )
+    }
+
+    private var configuredMediaDirectory: URL {
+        URL(
+            fileURLWithPath: (runtimeConfiguration.mediaDestination as NSString).expandingTildeInPath,
+            isDirectory: true
+        )
+    }
+
+    private func isTrustedFingerprint(_ value: String) -> Bool {
+        runtimeConfiguration.trustedPeerFingerprints.contains {
+            DiscoveryIdentity.fingerprintsMatch($0, value)
+        }
+    }
+
+    private func manualDevice(for peer: ManualPeer, lastSeen: Date = .distantPast) -> Device {
+        let normalizedFingerprint = peer.fingerprint?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let identifier = normalizedFingerprint?.isEmpty == false
+            ? normalizedFingerprint!
+            : "manual:\(peer.id)"
+        return Device(
+            id: identifier,
+            alias: peer.alias,
+            ip: peer.address,
+            port: peer.port,
+            deviceModel: "Manual Peer",
+            deviceType: DeviceType.desktop.rawValue,
+            version: "",
+            https: preferredLocalProtocol == .https && normalizedFingerprint?.isEmpty == false,
+            download: true,
+            lastSeen: lastSeen
+        )
+    }
+
+    private func materializeManualPeers() {
+        let configuredIDs = Set(runtimeConfiguration.manualPeers.map { manualDevice(for: $0).id })
+        devices = devices.filter { key, device in
+            !key.hasPrefix("manual:") || configuredIDs.contains(device.id)
+        }
+        for peer in runtimeConfiguration.manualPeers {
+            let identifier = manualDevice(for: peer).id
+            let device = manualDevice(for: peer, lastSeen: devices[identifier]?.lastSeen ?? .distantPast)
+            guard !DiscoveryIdentity.fingerprintsMatch(device.id, fingerprint) else { continue }
+            devices[device.id] = device
+        }
+        knownDiscoveryHosts = Array(Set(knownDiscoveryHosts + runtimeConfiguration.manualPeers.map(\.address))).sorted()
+    }
+
+    private func probeConfiguredManualPeers(reason: String) {
+        manualPeerProbeTask?.cancel()
+        let peers = runtimeConfiguration.manualPeers
+        guard !peers.isEmpty else { return }
+        let service = discoveryService
+        manualPeerProbeTask = Task { [weak self] in
+            guard let self else { return }
+            var configurationChanged = false
+            for peer in peers {
+                guard !Task.isCancelled else { break }
+                do {
+                    let device = try await service.resolveManualPeer(
+                        alias: peer.alias,
+                        address: peer.address,
+                        port: peer.port,
+                        expectedFingerprint: peer.fingerprint,
+                        timeout: 3
+                    )
+                    devices[device.id] = device
+                    if peer.id != device.id || peer.fingerprint == nil {
+                        runtimeConfiguration.manualPeers.removeAll {
+                            $0.id == peer.id
+                                || ($0.address.caseInsensitiveCompare(peer.address) == .orderedSame && $0.port == peer.port)
+                        }
+                        runtimeConfiguration.manualPeers.append(
+                            ManualPeer(
+                                id: device.id,
+                                alias: device.alias,
+                                address: device.ip,
+                                port: device.port,
+                                fingerprint: device.id
+                            )
+                        )
+                        configurationChanged = true
+                    }
+                    logTransfer("✅ Manual peer probe [\(reason)]: \(device.alias) at \(device.ip):\(device.port)")
+                } catch {
+                    let fallback = manualDevice(for: peer, lastSeen: .distantPast)
+                    devices[fallback.id] = fallback
+                    logTransfer("⚠️ Manual peer probe [\(reason)] failed for \(peer.address):\(peer.port): \(error.localizedDescription)")
+                }
+            }
+            if configurationChanged {
+                persistRuntimeConfiguration()
+            }
+            updateMenu()
+            refreshSettingsWindowIfNeeded()
+        }
+    }
+
+    private func shouldAcceptIncomingTransfer(_ request: TransferRequest) -> Bool {
+        switch runtimeConfiguration.receivePolicy {
+        case .off:
+            return false
+        case .trustedOnly:
+            guard !request.senderFingerprint.isEmpty else { return false }
+            return isTrustedFingerprint(request.senderFingerprint)
+        case .ask:
+            let alert = NSAlert()
+            alert.alertStyle = .informational
+            alert.messageText = "Receive from \(request.senderAlias)?"
+            let names = request.fileNames.prefix(3).joined(separator: "\n")
+            let remaining = max(0, request.fileCount - 3)
+            let more = remaining > 0 ? "\n…and \(remaining) more" : ""
+            let size = ByteCountFormatter.string(fromByteCount: request.totalSize, countStyle: .file)
+            alert.informativeText = "\(request.fileCount) item\(request.fileCount == 1 ? "" : "s") · \(size)\n\n\(names)\(more)"
+            alert.addButton(withTitle: "Accept")
+            alert.addButton(withTitle: "Decline")
+            alert.buttons.first?.keyEquivalent = "\r"
+            return alert.runModal() == .alertFirstButtonReturn
+        }
+    }
+
+    private func showIncomingTransferStarted(_ request: TransferRequest) {
+        hasStartedTransfer = true
+        dropZoneWindow.resetFromSuccess()
+        dropZoneWindow.setStatusText("Receiving from \(request.senderAlias)...")
+        dropZoneWindow.isPerformingDrop = true
+        dropZoneWindow.setProgress(0)
+        dropZoneWindow.show(under: statusItem)
+    }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         FileLogger.bootstrap()
@@ -1271,7 +1988,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             logTransfer("📲 Minimizing transfer to menu bar")
             self.isMinimizedToMenu = true
             self.dropZoneWindow.hide()
-            self.updateStatusItemIcon(showDot: true) // Show dot indicator
+            self.refreshStatusItemActivityIndicator()
             self.updateMenu() // Refresh menu to include progress row
         }
 
@@ -1285,10 +2002,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         loadDevices()
         migrateSelectionAndHistoryToV2IfNeeded()
         setupMenu()
+        setupNetworkLifecycleMonitoring()
         updateWindowStatus()
         
         // Initialize Security & Start Services
         Task { @MainActor in
+            await self.bootstrapRuntimePersistence()
             do {
                 // 1. Setup Certificate (Still needed for Fingerprint identity)
                 let certManager = CertificateManager.shared
@@ -1396,12 +2115,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         throw NSError(domain: "AirSend", code: -1, userInfo: [NSLocalizedDescriptionKey: "No candidates available"])
     }
     
-    private func sendFilesWithFallback(_ urls: [URL], to group: DeviceGroupViewModel) async throws {
+    private func sendFilesWithFallback(
+        _ urls: [URL],
+        to group: DeviceGroupViewModel,
+        source: TransferSource = .filePicker
+    ) async throws {
         var lastError: Error?
         for candidate in group.candidates {
             do {
                 logTransfer("App: Initiating send to \(candidate.alias) [\(candidate.ip)]")
-                try await fileSender.sendFiles(urls, to: candidate)
+                try await fileSender.sendFiles(urls, to: candidate, source: source)
                 rememberSuccessfulDevice(candidate)
                 recordConsoleActivity(
                     title: "Files sent",
@@ -1469,7 +2192,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
         // 1. Initial Phase: Requesting
         dropZoneWindow.setStatusText("Requesting...")
-        enableWakelock()
         dropZoneWindow.isPerformingDrop = true
         self.hasStartedTransfer = false
         
@@ -1486,7 +2208,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                             logTransfer("⏱️ Grace period expired: Hiding to background...")
                             app.dropZoneWindow.hide()
                             app.isRequestingInBackground = true
-                            app.updateStatusItemIcon(showDot: true) // Show dot when in background
+                            app.refreshStatusItemActivityIndicator()
                             app.updateMenu() // Refresh menu to show "Requesting" item
                         }
                     }
@@ -1507,7 +2229,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                             self.isRequestingInBackground = false
                             self.dropZoneWindow.isPerformingDrop = false
                             self.dropZoneWindow.hide()
-                            self.updateStatusItemIcon(showDot: false) // Clear dot on timeout
+                            self.refreshStatusItemActivityIndicator()
                             self.updateMenu()
                         }
                     }
@@ -1517,9 +2239,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             await fileSender.setOnCancelled {
                 logTransfer("🛑 [App] fileSender.onCancelled callback triggered (Async).")
                 DispatchQueue.main.async {
-                    app.disableWakelock()
                     app.isRequestingInBackground = false
-                    app.updateStatusItemIcon(showDot: false) // Clear dot on cancellation
+                    app.refreshStatusItemActivityIndicator()
                     app.updateMenu()
                     logTransfer("🛑 [App] fileSender.onCancelled handling on MainActor. PerformingDrop: \(app.dropZoneWindow.isPerformingDrop), ShowingSuccess: \(app.dropZoneWindow.isShowingSuccess)")
                     if app.dropZoneWindow.isPerformingDrop && !app.dropZoneWindow.isShowingSuccess {
@@ -1559,7 +2280,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                         app.dropZoneWindow.show(under: app.statusItem)
                     } else {
                         logTransfer("📲 Transfer started in background mode.")
-                        app.updateStatusItemIcon(showDot: true) // Ensure dot is visible during background transfer
+                        app.refreshStatusItemActivityIndicator()
                     }
                 }
             }
@@ -1584,7 +2305,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             // B. Perform actual send
             for group in targets {
                 do {
-                    try await self.sendFilesWithFallback(validURLs, to: group)
+                    try await self.sendFilesWithFallback(validURLs, to: group, source: .dropZone)
                 } catch {
                     logTransfer("App: Error sending to group \(group.key): \(error)")
                     lastErrorMsg = error.localizedDescription
@@ -1595,15 +2316,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             timeoutTask.cancel()
             
             // C. Completion Phase
-            DispatchQueue.main.async {
-                app.disableWakelock()
-            }
             await MainActor.run {
                 if allSuccessful {
                     logTransfer("✅ Final Success: Showing popup.")
                     app.isMinimizedToMenu = false
                     app.isRequestingInBackground = false
-                    app.updateStatusItemIcon(showDot: false) // Clear dot on success
+                    app.refreshStatusItemActivityIndicator()
                     app.updateMenu()
                     dropZoneWindow.setStatusText("Sent!")
                     dropZoneWindow.showSuccess()
@@ -1638,7 +2356,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     
                     app.isMinimizedToMenu = false
                     app.isRequestingInBackground = false
-                    app.updateStatusItemIcon(showDot: false) // Clear dot on error
+                    app.refreshStatusItemActivityIndicator()
                     app.updateMenu()
                     dropZoneWindow.showError(message: msg)
                     
@@ -1666,6 +2384,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         clipboardService.onNewContent = { [weak self] newText in
             guard let self = self else { return }
             guard self.isAutoClipboardSyncEnabled else { return }
+            guard !newText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             
             let targets = self.targetGroupsForCurrentSelection()
             
@@ -1710,11 +2429,84 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             }
         }
         
-        // 启动轮询
-        clipboardService.start()
+        clipboardService.start(
+            listenForText: isAutoClipboardSyncEnabled,
+            listenForImages: isAutoScreenshotSyncEnabled
+        )
     }
-    
+
+    private func updateAutomationServices() {
+        startClipboardService()
+
+        guard isScreenshotFileSyncEnabled else {
+            screenshotWatcher.stop()
+            refreshSettingsWindowIfNeeded()
+            return
+        }
+
+        let captureDirectory = ScreenshotWatcher.defaultCaptureDirectory()
+        screenshotWatcher.start(directory: captureDirectory) { [weak self] url in
+            self?.handleNewScreenshot(url)
+        }
+        refreshSettingsWindowIfNeeded()
+    }
+
+    private func handleNewScreenshot(_ url: URL) {
+        guard selectedDeviceGroupKey != broadcastSelectionKey,
+              let group = buildDeviceGroups().first(where: { $0.key == selectedDeviceGroupKey }),
+              group.candidates.contains(where: { isTrustedFingerprint($0.id) }) else {
+            recordConsoleActivity(
+                title: "Screenshot not sent",
+                detail: "Choose one trusted device for automatic screenshots",
+                symbolName: "lock.trianglebadge.exclamationmark",
+                tone: .warning
+            )
+            return
+        }
+
+        Task {
+            do {
+                try await sendFilesWithFallback([url], to: group, source: .screenshot)
+                recordConsoleActivity(
+                    title: "Screenshot sent",
+                    detail: url.lastPathComponent,
+                    symbolName: "camera.viewfinder",
+                    tone: .good
+                )
+            } catch {
+                recordConsoleActivity(
+                    title: "Screenshot send failed",
+                    detail: error.localizedDescription,
+                    symbolName: "exclamationmark.triangle.fill",
+                    tone: .warning
+                )
+            }
+        }
+    }
+
+    private func updateTransferSaveDirectories() async {
+        let saveDirectory = configuredDownloadDirectory
+        let mediaDirectory = configuredMediaDirectory
+        await transferServer.setGetSaveDirectory { file in
+            let mimeType = file.fileType.lowercased()
+            return mimeType.hasPrefix("image/") || mimeType.hasPrefix("video/")
+                ? mediaDirectory
+                : saveDirectory
+        }
+    }
+
     func startTransferServer() async {
+        await updateTransferSaveDirectories()
+
+        await transferServer.setOnHealthChanged { [weak self] health in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.transferServerHealth = health
+                self.refreshSettingsWindowIfNeeded()
+                self.updateMenu()
+            }
+        }
+
         // Setup Reverse Discovery Callback
         await transferServer.setOnDeviceRegistered { [weak self] device in
             DispatchQueue.main.async {
@@ -1748,60 +2540,39 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             }
         }
         
-        await transferServer.setOnCancelReceived { [weak self] in
-            guard let self = self else { return }
-            logTransfer("🛑 [App] HTTPTransferServer.onCancelReceived triggered.")
-            Task {
-                await self.fileSender.cancelCurrentTransfer()
-            }
+        await transferServer.setOnCancelReceived { sessionID in
+            logTransfer("🛑 [App] Incoming receiver session cancelled: \(sessionID)")
         }
         
         await transferServer.setOnTransferRequest { [weak self] request in
             logTransfer("📥 [App] Incoming transfer request from \(request.senderAlias) (\(request.fileCount) files, \(request.totalSize) bytes)")
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.enableWakelock()
-                self.hasStartedTransfer = true
-                self.dropZoneWindow.resetFromSuccess()
-                self.dropZoneWindow.setStatusText("Receiving from \(request.senderAlias)...")
-                self.dropZoneWindow.isPerformingDrop = true
-                self.dropZoneWindow.setProgress(0)
-                self.dropZoneWindow.show(under: self.statusItem)
+            guard let self else { return false }
+            let accepted = await self.shouldAcceptIncomingTransfer(request)
+            if accepted {
+                await self.showIncomingTransferStarted(request)
             }
-            return true // Auto-accept
+            return accepted
         }
 
         await campusFallback.setOnTransferRequest { [weak self] request in
             logTransfer("📥 [App] Incoming campus transfer request from \(request.senderAlias) (\(request.fileCount) files, \(request.totalSize) bytes)")
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.enableWakelock()
-                self.hasStartedTransfer = true
-                self.dropZoneWindow.resetFromSuccess()
-                self.dropZoneWindow.setStatusText("Receiving from \(request.senderAlias)...")
-                self.dropZoneWindow.isPerformingDrop = true
-                self.dropZoneWindow.setProgress(0)
-                self.dropZoneWindow.show(under: self.statusItem)
+            guard let self else { return false }
+            let accepted = await self.shouldAcceptIncomingTransfer(request)
+            if accepted {
+                await self.showIncomingTransferStarted(request)
             }
-            return true
+            return accepted
         }
         
-        await transferServer.setOnProgress { [weak self] progress in
+        await transferServer.setOnProgress { [weak self] _, progress in
             DispatchQueue.main.async {
                 self?.dropZoneWindow.setProgress(progress)
             }
         }
 
-        await campusFallback.setOnProgress { [weak self] progress in
-            DispatchQueue.main.async {
-                self?.dropZoneWindow.setProgress(progress)
-            }
-        }
-        
-        await transferServer.setOnTransferComplete { [weak self] (success, errorMsg) in
+        await transferServer.setOnTransferComplete { [weak self] (_, success, errorMsg) in
             guard let self = self else { return }
             DispatchQueue.main.async {
-                self.disableWakelock()
                 logTransfer("🏁 [App] Incoming transfer complete. Success: \(success), Error: \(errorMsg ?? "nil")")
                 
                 if success {
@@ -1843,14 +2614,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             }
         }
 
-        await campusFallback.setGetSaveDirectory {
-            FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+        let campusDownloadDirectory = configuredDownloadDirectory
+        let campusMediaDirectory = configuredMediaDirectory
+        await campusFallback.setGetSaveDirectory { _, fileType in
+            let mimeType = fileType.lowercased()
+            return mimeType.hasPrefix("image/") || mimeType.hasPrefix("video/")
+                ? campusMediaDirectory
+                : campusDownloadDirectory
         }
 
         await campusFallback.setOnTransferComplete { [weak self] (success, errorMsg) in
             guard let self = self else { return }
             DispatchQueue.main.async {
-                self.disableWakelock()
                 logTransfer("🏁 [App] Campus fallback transfer complete. Success: \(success), Error: \(errorMsg ?? "nil")")
 
                 if success {
@@ -1904,11 +2679,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         } catch {
             logTransfer("❌ CRITICAL: Failed to start Transfer Server: \(error)")
             logTransfer("❌ Current Mode: \(discoveryService.protocolType). NO FALLBACK allowed to prevent protocol mismatch.")
+            diagnosticsError = error.localizedDescription
             // Do NOT try to start in plain mode here. If it fails, we want it to fail loudly.
         }
+        transferServerHealth = await transferServer.healthSnapshot()
+        refreshSettingsWindowIfNeeded()
     }
 
     private func restartNetworkingStack(clearTransientDevices: Bool = false) async {
+        isPublishingPreferredDiscoveryHosts = false
+        broadcastTimer?.invalidate()
+        broadcastTimer = nil
+        selectedTargetFreshnessTimer?.invalidate()
+        selectedTargetFreshnessTimer = nil
+        selectedTargetRecoveryTimer?.invalidate()
+        selectedTargetRecoveryTimer = nil
         if hasStartedNetworkingStack {
             await transferServer.stop()
             discoveryService.stop()
@@ -1930,11 +2715,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             logTransfer("🔐 Secure LAN mode enabled. Using HTTPS for local receiver/discovery.")
         }
 
-        self.transferServer = HTTPTransferServer(fingerprint: fingerprint)
+        self.transferServer = HTTPTransferServer(
+            fingerprint: fingerprint,
+            transferCoordinator: transferCoordinator
+        )
         self.discoveryService = UDPDiscoveryService(fingerprint: fingerprint, protocolType: targetProtocol)
-        self.campusFallback = CampusFallbackCoordinator(fingerprint: fingerprint)
-        self.fileSender = FileSender(fingerprint: fingerprint, localProtocol: targetProtocol, campusFallback: campusFallback)
-        self.clipboardSender = ClipboardSender(fingerprint: fingerprint, localProtocol: targetProtocol, campusFallback: campusFallback)
+        self.campusFallback = CampusFallbackCoordinator(
+            fingerprint: fingerprint,
+            transferCoordinator: transferCoordinator
+        )
+        self.fileSender = FileSender(
+            fingerprint: fingerprint,
+            localProtocol: targetProtocol,
+            campusFallback: campusFallback,
+            transferCoordinator: transferCoordinator
+        )
+        self.clipboardSender = ClipboardSender(fileSender: fileSender)
 
         startDiscovery()
 
@@ -1942,22 +2738,73 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         try? await Task.sleep(nanoseconds: 500_000_000)
 
         await startTransferServer()
-        startClipboardService()
+        updateAutomationServices()
         hasStartedNetworkingStack = true
+        updateDiscoveryTimers()
         updateMenu()
+    }
+
+    private func setupNetworkLifecycleMonitoring() {
+        networkPathMonitor.pathUpdateHandler = { [weak self] path in
+            let signature = Self.networkPathSignature(path)
+            DispatchQueue.main.async {
+                self?.handleNetworkPathChange(signature: signature, isSatisfied: path.status == .satisfied)
+            }
+        }
+        networkPathMonitor.start(queue: networkPathMonitorQueue)
+
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.hasStartedNetworkingStack else { return }
+                self.restartDiscoveryService(reason: "workspace-wake", triggerScan: false)
+                self.discoveryService.triggerScan(allowSubnetSweep: false)
+            }
+        }
+    }
+
+    nonisolated private static func networkPathSignature(_ path: NWPath) -> String {
+        let interfaces = [
+            path.usesInterfaceType(.wiredEthernet) ? "ethernet" : nil,
+            path.usesInterfaceType(.wifi) ? "wifi" : nil,
+            path.usesInterfaceType(.other) ? "other" : nil,
+        ].compactMap { $0 }.joined(separator: ",")
+        return "\(path.status)-\(interfaces)-expensive:\(path.isExpensive)-constrained:\(path.isConstrained)"
+    }
+
+    private func handleNetworkPathChange(signature: String, isSatisfied: Bool) {
+        isNetworkPathSatisfied = isSatisfied
+        refreshSettingsWindowIfNeeded()
+        defer { lastNetworkPathSignature = signature }
+        guard let previous = lastNetworkPathSignature, previous != signature else { return }
+        guard hasStartedNetworkingStack, isSatisfied else {
+            if hasStartedNetworkingStack, !isSatisfied {
+                recordConsoleActivity(
+                    title: "Network unavailable",
+                    detail: "AirSend will recover when the LAN returns",
+                    symbolName: "wifi.exclamationmark",
+                    tone: .warning
+                )
+            }
+            return
+        }
+        logTransfer("🌐 Network path changed; rebinding passive discovery")
+        restartDiscoveryService(reason: "network-path-change", triggerScan: false)
+        discoveryService.triggerScan(allowSubnetSweep: false)
     }
     
     func startDiscovery() {
+        isPublishingPreferredDiscoveryHosts = true
+        publishPreferredDiscoveryHostsIfActive()
+
         discoveryService.onTransportFailure = { [weak self] reason in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.restartDiscoveryService(reason: reason, triggerScan: true)
             }
-        }
-
-        discoveryService.prioritizedProbeHostsProvider = { [weak self] in
-            guard let self = self else { return [] }
-            return self.prioritizedDiscoveryHosts()
         }
 
         discoveryService.onCampusFallbackPacket = { [weak self] data, sourceIP in
@@ -2023,22 +2870,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
         
         discoveryService.start()
-        discoveryService.probePreferredHosts(reason: "startup-preferred")
+        probePreferredDiscoveryHosts(trigger: .startup, reason: "startup-preferred")
         
         // 🔋 发送一次初始广播，然后交由 updateDiscoveryTimers() 管理后续定时
         discoveryService.sendAnnouncement()
+        probeConfiguredManualPeers(reason: "discovery-start")
         updateDiscoveryTimers()
     }
     
-    private func restartDiscoveryService(reason: String, triggerScan: Bool) {
+    @discardableResult
+    private func restartDiscoveryService(reason: String, triggerScan: Bool) -> Bool {
         let now = Date()
         if isRestartingDiscovery {
             logTransfer("⏳ Discovery restart already in progress. Skip [\(reason)].")
-            return
+            return false
         }
         if now.timeIntervalSince(lastDiscoveryRestartAt) < discoveryRestartCooldown {
             logTransfer("⏱️ Discovery restart throttled. Skip [\(reason)].")
-            return
+            return false
         }
         
         isRestartingDiscovery = true
@@ -2047,10 +2896,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         let currentProtocol = discoveryService.protocolType
         let currentFingerprint = fingerprint
         logTransfer("♻️ Restarting discovery service: \(reason)")
-        
+
+        isPublishingPreferredDiscoveryHosts = false
         discoveryService.stop()
         broadcastTimer?.invalidate()
         broadcastTimer = nil
+        selectedTargetFreshnessTimer?.invalidate()
+        selectedTargetFreshnessTimer = nil
+        selectedTargetRecoveryTimer?.invalidate()
+        selectedTargetRecoveryTimer = nil
         
         discoveryService = UDPDiscoveryService(fingerprint: currentFingerprint, protocolType: currentProtocol)
         startDiscovery()
@@ -2059,43 +2913,119 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
         
         isRestartingDiscovery = false
+        return true
     }
     
     // 🔋 连接感知的定时器管理
     func updateDiscoveryTimers() {
-        if selectedDeviceGroupKey != broadcastSelectionKey {
-            // 已连接特定设备组：停止广播，但保留清理，避免陈旧设备累积。
-            broadcastTimer?.invalidate(); broadcastTimer = nil
-            logTransfer("🔋 Discovery: 已连接设备组，停止定时广播，保留清理")
-        } else if broadcastTimer == nil {
+        if selectedDeviceGroupKey == broadcastSelectionKey {
+            selectedTargetFreshnessTimer?.invalidate()
+            selectedTargetFreshnessTimer = nil
+            selectedTargetRecoveryTimer?.invalidate()
+            selectedTargetRecoveryTimer = nil
+
+            guard broadcastTimer == nil else {
+                scheduleNextDeviceExpiry()
+                return
+            }
             // Broadcast 模式：30s 广播
             broadcastTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     self?.discoveryService.sendAnnouncement()
-                    if self?.shouldProbeKnownHosts() == true {
-                        self?.discoveryService.probePreferredHosts(reason: "broadcast-keepalive")
-                    }
                 }
             }
             broadcastTimer?.tolerance = 15.0 // 🔋
             logTransfer("🔋 Discovery: 广播模式，30s 广播")
+        } else {
+            broadcastTimer?.invalidate()
+            broadcastTimer = nil
+
+            let candidates = devices.values.filter {
+                deviceGroupKey(for: $0) == selectedDeviceGroupKey
+            }
+            if candidates.contains(where: { isDeviceOnline($0) }) {
+                selectedTargetRecoveryTimer?.invalidate()
+                selectedTargetRecoveryTimer = nil
+                scheduleSelectedTargetFreshnessCheck(for: candidates)
+            } else {
+                selectedTargetFreshnessTimer?.invalidate()
+                selectedTargetFreshnessTimer = nil
+                startSelectedTargetRecoveryIfNeeded()
+            }
         }
         
-        if cleanupTimer == nil {
-            cleanupTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
-                Task { @MainActor in
-                    self?.cleanupOfflineDevices()
-                }
+        scheduleNextDeviceExpiry()
+    }
+
+    private func scheduleSelectedTargetFreshnessCheck(for candidates: [Device]) {
+        selectedTargetFreshnessTimer?.invalidate()
+        selectedTargetFreshnessTimer = nil
+
+        guard let freshestSeenAt = candidates.map(\.lastSeen).max() else { return }
+        let interval = max(1, freshestSeenAt.addingTimeInterval(deviceOnlineTimeout).timeIntervalSinceNow)
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.updateMenu()
+                self.refreshSettingsWindowIfNeeded()
+                self.updateDiscoveryTimers()
             }
-            cleanupTimer?.tolerance = 30.0 // 🔋
-            logTransfer("🔋 Discovery: 清理定时器已启用，60s 轮询")
         }
+        timer.tolerance = min(5, interval * 0.1)
+        selectedTargetFreshnessTimer = timer
+    }
+
+    private func startSelectedTargetRecoveryIfNeeded() {
+        guard selectedTargetRecoveryTimer == nil else { return }
+
+        recoverSelectedTarget(reason: "selected-target-offline")
+        let timer = Timer.scheduledTimer(withTimeInterval: selectedTargetRecoveryInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.recoverSelectedTarget(reason: "selected-target-offline-periodic")
+            }
+        }
+        timer.tolerance = 10
+        selectedTargetRecoveryTimer = timer
+        logTransfer("🔋 Discovery: selected target offline; enabled bounded 30s recovery")
+    }
+
+    private func recoverSelectedTarget(reason: String) {
+        guard isNetworkPathSatisfied, isPublishingPreferredDiscoveryHosts else { return }
+        publishPreferredDiscoveryHostsIfActive()
+        discoveryService.sendAnnouncement()
+        probePreferredDiscoveryHosts(trigger: .offlineRecovery, reason: reason)
+        probeConfiguredManualPeers(reason: reason)
+    }
+
+    private func scheduleNextDeviceExpiry(now: Date = Date()) {
+        cleanupTimer?.invalidate()
+        cleanupTimer = nil
+
+        let expiryDates = devices.values.compactMap { device -> Date? in
+            guard !isConfiguredManualDevice(device) else { return nil }
+            let groupKey = deviceGroupKey(for: device)
+            if selectedDeviceGroupKey != broadcastSelectionKey && groupKey == selectedDeviceGroupKey {
+                return nil
+            }
+            return device.lastSeen.addingTimeInterval(retentionInterval(for: device))
+        }
+        guard let nextExpiry = expiryDates.min() else { return }
+        let interval = max(1, nextExpiry.timeIntervalSince(now))
+        cleanupTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.cleanupOfflineDevices()
+            }
+        }
+        cleanupTimer?.tolerance = min(10, interval * 0.15)
     }
     
     private func cleanupOfflineDevices() {
         let now = Date()
         var hasChanges = false
         for (id, device) in self.devices {
+            if isConfiguredManualDevice(device) {
+                continue
+            }
             let groupKey = deviceGroupKey(for: device)
             if selectedDeviceGroupKey != broadcastSelectionKey && groupKey == selectedDeviceGroupKey {
                 // Keep current selection candidates to avoid immediate "Target Offline" flapping.
@@ -2110,6 +3040,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         if hasChanges {
             self.updateMenu()
         }
+        scheduleNextDeviceExpiry(now: now)
     }
     
     private func groupSelectionActionKey(_ groupKey: String) -> String {
@@ -2163,6 +3094,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
     
     func setupMenu() {
+        runtimeTransferMenuViews.removeAll(keepingCapacity: true)
         let menu: NSMenu
         if let existing = statusItem.menu {
             menu = existing
@@ -2184,6 +3116,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
         // 1. Core Action
         menu.addItem(NSMenuItem(title: "Send Clipboard", action: #selector(sendClipboard), keyEquivalent: "s"))
+        menu.addItem(NSMenuItem(title: "Send Files…", action: #selector(chooseFilesToSend), keyEquivalent: "o"))
         let autoClipboardItem = NSMenuItem()
         autoClipboardItem.view = AutoClipboardToggleMenuItemView(
             title: "Auto Sync Clipboard Text",
@@ -2195,14 +3128,44 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         menu.addItem(autoClipboardItem)
         let autoScreenshotItem = NSMenuItem()
         autoScreenshotItem.view = AutoClipboardToggleMenuItemView(
-            title: "Auto Sync Screenshots",
+            title: "Auto Sync Clipboard Images",
             isOn: isAutoScreenshotSyncEnabled,
             onToggle: { [weak self] enabled in
                 self?.setAutoScreenshotSyncEnabled(enabled, showInfoIfEnabling: true)
             }
         )
         menu.addItem(autoScreenshotItem)
+        let screenshotFilesItem = NSMenuItem()
+        screenshotFilesItem.view = AutoClipboardToggleMenuItemView(
+            title: "Auto Sync Screenshot Files",
+            isOn: isScreenshotFileSyncEnabled,
+            onToggle: { [weak self] enabled in
+                self?.setScreenshotFileSyncEnabled(enabled)
+            }
+        )
+        menu.addItem(screenshotFilesItem)
         menu.addItem(NSMenuItem.separator())
+
+        let activeTransfers = runtimeTransfersByID.values
+            .filter { !$0.status.isTerminal }
+            .sorted { $0.startedAt > $1.startedAt }
+        if !activeTransfers.isEmpty {
+            let headerItem = NSMenuItem()
+            headerItem.view = MenuSectionHeaderView(title: "ACTIVE TRANSFERS")
+            headerItem.isEnabled = false
+            menu.addItem(headerItem)
+
+            for transfer in activeTransfers.prefix(4) {
+                let item = NSMenuItem()
+                let view = RuntimeTransferMenuItemView(record: transfer) { [weak self] id in
+                    self?.cancelTransfer(id: id.uuidString)
+                }
+                item.view = view
+                menu.addItem(item)
+                runtimeTransferMenuViews[transfer.id] = view
+            }
+            menu.addItem(NSMenuItem.separator())
+        }
         
         let groups = buildDeviceGroups()
         
@@ -2261,6 +3224,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         let compatibilityItem = NSMenuItem(title: "Compatibility Mode (HTTP)", action: #selector(toggleLanCompatibilityMode(_:)), keyEquivalent: "")
         compatibilityItem.state = preferredLocalProtocol == .http ? .on : .off
         advancedMenu.addItem(compatibilityItem)
+
+        let receivePolicyMenu = NSMenu(title: "Receive Requests")
+        for option in [("Ask Every Time", ReceivePolicy.ask), ("Trusted Devices Only", ReceivePolicy.trustedOnly), ("Off", ReceivePolicy.off)] {
+            let item = NSMenuItem(title: option.0, action: #selector(receivePolicySelected(_:)), keyEquivalent: "")
+            item.representedObject = option.1.rawValue
+            item.state = runtimeConfiguration.receivePolicy == option.1 ? .on : .off
+            receivePolicyMenu.addItem(item)
+        }
+        let receivePolicyItem = NSMenuItem(title: "Receive Requests", action: nil, keyEquivalent: "")
+        receivePolicyItem.submenu = receivePolicyMenu
+        advancedMenu.addItem(receivePolicyItem)
         
         advancedMenu.addItem(NSMenuItem.separator())
         let autoUpdateItem = NSMenuItem(title: "Auto-check for Updates", action: #selector(toggleAutoUpdate(_:)), keyEquivalent: "")
@@ -2314,7 +3288,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         deviceItem.isEnabled = true 
         
         let connectionState: DeviceMenuItemView.ConnectionState
-        if connectingSelectionKey == actionKey {
+        if !isDeviceOnline(device) {
+            connectionState = .offline
+        } else if connectingSelectionKey == actionKey {
             connectionState = .connecting
         } else if selectedDeviceGroupKey == groupKey {
             if isExpandedCandidate {
@@ -2359,7 +3335,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     
     @objc func sendClipboard() {
         print("Send Clipboard clicked")
-        if let str = NSPasteboard.general.string(forType: .string) {
+        if let str = NSPasteboard.general.string(forType: .string),
+           !str.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let targets = targetGroupsForCurrentSelection()
             
             print("Clipboard content found: \(str.count) chars")
@@ -2380,18 +3357,91 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
     }
 
+    @objc private func chooseFilesToSend() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.resolvesAliases = true
+        panel.prompt = "Send"
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+
+        let targets = targetGroupsForCurrentSelection()
+        guard !targets.isEmpty else {
+            recordConsoleActivity(
+                title: "Files not sent",
+                detail: "Choose an online target first",
+                symbolName: "wifi.exclamationmark",
+                tone: .warning
+            )
+            return
+        }
+
+        for group in targets {
+            Task {
+                do {
+                    try await sendFilesWithFallback(panel.urls, to: group, source: .filePicker)
+                } catch {
+                    recordConsoleActivity(
+                        title: "File send failed",
+                        detail: error.localizedDescription,
+                        symbolName: "exclamationmark.triangle.fill",
+                        tone: .warning
+                    )
+                }
+            }
+        }
+    }
+
     private func performManualRescan(reopenMenu: Bool, recordActivity: Bool = true) {
-        print("Manual scan triggered - preserving current discovery state")
+        guard !isDiscoveryRefreshing else { return }
+
+        print("Manual refresh triggered - rebinding discovery and probing the current LAN")
+        isDiscoveryRefreshing = true
+        discoveryRefreshSummary = "Refreshing devices on the current LAN"
+        discoveryRefreshCompletionWorkItem?.cancel()
+        refreshSettingsWindowIfNeeded()
+
         if recordActivity {
             recordConsoleActivity(
-                title: "Discovery refreshed",
-                detail: "Manual scan requested",
+                title: "Refreshing devices",
+                detail: "Rebinding discovery on the current network",
                 symbolName: "arrow.triangle.2.circlepath"
             )
         }
 
-        discoveryService.probePreferredHosts(reason: "manual-refresh-preferred")
-        discoveryService.triggerScan()
+        let restarted = restartDiscoveryService(reason: "manual-refresh", triggerScan: true)
+        if !restarted {
+            publishPreferredDiscoveryHostsIfActive()
+            probePreferredDiscoveryHosts(trigger: .manualRefresh, reason: "manual-refresh-preferred")
+            discoveryService.triggerScan()
+            probeConfiguredManualPeers(reason: "manual-refresh")
+        }
+
+        let completion = DispatchWorkItem { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let visibleCount = self.buildDeviceGroups().filter { group in
+                    group.candidates.contains { self.isDeviceOnline($0) }
+                }.count
+                self.isDiscoveryRefreshing = false
+                self.discoveryRefreshSummary = visibleCount == 0
+                    ? "No online devices found"
+                    : "Found \(visibleCount) online device\(visibleCount == 1 ? "" : "s")"
+                if recordActivity {
+                    self.recordConsoleActivity(
+                        title: "Devices refreshed",
+                        detail: self.discoveryRefreshSummary,
+                        symbolName: visibleCount == 0 ? "wifi.exclamationmark" : "checkmark.circle.fill",
+                        tone: visibleCount == 0 ? .neutral : .good
+                    )
+                }
+                self.updateMenu()
+                self.refreshSettingsWindowIfNeeded()
+            }
+        }
+        discoveryRefreshCompletionWorkItem = completion
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.5, execute: completion)
 
         guard reopenMenu else { return }
         DispatchQueue.main.async {
@@ -2402,11 +3452,295 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private func runDiagnosticsFromConsole() {
         recordConsoleActivity(
             title: "Diagnostics started",
-            detail: "Discovery scan requested",
+            detail: "Reading live runtime state",
             symbolName: "wave.3.right",
             tone: .neutral
         )
-        performManualRescan(reopenMenu: false, recordActivity: false)
+        Task {
+            await refreshDiagnosticsState(includeLogs: true)
+            recordConsoleActivity(
+                title: "Diagnostics complete",
+                detail: diagnosticsError ?? "Runtime state refreshed",
+                symbolName: diagnosticsError == nil ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
+                tone: diagnosticsError == nil ? .good : .warning
+            )
+        }
+    }
+
+    private func setReceivePolicy(_ rawValue: String) {
+        guard let policy = ReceivePolicy(rawValue: rawValue) else { return }
+        runtimeConfiguration.receivePolicy = policy
+        persistRuntimeConfiguration()
+        refreshSettingsWindowIfNeeded()
+    }
+
+    private func setHistoryLimitPerDirection(_ limit: Int) {
+        guard (1...500).contains(limit) else { return }
+        runtimeConfiguration.historyLimitPerDirection = limit
+        persistRuntimeConfiguration()
+        Task {
+            do {
+                try await transferHistoryStore?.setRetentionLimitPerDirection(limit)
+                await reloadRuntimeHistory()
+            } catch {
+                diagnosticsError = error.localizedDescription
+                refreshSettingsWindowIfNeeded()
+            }
+        }
+    }
+
+    private func setPeerTrusted(groupID: String, trusted: Bool) {
+        guard let group = groupMap()[groupID] else { return }
+        let fingerprints = group.candidates.map(\.id).filter { !$0.hasPrefix("manual:") }
+        guard !fingerprints.isEmpty else {
+            recordConsoleActivity(
+                title: "Trust unavailable",
+                detail: "Add the device fingerprint to this manual peer first",
+                symbolName: "lock.slash",
+                tone: .warning
+            )
+            return
+        }
+        var values = runtimeConfiguration.trustedPeerFingerprints
+        if trusted {
+            for value in fingerprints where !values.contains(where: { DiscoveryIdentity.fingerprintsMatch($0, value) }) {
+                values.append(value)
+            }
+        } else {
+            values.removeAll { existing in
+                fingerprints.contains { DiscoveryIdentity.fingerprintsMatch(existing, $0) }
+            }
+        }
+        runtimeConfiguration.trustedPeerFingerprints = values
+        persistRuntimeConfiguration()
+        refreshSettingsWindowIfNeeded()
+    }
+
+    private func showTrustDeviceDialog() {
+        let candidates = buildDeviceGroups().filter { group in
+            group.candidates.contains { device in
+                !device.id.hasPrefix("manual:") && !isTrustedFingerprint(device.id)
+            }
+        }
+
+        guard !candidates.isEmpty else {
+            let alert = NSAlert()
+            alert.messageText = "No Devices Available to Trust"
+            alert.informativeText = "Discover an untrusted device on the current LAN, then try again."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+            return
+        }
+
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 330, height: 28), pullsDown: false)
+        popup.addItems(withTitles: candidates.map { group in
+            "\(displayTitle(for: group)) · ID \(shortFingerprint(group.primary.id))"
+        })
+
+        let alert = NSAlert()
+        alert.messageText = "Trust a Device"
+        alert.informativeText = "Trusted devices may send files without a prompt when receiving is limited to trusted devices. Only trust devices you control."
+        alert.alertStyle = .informational
+        alert.accessoryView = popup
+        alert.addButton(withTitle: "Trust Device")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+
+        guard alert.runModal() == .alertFirstButtonReturn,
+              candidates.indices.contains(popup.indexOfSelectedItem) else {
+            return
+        }
+
+        let group = candidates[popup.indexOfSelectedItem]
+        setPeerTrusted(groupID: group.key, trusted: true)
+        recordConsoleActivity(
+            title: "Device trusted",
+            detail: displayTitle(for: group),
+            symbolName: "checkmark.shield.fill",
+            tone: .good
+        )
+    }
+
+    private func revokeTrustedFingerprint(_ fingerprint: String) {
+        let before = runtimeConfiguration.trustedPeerFingerprints.count
+        runtimeConfiguration.trustedPeerFingerprints.removeAll {
+            DiscoveryIdentity.fingerprintsMatch($0, fingerprint)
+        }
+        guard runtimeConfiguration.trustedPeerFingerprints.count != before else { return }
+        persistRuntimeConfiguration()
+        refreshSettingsWindowIfNeeded()
+        recordConsoleActivity(
+            title: "Device trust revoked",
+            detail: "ID \(shortFingerprint(fingerprint))",
+            symbolName: "shield.slash",
+            tone: .neutral
+        )
+    }
+
+    private func removeManualPeer(id: String) {
+        guard let peer = runtimeConfiguration.manualPeers.first(where: { $0.id == id }) else { return }
+        let device = manualDevice(for: peer)
+        runtimeConfiguration.manualPeers.removeAll { $0.id == id }
+        persistRuntimeConfiguration()
+        devices.removeValue(forKey: device.id)
+        materializeManualPeers()
+        refreshSettingsWindowIfNeeded()
+    }
+
+    private enum DestinationKind {
+        case downloads
+        case media
+    }
+
+    private func selectDestination(kind: DestinationKind) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Choose"
+        panel.message = kind == .downloads ? "Choose where received files are saved." : "Choose where received images and videos are saved."
+        panel.directoryURL = kind == .downloads ? configuredDownloadDirectory : configuredMediaDirectory
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        switch kind {
+        case .downloads:
+            runtimeConfiguration.downloadDestination = url.path
+        case .media:
+            runtimeConfiguration.mediaDestination = url.path
+        }
+        persistRuntimeConfiguration()
+        Task { await updateTransferSaveDirectories() }
+        refreshSettingsWindowIfNeeded()
+    }
+
+    private func runtimeRecord(id: String) -> TransferRecord? {
+        guard let uuid = UUID(uuidString: id) else { return nil }
+        return runtimeTransfersByID[uuid] ?? runtimeHistory.first(where: { $0.id == uuid })
+    }
+
+    private func cancelTransfer(id: String) {
+        guard let record = runtimeRecord(id: id), !record.status.isTerminal else { return }
+        Task {
+            if record.direction == .outgoing {
+                await fileSender.cancelTransfer(record.id)
+            } else {
+                let cancelledHTTP = await transferServer.cancelTransfer(id: record.id)
+                if !cancelledHTTP {
+                    _ = await campusFallback.cancelIncomingTransfer(record.id)
+                }
+            }
+        }
+    }
+
+    private func retryTransfer(id: String) {
+        guard let record = runtimeRecord(id: id), record.isRetryable else { return }
+        let targetID = record.retrySpec?.targetID ?? record.peer.id
+        guard let device = devices[targetID] ?? devices.values.first(where: {
+            DiscoveryIdentity.fingerprintsMatch($0.id, targetID)
+        }) else {
+            recordConsoleActivity(
+                title: "Retry unavailable",
+                detail: "The original target is offline",
+                symbolName: "arrow.clockwise.circle",
+                tone: .warning
+            )
+            return
+        }
+        Task {
+            do {
+                _ = try await fileSender.retry(record, to: device)
+            } catch {
+                recordConsoleActivity(
+                    title: "Retry failed",
+                    detail: error.localizedDescription,
+                    symbolName: "exclamationmark.triangle.fill",
+                    tone: .warning
+                )
+            }
+        }
+    }
+
+    private func deleteHistory(id: String) {
+        guard let uuid = UUID(uuidString: id), let transferHistoryStore else { return }
+        Task {
+            try? await transferHistoryStore.delete(id: uuid)
+            runtimeTransfersByID.removeValue(forKey: uuid)
+            await reloadRuntimeHistory()
+        }
+    }
+
+    private func clearHistory(direction rawValue: String) {
+        guard let direction = TransferDirection(rawValue: rawValue), let transferHistoryStore else { return }
+        Task {
+            try? await transferHistoryStore.clear(direction: direction)
+            runtimeTransfersByID = runtimeTransfersByID.filter { !$0.value.status.isTerminal || $0.value.direction != direction }
+            await reloadRuntimeHistory()
+        }
+    }
+
+    private func transferURLs(for record: TransferRecord) -> [URL] {
+        record.files.compactMap { file in
+            let path = record.direction == .incoming ? file.savedPath : file.sourcePath
+            guard let path, FileManager.default.fileExists(atPath: path) else { return nil }
+            return URL(fileURLWithPath: path)
+        }
+    }
+
+    private func revealTransfer(id: String) {
+        guard let record = runtimeRecord(id: id) else { return }
+        let urls = transferURLs(for: record)
+        guard !urls.isEmpty else { return }
+        NSWorkspace.shared.activateFileViewerSelecting(urls)
+    }
+
+    private func shareTransfer(id: String) {
+        guard let record = runtimeRecord(id: id),
+              !transferURLs(for: record).isEmpty,
+              let view = settingsWindowController?.window?.contentView else { return }
+        let picker = NSSharingServicePicker(items: transferURLs(for: record))
+        sharingServicePicker = picker
+        picker.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+    }
+
+    private func exportLogs() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = "AirSend-Diagnostics-\(ISO8601DateFormatter().string(from: Date()).prefix(10)).log"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            do {
+                try await FileLogger.export(to: url)
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            } catch {
+                diagnosticsError = error.localizedDescription
+                refreshSettingsWindowIfNeeded()
+            }
+        }
+    }
+
+    private func clearLogs() {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Clear AirSend logs?"
+        alert.informativeText = "This removes the local diagnostic log history."
+        alert.addButton(withTitle: "Clear Logs")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        Task {
+            try? await FileLogger.clear()
+            runtimeLogTail = []
+            refreshSettingsWindowIfNeeded()
+        }
+    }
+
+    private func restartRuntimeFromConsole() {
+        Task {
+            await restartNetworkingStack(clearTransientDevices: false)
+            await refreshDiagnosticsState(includeLogs: true)
+        }
     }
 
     @objc func scanForDevices(_ sender: NSMenuItem) {
@@ -2446,36 +3780,97 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
     @objc func addDeviceByIP() {
         let alert = NSAlert()
-        alert.messageText = "Add Device by IP"
-        alert.informativeText = "Enter the IP address of the target LocalSend instance:"
+        alert.messageText = "Add Manual Device"
+        alert.informativeText = "AirSend will remember this endpoint and probe it directly. Add its fingerprint to use verified HTTPS."
         alert.addButton(withTitle: "Add")
         alert.addButton(withTitle: "Cancel")
-        
-        let inputTextField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
-        inputTextField.placeholderString = "192.168.1.100"
-        alert.accessoryView = inputTextField
-        
+
+        let aliasField = NSTextField(string: "")
+        aliasField.placeholderString = "Living Room Phone"
+        let addressField = NSTextField(string: "")
+        addressField.placeholderString = "192.168.1.100"
+        let portField = NSTextField(string: String(NetworkPorts.transferPort))
+        let fingerprintField = NSTextField(string: "")
+        fingerprintField.placeholderString = "Optional SHA-256 fingerprint"
+        for field in [aliasField, addressField, portField, fingerprintField] {
+            field.widthAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
+        }
+        let grid = NSGridView(views: [
+            [NSTextField(labelWithString: "Name"), aliasField],
+            [NSTextField(labelWithString: "Address"), addressField],
+            [NSTextField(labelWithString: "Port"), portField],
+            [NSTextField(labelWithString: "Fingerprint"), fingerprintField],
+        ])
+        grid.rowSpacing = 8
+        grid.columnSpacing = 12
+        grid.column(at: 0).xPlacement = .trailing
+        alert.accessoryView = grid
+
         let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            let ip = inputTextField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !ip.isEmpty {
-                // For manual IP, we create a pseudo-device or just try to send
-                // Let's create a temporary device object
-                let manualDevice = Device(
-                    id: "manual-\(ip)",
-                    alias: "Manual IP (\(ip))",
-                    ip: ip,
-                    port: Int(NetworkPorts.transferPort),
-                    deviceModel: "Remote Device",
-                    deviceType: "desktop",
-                    version: "3.5.0",
-                    https: false,
-                    download: true,
-                    lastSeen: Date()
+        guard response == .alertFirstButtonReturn else { return }
+        let address = addressField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let alias = aliasField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fingerprint = fingerprintField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !address.isEmpty, let port = Int(portField.stringValue), (1...65_535).contains(port) else {
+            recordConsoleActivity(
+                title: "Manual device not added",
+                detail: "Enter a valid address and port",
+                symbolName: "exclamationmark.triangle.fill",
+                tone: .warning
+            )
+            return
+        }
+        recordConsoleActivity(
+            title: "Connecting to manual device",
+            detail: "\(address):\(port)",
+            symbolName: "point.3.connected.trianglepath.dotted"
+        )
+        Task {
+            do {
+                let device = try await discoveryService.resolveManualPeer(
+                    alias: alias,
+                    address: address,
+                    port: port,
+                    expectedFingerprint: fingerprint.isEmpty ? nil : fingerprint
                 )
-                self.devices[manualDevice.id] = manualDevice
-                self.selectedDeviceGroupKey = self.deviceGroupKey(for: manualDevice)
-                self.preferredDeviceIdsByGroup[self.selectedDeviceGroupKey] = manualDevice.id
+                let peer = ManualPeer(
+                    id: device.id,
+                    alias: device.alias,
+                    address: device.ip,
+                    port: device.port,
+                    fingerprint: device.id
+                )
+                runtimeConfiguration.manualPeers.removeAll {
+                    DiscoveryIdentity.fingerprintsMatch($0.id, peer.id)
+                        || ($0.address.caseInsensitiveCompare(peer.address) == .orderedSame && $0.port == peer.port)
+                }
+                runtimeConfiguration.manualPeers.append(peer)
+                persistRuntimeConfiguration()
+                devices[device.id] = device
+                selectedDeviceGroupKey = deviceGroupKey(for: device)
+                preferredDeviceIdsByGroup[selectedDeviceGroupKey] = device.id
+                discoveryService.updatePreferredProbeHosts(prioritizedDiscoveryHosts())
+                recordConsoleActivity(
+                    title: "Manual device added",
+                    detail: "\(device.alias) · \(device.ip):\(device.port)",
+                    symbolName: "checkmark.circle.fill",
+                    tone: .good
+                )
+                updateMenu()
+                refreshSettingsWindowIfNeeded()
+            } catch {
+                recordConsoleActivity(
+                    title: "Manual device not added",
+                    detail: error.localizedDescription,
+                    symbolName: "exclamationmark.triangle.fill",
+                    tone: .warning
+                )
+                let failure = NSAlert()
+                failure.alertStyle = .warning
+                failure.messageText = "Device Could Not Be Added"
+                failure.informativeText = error.localizedDescription
+                failure.addButton(withTitle: "OK")
+                failure.runModal()
             }
         }
     }
@@ -2511,6 +3906,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         if isAutoClipboardSyncEnabled != enabled {
             isAutoClipboardSyncEnabled = enabled
         }
+        updateAutomationServices()
 
         guard enabled, showInfoIfEnabling else {
             return
@@ -2526,14 +3922,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         if isAutoScreenshotSyncEnabled != enabled {
             isAutoScreenshotSyncEnabled = enabled
         }
+        updateAutomationServices()
 
         guard enabled, showInfoIfEnabling else {
             return
         }
 
         showAndroidIntegrationAlert(
-            featureName: "Auto Screenshot Sync",
-            description: "Copied screenshots and images on your Mac are converted to PNG and pushed to the selected Android target."
+            featureName: "Auto Clipboard Image Sync",
+            description: "Copied images on your Mac are converted to PNG and pushed to the selected Android target."
+        )
+    }
+
+    private func setScreenshotFileSyncEnabled(_ enabled: Bool) {
+        guard runtimeConfiguration.screenshotSyncEnabled != enabled else { return }
+        runtimeConfiguration.screenshotSyncEnabled = enabled
+        persistRuntimeConfiguration()
+        updateAutomationServices()
+        recordConsoleActivity(
+            title: enabled ? "Screenshot sync enabled" : "Screenshot sync disabled",
+            detail: enabled ? "Watching \(ScreenshotWatcher.defaultCaptureDirectory().path)" : "Screenshot folder watcher stopped",
+            symbolName: "camera.viewfinder",
+            tone: .neutral
         )
     }
 
@@ -2556,6 +3966,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 try service.unregister()
                 logTransfer("🚀 Launch at Login disabled.")
             }
+            runtimeConfiguration.launchAtLoginEnabled = enabled
+            persistRuntimeConfiguration()
             updateMenu()
         } catch {
             logTransfer("❌ Failed to toggle Launch at Login: \(error)")
@@ -2591,44 +4003,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             controller.showSettingsWindow()
         }
     }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        let controller = ensureSettingsWindowController()
+        controller.showSettingsWindow()
+        return false
+    }
     
     // MARK: - NSMenuDelegate
     
     func menuWillOpen(_ menu: NSMenu) {
         isStatusMenuOpen = true
-        print("📡 Menu: Opening... starting high-frequency scan.")
-        discoveryService.probePreferredHosts(reason: "menu-open-preferred")
-        // Perform an initial scan immediately
-        discoveryService.triggerScan()
-        
-        // Start a 1-second timer for continuous scanning while menu is open
-        menuScanTimer?.invalidate()
-        menuScanTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                // Stop scanning if a specific device is selected or being connected
-                if self?.selectedDeviceGroupKey != self?.broadcastSelectionKey || self?.connectingSelectionKey != nil {
-                    print("📡 Menu: Active selection/connection detected, stopping aggressive scan.")
-                    self?.menuScanTimer?.invalidate()
-                    self?.menuScanTimer = nil
-                    return
-                }
-                
-                print("📡 Menu: Periodic scan while open...")
-                if self?.shouldProbeKnownHosts() == true {
-                    self?.discoveryService.probePreferredHosts(reason: "menu-periodic-preferred")
-                }
-                if self?.buildDeviceGroups().isEmpty == true {
-                    self?.discoveryService.triggerScan()
-                }
-            }
-        }
+        discoveryService.sendAnnouncement()
     }
     
     func menuDidClose(_ menu: NSMenu) {
         isStatusMenuOpen = false
-        print("📡 Menu: Closed. Stopping high-frequency scan.")
-        menuScanTimer?.invalidate()
-        menuScanTimer = nil
         if pendingStatusMenuRefresh {
             pendingStatusMenuRefresh = false
             DispatchQueue.main.async { [weak self] in
@@ -2731,13 +4121,39 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     
     @MainActor
     @objc func quit() {
+        guard !isQuitting else { return }
+        isQuitting = true
+        stopDragProximityMonitoring()
+        stopDragReleaseMonitoring()
+        dragReleaseRecoveryWorkItem?.cancel()
+        discoveryRefreshCompletionWorkItem?.cancel()
+        settingsWindowRelativeTimeTimer?.invalidate()
+        broadcastTimer?.invalidate()
+        cleanupTimer?.invalidate()
+        selectedTargetFreshnessTimer?.invalidate()
+        selectedTargetRecoveryTimer?.invalidate()
+        clipboardService.stop()
+        screenshotWatcher.stop()
+        manualPeerProbeTask?.cancel()
+        isPublishingPreferredDiscoveryHosts = false
         discoveryService.stop()
-        NSApplication.shared.terminate(self)
+        networkPathMonitor.cancel()
+        if let wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+            self.wakeObserver = nil
+        }
+        runtimeEventTask?.cancel()
+        let pendingConfigurationSave = runtimeConfigurationSaveTask
+        Task {
+            _ = await pendingConfigurationSave?.value
+            NSApplication.shared.terminate(self)
+        }
     }
     
     // MARK: - System Integration
     
-    private func enableWakelock() {
+    private func enableWakelock(reasonID: String = "legacy-transfer") {
+        activePowerAssertionReasons.insert(reasonID)
         guard wakelockAssertionID == 0 else { return }
         let reason = "LocalSend is transferring files" as CFString
         let result = IOPMAssertionCreateWithName(kIOPMAssertionTypeNoIdleSleep as CFString,
@@ -2751,7 +4167,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
     }
     
-    private func disableWakelock() {
+    private func disableWakelock(reasonID: String = "legacy-transfer") {
+        activePowerAssertionReasons.remove(reasonID)
+        guard activePowerAssertionReasons.isEmpty else { return }
         guard wakelockAssertionID != 0 else { return }
         let result = IOPMAssertionRelease(wakelockAssertionID)
         if result == kIOReturnSuccess {
@@ -2783,6 +4201,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
     @objc private func toggleLanCompatibilityMode(_ sender: NSMenuItem) {
         setCompatibilityModeEnabled(preferredLocalProtocol != .http)
+    }
+
+    @objc private func receivePolicySelected(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String else { return }
+        setReceivePolicy(rawValue)
     }
 }
 
@@ -2821,6 +4244,19 @@ private final class SelfTestExitState: @unchecked Sendable {
     var code: Int32 = 0
 }
 
+private final class SelfTestTextCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: String?
+
+    func store(_ text: String) {
+        lock.withLock { value = text }
+    }
+
+    func load() -> String? {
+        lock.withLock { value }
+    }
+}
+
 private enum SelfTestRunner {
     static func runIfRequested() {
         let env = ProcessInfo.processInfo.environment
@@ -2846,6 +4282,11 @@ private enum SelfTestRunner {
 
     static func run() async throws {
         let env = ProcessInfo.processInfo.environment
+        if env["AIRSEND_SELFTEST_LOOPBACK"] == "1" {
+            try await runLoopback()
+            print("SELFTEST_OK")
+            return
+        }
         let ip = try requiredEnv("AIRSEND_SELFTEST_DEVICE_IP", env: env)
         let fingerprint = try requiredEnv("AIRSEND_SELFTEST_DEVICE_FINGERPRINT", env: env)
         let alias = env["AIRSEND_SELFTEST_DEVICE_ALIAS"] ?? "AirSend Android Module"
@@ -2888,7 +4329,13 @@ private enum SelfTestRunner {
         try "airsend-selftest-\(Int(Date().timeIntervalSince1970))".write(to: tempFile, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: tempFile) }
 
-        let campusFallback = campusMode ? CampusFallbackCoordinator(fingerprint: localFingerprint) : nil
+        let selfTestCoordinator = TransferCoordinator()
+        let campusFallback = campusMode
+            ? CampusFallbackCoordinator(
+                fingerprint: localFingerprint,
+                transferCoordinator: selfTestCoordinator
+            )
+            : nil
         let discoveryService = campusMode ? UDPDiscoveryService(fingerprint: localFingerprint, protocolType: localProtocol) : nil
 
         if let campusFallback, let discoveryService {
@@ -2909,14 +4356,14 @@ private enum SelfTestRunner {
         }
 
         let fileSender = FileSender(fingerprint: localFingerprint, localProtocol: localProtocol, campusFallback: campusFallback)
-        let clipboardSender = ClipboardSender(fingerprint: localFingerprint, localProtocol: localProtocol, campusFallback: campusFallback)
+        let clipboardSender = ClipboardSender(fileSender: fileSender)
 
         if campusMode {
             let fileGood = await runCase("FILE_GOOD_PORT") {
-                try await fileSender.sendFiles([tempFile], to: goodDevice)
+                _ = try await fileSender.sendFiles([tempFile], to: goodDevice)
             }
             let textGood = await runCase("TEXT_GOOD_PORT") {
-                try await clipboardSender.sendText("selftest-text-good-port", to: goodDevice)
+                _ = try await clipboardSender.sendText("selftest-text-good-port", to: goodDevice)
             }
 
             let failures = [fileGood, textGood].filter { !$0.success }
@@ -2931,16 +4378,16 @@ private enum SelfTestRunner {
         }
 
         let fileBad = await runCase("FILE_BAD_PORT") {
-            try await fileSender.sendFiles([tempFile], to: badDevice)
+            _ = try await fileSender.sendFiles([tempFile], to: badDevice)
         }
         let fileGood = await runCase("FILE_GOOD_PORT") {
-            try await fileSender.sendFiles([tempFile], to: goodDevice)
+            _ = try await fileSender.sendFiles([tempFile], to: goodDevice)
         }
         let textBad = await runCase("TEXT_BAD_PORT") {
-            try await clipboardSender.sendText("selftest-text-bad-port", to: badDevice)
+            _ = try await clipboardSender.sendText("selftest-text-bad-port", to: badDevice)
         }
         let textGood = await runCase("TEXT_GOOD_PORT") {
-            try await clipboardSender.sendText("selftest-text-good-port", to: goodDevice)
+            _ = try await clipboardSender.sendText("selftest-text-good-port", to: goodDevice)
         }
 
         let mustSucceed = [fileGood, textGood].filter { !$0.success }
@@ -2954,6 +4401,122 @@ private enum SelfTestRunner {
         }
 
         print("SELFTEST_OK")
+    }
+
+    static func runLoopback() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("airsend-loopback-\(UUID().uuidString)", isDirectory: true)
+        let firstSource = root.appendingPathComponent("first", isDirectory: true)
+        let secondSource = root.appendingPathComponent("second", isDirectory: true)
+        let destination = root.appendingPathComponent("received", isDirectory: true)
+        try FileManager.default.createDirectory(at: firstSource, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondSource, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let firstFile = firstSource.appendingPathComponent("note.txt")
+        let secondFile = secondSource.appendingPathComponent("note.txt")
+        try Data("first ordinary text file".utf8).write(to: firstFile)
+        try Data("second ordinary text file".utf8).write(to: secondFile)
+
+        let port = UInt16(54_000 + Int.random(in: 0..<1_000))
+        let receiverCoordinator = TransferCoordinator()
+        let receiver = HTTPTransferServer(
+            port: port,
+            fingerprint: "aabbcc",
+            transferCoordinator: receiverCoordinator
+        )
+        let clipboardCapture = SelfTestTextCapture()
+        await receiver.setOnTransferRequest { _ in true }
+        await receiver.setGetSaveDirectory { _ in destination }
+        await receiver.setOnTextReceived { text in clipboardCapture.store(text) }
+        try await receiver.start()
+
+        do {
+            let senderCoordinator = TransferCoordinator()
+            let sender = FileSender(
+                fingerprint: "ddeeff",
+                localProtocol: .http,
+                campusFallback: nil,
+                transferCoordinator: senderCoordinator
+            )
+            let clipboard = ClipboardSender(fileSender: sender)
+            let device = Device(
+                id: "aabbcc",
+                alias: "Loopback Receiver",
+                ip: "127.0.0.1",
+                port: Int(port),
+                deviceModel: "macOS",
+                deviceType: DeviceType.desktop.rawValue,
+                version: "selftest",
+                https: false,
+                download: true,
+                lastSeen: Date()
+            )
+
+            let manualResolver = UDPDiscoveryService(
+                fingerprint: "ddeeff",
+                protocolType: .http
+            )
+            let resolved = try await manualResolver.resolveManualPeer(
+                alias: "Verified Loopback",
+                address: "127.0.0.1",
+                port: Int(port),
+                expectedFingerprint: "aabbcc"
+            )
+            guard resolved.id == "aabbcc", resolved.alias == "Verified Loopback" else {
+                throw NSError(domain: "SelfTestRunner", code: 15, userInfo: [NSLocalizedDescriptionKey: "Manual peer resolution did not verify endpoint identity"])
+            }
+            do {
+                _ = try await manualResolver.resolveManualPeer(
+                    alias: "Wrong Fingerprint",
+                    address: "127.0.0.1",
+                    port: Int(port),
+                    expectedFingerprint: "112233"
+                )
+                throw NSError(domain: "SelfTestRunner", code: 16, userInfo: [NSLocalizedDescriptionKey: "Manual peer fingerprint mismatch was accepted"])
+            } catch ManualPeerProbeError.fingerprintMismatch {
+            }
+
+            async let firstSend: UUID = sender.sendFiles([firstFile], to: device)
+            async let secondSend: UUID = sender.sendFiles([secondFile], to: device)
+            _ = try await (firstSend, secondSend)
+
+            guard clipboardCapture.load() == nil else {
+                throw NSError(domain: "SelfTestRunner", code: 10, userInfo: [NSLocalizedDescriptionKey: "Ordinary text files must not update the clipboard"])
+            }
+            _ = try await clipboard.sendText("loopback clipboard text", to: device)
+            guard clipboardCapture.load() == "loopback clipboard text" else {
+                throw NSError(domain: "SelfTestRunner", code: 11, userInfo: [NSLocalizedDescriptionKey: "Clipboard identity was not delivered exactly"])
+            }
+
+            let receivedFiles = try FileManager.default.contentsOfDirectory(
+                at: destination,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )
+            guard receivedFiles.count == 2,
+                  receivedFiles.allSatisfy({ $0.lastPathComponent != "clipboard.txt" }) else {
+                throw NSError(domain: "SelfTestRunner", code: 12, userInfo: [NSLocalizedDescriptionKey: "Duplicate naming or clipboard persistence failed"])
+            }
+            let receivedPayloads = try Set(receivedFiles.map { try String(contentsOf: $0, encoding: .utf8) })
+            guard receivedPayloads == Set(["first ordinary text file", "second ordinary text file"]) else {
+                throw NSError(domain: "SelfTestRunner", code: 13, userInfo: [NSLocalizedDescriptionKey: "Concurrent receiver payloads were corrupted"])
+            }
+
+            let senderRecords = await senderCoordinator.list()
+            let receiverRecords = await receiverCoordinator.list()
+            guard senderRecords.count == 3,
+                  receiverRecords.count == 3,
+                  senderRecords.allSatisfy({ $0.status == .completed }),
+                  receiverRecords.allSatisfy({ $0.status == .completed }) else {
+                throw NSError(domain: "SelfTestRunner", code: 14, userInfo: [NSLocalizedDescriptionKey: "Loopback transfer records did not reach independent terminal states"])
+            }
+            await receiver.stop()
+        } catch {
+            await receiver.stop()
+            throw error
+        }
     }
 
     static func runCase(_ label: String, operation: @escaping () async throws -> Void) async -> SelfTestCaseResult {

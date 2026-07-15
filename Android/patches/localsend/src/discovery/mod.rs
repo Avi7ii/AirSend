@@ -27,8 +27,10 @@ impl Client {
             self.maybe_pin_peer_neighbor(src.ip(), device.mac_address.as_deref())
                 .await;
 
-            let mut peers = self.peers.lock().await;
-            remember_peer_entry(&mut peers, src, device.clone());
+            {
+                let mut peers = self.peers.lock().await;
+                remember_peer_entry(&mut peers, src, device.clone());
+            }
 
             if device.announce != Some(true) {
                 return;

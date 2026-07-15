@@ -99,14 +99,9 @@ actor CertificateManager {
     private func generateCertificate() async throws {
         logTransfer("🔐 Generating ultra-minimal official-aligned self-signed certificate...")
         
-        // DN requirements: CN is required, O should be empty for official LocalSend alignment
-        let commonName = "LocalSend User"
-        let organization = "" 
-        
         // 1. Generate Key and Cert (Minimal approach, no extensions)
         // Official LocalSend (Dart/Rust) uses very plain certificates.
         // We avoid -config and SANs to maximize compatibility with sensitive TLS clients.
-        let fm = FileManager.default
         let configPath = appSupportDir.appendingPathComponent("openssl.conf")
         
         // 2. Generate config with SANs (Subject Alternative Names)
@@ -250,7 +245,10 @@ actor CertificateManager {
                             continue
                         }
 
-                        let address = String(cString: hostname)
+                        let address = String(
+                            decoding: hostname.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) },
+                            as: UTF8.self
+                        )
 
                         if address != "127.0.0.1" {
                             addresses.append(address)

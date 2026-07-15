@@ -1,6 +1,6 @@
 import Foundation
 
-struct InfoDto: Codable {
+struct InfoDto: Codable, Sendable {
     let alias: String
     let version: String
     let deviceModel: String?
@@ -9,7 +9,7 @@ struct InfoDto: Codable {
     let download: Bool?
 }
 
-struct RegisterDto: Codable {
+struct RegisterDto: Codable, Sendable {
     let alias: String
     let version: String?
     let deviceModel: String?
@@ -26,7 +26,7 @@ struct RegisterDto: Codable {
     }
 }
 
-struct FileDto: Codable {
+struct FileDto: Codable, Sendable {
     let id: String
     let fileName: String
     let size: Int64
@@ -35,12 +35,12 @@ struct FileDto: Codable {
     let preview: String? // Base64 preview?
 }
 
-struct PrepareUploadRequestDto: Codable {
+struct PrepareUploadRequestDto: Codable, Sendable {
     let info: RegisterDto
     let files: [String: FileDto] // Map fileId -> FileDto
 }
 
-struct PrepareUploadResponseDto: Codable {
+struct PrepareUploadResponseDto: Codable, Sendable {
     let sessionId: String
     let files: [String: String] // Map fileId -> token
 }

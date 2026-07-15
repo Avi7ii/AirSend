@@ -287,7 +287,9 @@ async fn main() -> Result<()> {
     let tls_identity =
         load_or_create_tls_identity().context("Failed to initialize TLS identity")?;
     info!("🔐 TLS 设备指纹: {}", tls_identity.fingerprint);
-    let device_info = DeviceInfo::headless_with_identity(tls_identity.fingerprint.clone(), "https");
+    let mut device_info =
+        DeviceInfo::headless_with_identity(tls_identity.fingerprint.clone(), "https");
+    device_info.version = env!("CARGO_PKG_VERSION").to_string();
     let services = Arc::new(DaemonServices::new(
         config_store,
         runtime_config.clone(),

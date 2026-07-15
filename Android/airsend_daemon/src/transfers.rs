@@ -59,6 +59,15 @@ pub struct TransferExecution {
     pub cancel: watch::Receiver<bool>,
 }
 
+struct TerminalOutcome<'a> {
+    status: TransferStatus,
+    error_code: Option<&'a str>,
+    error_message: Option<&'a str>,
+    retryable: bool,
+    saved_paths: Option<Vec<String>>,
+    preview_text: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct TransferService {
     inner: Arc<TransferServiceInner>,
@@ -368,12 +377,14 @@ impl TransferService {
     pub async fn finish_completed(&self, transfer_id: &str) -> Result<HistoryRecord> {
         self.finish_terminal(
             transfer_id,
-            TransferStatus::Completed,
-            None,
-            None,
-            false,
-            None,
-            None,
+            TerminalOutcome {
+                status: TransferStatus::Completed,
+                error_code: None,
+                error_message: None,
+                retryable: false,
+                saved_paths: None,
+                preview_text: None,
+            },
         )
         .await
     }
@@ -386,12 +397,14 @@ impl TransferService {
     ) -> Result<HistoryRecord> {
         self.finish_terminal(
             transfer_id,
-            TransferStatus::Completed,
-            None,
-            None,
-            false,
-            Some(saved_paths),
-            preview_text,
+            TerminalOutcome {
+                status: TransferStatus::Completed,
+                error_code: None,
+                error_message: None,
+                retryable: false,
+                saved_paths: Some(saved_paths),
+                preview_text,
+            },
         )
         .await
     }
@@ -399,12 +412,14 @@ impl TransferService {
     pub async fn finish_cancelled(&self, transfer_id: &str) -> Result<HistoryRecord> {
         self.finish_terminal(
             transfer_id,
-            TransferStatus::Cancelled,
-            Some("cancelled"),
-            Some("Transfer cancelled"),
-            true,
-            None,
-            None,
+            TerminalOutcome {
+                status: TransferStatus::Cancelled,
+                error_code: Some("cancelled"),
+                error_message: Some("Transfer cancelled"),
+                retryable: true,
+                saved_paths: None,
+                preview_text: None,
+            },
         )
         .await
     }
@@ -412,12 +427,14 @@ impl TransferService {
     pub async fn finish_incoming_cancelled(&self, transfer_id: &str) -> Result<HistoryRecord> {
         self.finish_terminal(
             transfer_id,
-            TransferStatus::Cancelled,
-            Some("sender_cancelled"),
-            Some("Sender cancelled the transfer"),
-            false,
-            None,
-            None,
+            TerminalOutcome {
+                status: TransferStatus::Cancelled,
+                error_code: Some("sender_cancelled"),
+                error_message: Some("Sender cancelled the transfer"),
+                retryable: false,
+                saved_paths: None,
+                preview_text: None,
+            },
         )
         .await
     }
@@ -430,12 +447,14 @@ impl TransferService {
     ) -> Result<HistoryRecord> {
         self.finish_terminal(
             transfer_id,
-            TransferStatus::Declined,
-            Some(error_code),
-            Some(error_message),
-            false,
-            None,
-            None,
+            TerminalOutcome {
+                status: TransferStatus::Declined,
+                error_code: Some(error_code),
+                error_message: Some(error_message),
+                retryable: false,
+                saved_paths: None,
+                preview_text: None,
+            },
         )
         .await
     }
@@ -449,12 +468,14 @@ impl TransferService {
     ) -> Result<HistoryRecord> {
         self.finish_terminal(
             transfer_id,
-            TransferStatus::Failed,
-            Some(error_code),
-            Some(error_message),
-            retryable,
-            None,
-            None,
+            TerminalOutcome {
+                status: TransferStatus::Failed,
+                error_code: Some(error_code),
+                error_message: Some(error_message),
+                retryable,
+                saved_paths: None,
+                preview_text: None,
+            },
         )
         .await
     }
@@ -467,13 +488,16 @@ impl TransferService {
     async fn finish_terminal(
         &self,
         transfer_id: &str,
-        status: TransferStatus,
-        error_code: Option<&str>,
-        error_message: Option<&str>,
-        retryable: bool,
-        saved_paths: Option<Vec<String>>,
-        preview_text: Option<String>,
+        outcome: TerminalOutcome<'_>,
     ) -> Result<HistoryRecord> {
+        let TerminalOutcome {
+            status,
+            error_code,
+            error_message,
+            retryable,
+            saved_paths,
+            preview_text,
+        } = outcome;
         let record = {
             let mut transfers = self.inner.transfers.write().await;
             let record = transfers

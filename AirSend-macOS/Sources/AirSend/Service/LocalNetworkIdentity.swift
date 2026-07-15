@@ -1,6 +1,19 @@
 import Foundation
+import SystemConfiguration
 
 enum LocalNetworkIdentity {
+    static func defaultIPv4Gateway() -> String? {
+        guard let value = SCDynamicStoreCopyValue(
+            nil,
+            "State:/Network/Global/IPv4" as CFString
+        ) as? [String: Any],
+        let router = value["Router"] as? String,
+        isPrivateIPv4(router) else {
+            return nil
+        }
+        return router
+    }
+
     static func primaryHardwareAddress() -> String? {
         guard let interfaceName = primaryIPv4InterfaceName() else {
             return nil
@@ -90,7 +103,10 @@ enum LocalNetworkIdentity {
             NI_NUMERICHOST
         )
         guard result == 0 else { return nil }
-        return String(cString: hostBuffer)
+        return String(
+            decoding: hostBuffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) },
+            as: UTF8.self
+        )
     }
 
     private static func isExcludedInterface(_ name: String) -> Bool {

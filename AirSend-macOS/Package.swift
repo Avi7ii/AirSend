@@ -21,12 +21,31 @@ let package = Package(
         .target(
             name: "AirSendDragHandoff"
         ),
+        .target(
+            name: "AirSendAutomationSupport"
+        ),
+        .target(
+            name: "AirSendConsoleSupport"
+        ),
+        .target(
+            name: "AirSendDiscoverySupport"
+        ),
+        .target(
+            name: "AirSendRuntimeCore",
+            linkerSettings: [
+                .linkedLibrary("sqlite3"),
+            ]
+        ),
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
         .executableTarget(
             name: "AirSend",
             dependencies: [
                 "AirSendDragHandoff",
+                "AirSendAutomationSupport",
+                "AirSendConsoleSupport",
+                "AirSendDiscoverySupport",
+                "AirSendRuntimeCore",
                 "AirSendUpdater",
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
@@ -39,6 +58,7 @@ let package = Package(
                 .define("ENABLE_SPARKLE"),
             ],
             linkerSettings: [
+                 .linkedFramework("SystemConfiguration"),
                  .unsafeFlags(["-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist", "-Xlinker", "Info.plist"])
             ]
         ),
@@ -55,6 +75,34 @@ let package = Package(
                 "AirSendDragHandoff",
             ],
             path: "Tests/AirSendDragHandoffSelfTests"
+        ),
+        .executableTarget(
+            name: "AirSendAutomationSupportSelfTests",
+            dependencies: [
+                "AirSendAutomationSupport",
+            ],
+            path: "Tests/AirSendAutomationSupportSelfTests"
+        ),
+        .executableTarget(
+            name: "AirSendConsoleSupportSelfTests",
+            dependencies: [
+                "AirSendConsoleSupport",
+            ],
+            path: "Tests/AirSendConsoleSupportSelfTests"
+        ),
+        .executableTarget(
+            name: "AirSendDiscoverySupportSelfTests",
+            dependencies: [
+                "AirSendDiscoverySupport",
+            ],
+            path: "Tests/AirSendDiscoverySupportSelfTests"
+        ),
+        .executableTarget(
+            name: "AirSendRuntimeCoreSelfTests",
+            dependencies: [
+                "AirSendRuntimeCore",
+            ],
+            path: "Tests/AirSendRuntimeCoreSelfTests"
         ),
     ]
 )

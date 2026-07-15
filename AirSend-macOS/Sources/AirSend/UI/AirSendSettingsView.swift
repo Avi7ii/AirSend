@@ -1,3 +1,6 @@
+import AppKit
+import QuartzCore
+import QuickLookThumbnailing
 import SwiftUI
 
 private enum AirSendSettingsCategory: String, CaseIterable, Identifiable {
@@ -55,13 +58,32 @@ private enum AirSendSettingsCategory: String, CaseIterable, Identifiable {
     }
 }
 
+private enum AirSendTransferHistoryFilter: String, CaseIterable, Identifiable {
+    case outgoing = "Sent"
+    case incoming = "Received"
+
+    var id: String { rawValue }
+    var direction: String { self == .outgoing ? "outgoing" : "incoming" }
+}
+
 struct AirSendSettingsView: View {
     private let topInset: CGFloat = 52
+    private let edgeBlurHeight: CGFloat = 54
+    private let topEdgeBlurHeight: CGFloat = 76
+    private let edgeBlurSidebarOffset: CGFloat = 236
+    private let edgeBlurMaxRadius: CGFloat = 5.5
+    private let edgeBlurFalloffExponent: CGFloat = 2.05
+    private let edgeBlurClearTailFraction: CGFloat = 0.18
+    private let edgeBlurTailAlphaFloor: CGFloat = 0.10
+    private var sidebarContentTopInset: CGFloat { topEdgeBlurHeight + 8 }
+    private var detailContentTopInset: CGFloat { topEdgeBlurHeight - 2 }
 
     @ObservedObject var store: AirSendSettingsStore
 
     @AppStorage("airsend.settings.selectedCategory")
     private var selectedCategoryRawValue = AirSendSettingsCategory.devices.rawValue
+
+    @State private var transferHistoryFilter = AirSendTransferHistoryFilter.outgoing
 
     private var snapshot: AirSendSettingsSnapshot {
         store.snapshot
@@ -75,18 +97,60 @@ struct AirSendSettingsView: View {
         HStack(spacing: 0) {
             sidebar
                 .frame(width: 210)
-                .background(Color.black.opacity(0.01))
+                .background(SettingsSidebarBackground())
+                .overlay(alignment: .trailing) {
+                    SettingsSidebarEdgeFade()
+                        .frame(width: 18)
+                        .allowsHitTesting(false)
+                }
 
-            Divider()
-                .overlay(.separator.opacity(0.55))
+            SettingsSidebarSeparator()
+                .frame(width: 26)
 
             detail
         }
-        .padding(.top, topInset)
         .background(WindowDragSurface())
         .controlSize(.small)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .frame(minWidth: 760, minHeight: 480)
+        .overlay(alignment: .top) {
+            edgeBlurOverlay(
+                direction: .blurredTopClearBottom,
+                height: topEdgeBlurHeight,
+                sidebarOffset: 0
+            )
+        }
+        .overlay(alignment: .bottom) {
+            edgeBlurOverlay(
+                direction: .blurredBottomClearTop,
+                height: edgeBlurHeight,
+                sidebarOffset: edgeBlurSidebarOffset
+            )
+        }
+    }
+
+    private func edgeBlurOverlay(
+        direction: SettingsVariableBlurDirection,
+        height: CGFloat,
+        sidebarOffset: CGFloat
+    ) -> some View {
+        HStack(spacing: 0) {
+            Color.clear
+                .frame(width: sidebarOffset)
+
+            SettingsVariableBlurView(
+                maxBlurRadius: edgeBlurMaxRadius,
+                direction: direction,
+                falloffExponent: edgeBlurFalloffExponent,
+                clearTailFraction: edgeBlurClearTailFraction,
+                tailAlphaFloor: edgeBlurTailAlphaFloor
+            )
+            .frame(maxWidth: .infinity)
+            .frame(height: height)
+            .allowsHitTesting(false)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: height)
     }
 
     private var sidebar: some View {
@@ -123,8 +187,8 @@ struct AirSendSettingsView: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 14)
-                .padding(.top, 14)
-                .padding(.bottom, 16)
+                .padding(.top, sidebarContentTopInset)
+                .padding(.bottom, 24)
                 .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .topLeading)
             }
             .scrollContentBackground(.hidden)
@@ -148,8 +212,8 @@ struct AirSendSettingsView: View {
                     pageContent(for: selectedCategory)
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 14)
-                .padding(.bottom, 20)
+                .padding(.top, detailContentTopInset)
+                .padding(.bottom, 34)
                 .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .topLeading)
                 .draggableBlankArea()
             }
@@ -183,12 +247,33 @@ struct AirSendSettingsView: View {
                             SettingsDeviceRow(
                                 device: device,
                                 isCompatibilityModeEnabled: snapshot.compatibilityModeEnabled,
-                                action: {
+                                selectAction: {
                                     store.actions.selectDeviceTarget(device.id)
                                 }
                             )
                         }
                     }
+                }
+
+                SettingsCard(title: "Manual Devices") {
+                    if snapshot.manualPeers.isEmpty {
+                        SettingsEmptyStateRow(
+                            title: "No manual devices",
+                            message: "Direct endpoints appear here."
+                        )
+                    } else {
+                        ForEach(snapshot.manualPeers) { peer in
+                            SettingsManualPeerRow(
+                                peer: peer,
+                                removeAction: { store.actions.removeManualPeer(peer.id) }
+                            )
+                        }
+                    }
+                    SettingsInlineCommandRow(
+                        title: "Add Manual Device",
+                        symbolName: "plus",
+                        action: { store.actions.addDeviceByIP() }
+                    )
                 }
 
                 ViewThatFits(in: .horizontal) {
@@ -206,27 +291,54 @@ struct AirSendSettingsView: View {
 
         case .transfers:
             VStack(alignment: .leading, spacing: 14) {
-                SettingsCard(title: "Recent Status") {
-                    if snapshot.recentActivities.isEmpty {
+                SettingsCard(title: "Active") {
+                    if snapshot.activeTransfers.isEmpty {
                         SettingsEmptyStateRow(
-                            title: "No recent transfers",
-                            message: "Sent and received activity will appear here."
+                            title: "No active transfers",
+                            message: "Current sends and receives appear here."
                         )
                     } else {
-                        SettingsActivityList(
-                            activities: snapshot.recentActivities,
-                            maximumVisibleRows: 4
-                        )
+                        ForEach(snapshot.activeTransfers) { transfer in
+                            SettingsTransferRow(
+                                transfer: transfer,
+                                cancelAction: { store.actions.cancelTransfer(transfer.id) },
+                                retryAction: {},
+                                revealAction: {},
+                                shareAction: {},
+                                deleteAction: {}
+                            )
+                        }
                     }
                 }
 
-                SettingsCard(title: "Target") {
-                    SettingsValueRow(
-                        title: "Current target",
-                        value: snapshot.selectedTargetTitle,
-                        detail: snapshot.selectedTargetSubtitle
+                SettingsCard(title: "History") {
+                    SettingsTransferHistoryHeader(
+                        filter: $transferHistoryFilter,
+                        clearAction: {
+                            store.actions.clearHistory(transferHistoryFilter.direction)
+                        }
                     )
-                    SettingsValueRow(title: "Transport", value: snapshot.protocolLabel)
+
+                    let history = transferHistoryFilter == .outgoing
+                        ? snapshot.sentHistory
+                        : snapshot.receivedHistory
+                    if history.isEmpty {
+                        SettingsEmptyStateRow(
+                            title: transferHistoryFilter == .outgoing ? "Nothing sent yet" : "Nothing received yet",
+                            message: "Completed and failed transfers are stored locally."
+                        )
+                    } else {
+                        ForEach(history) { transfer in
+                            SettingsTransferRow(
+                                transfer: transfer,
+                                cancelAction: {},
+                                retryAction: { store.actions.retryTransfer(transfer.id) },
+                                revealAction: { store.actions.revealTransfer(transfer.id) },
+                                shareAction: { store.actions.shareTransfer(transfer.id) },
+                                deleteAction: { store.actions.deleteHistory(transfer.id) }
+                            )
+                        }
+                    }
                 }
             }
 
@@ -243,16 +355,30 @@ struct AirSendSettingsView: View {
                     )
 
                     SettingsToggleRow(
-                        title: "Screenshots",
-                        detail: "Handle copied images separately from text sync.",
+                        title: "Clipboard images",
+                        detail: "Copied images to the selected target.",
                         isOn: Binding(
-                            get: { snapshot.autoScreenshotSyncEnabled },
-                            set: { store.actions.setAutoScreenshotSyncEnabled($0) }
+                            get: { snapshot.autoClipboardImageSyncEnabled },
+                            set: { store.actions.setAutoClipboardImageSyncEnabled($0) }
+                        )
+                    )
+
+                    SettingsToggleRow(
+                        title: "Screenshot files",
+                        detail: "New screenshots to one trusted target.",
+                        isOn: Binding(
+                            get: { snapshot.autoScreenshotFileSyncEnabled },
+                            set: { store.actions.setAutoScreenshotFileSyncEnabled($0) }
                         )
                     )
                 }
 
-                SettingsCard(title: "Destination") {
+                SettingsCard(title: "Screenshot Watcher") {
+                    SettingsValueRow(title: "Status", value: snapshot.screenshotWatcherStatus)
+                    SettingsValueRow(title: "Folder", value: snapshot.screenshotWatchFolder)
+                }
+
+                SettingsCard(title: "Target") {
                     SettingsValueRow(title: "Current target", value: snapshot.selectedTargetTitle, detail: snapshot.selectedTargetSubtitle)
                 }
 
@@ -260,42 +386,84 @@ struct AirSendSettingsView: View {
                     SettingsButtonRow(
                         primaryTitle: "Send Clipboard Now",
                         primaryAction: { store.actions.sendClipboardNow() },
-                        secondaryTitle: "Android Repository",
-                        secondaryAction: { store.actions.openAndroidRepository() }
+                        secondaryTitle: "Choose Files",
+                        secondaryAction: { store.actions.chooseFilesToSend() }
                     )
                 }
             }
 
         case .diagnostics:
             VStack(alignment: .leading, spacing: 14) {
-                SettingsCard(title: "Network Health") {
-                    SettingsHealthStatusRow(
-                        snapshot: snapshot,
-                        action: { store.actions.runDiagnostics() }
-                    )
+                SettingsCard(title: "Runtime Health") {
+                    ForEach(snapshot.diagnostics) { diagnostic in
+                        SettingsDiagnosticRow(diagnostic: diagnostic)
+                    }
                 }
 
-                SettingsCard(title: "Preflight") {
-                    SettingsValueRow(title: "Network check", value: snapshot.preflightSummary)
-                    SettingsValueRow(title: "Visible devices", value: "\(snapshot.nearbyDevices.count)")
-                    SettingsValueRow(title: "Remembered devices", value: "\(snapshot.rememberedDeviceCount)")
-                    SettingsValueRow(title: "Receiver fingerprint", value: snapshot.fingerprintSuffix)
+                SettingsCard(title: "Logs") {
+                    SettingsLogTailView(lines: snapshot.logTail)
                 }
 
-                SettingsCard(title: "Troubleshooting") {
+                SettingsCard(title: "Tools") {
                     SettingsButtonRow(
                         primaryTitle: "Run Diagnostics",
                         primaryAction: { store.actions.runDiagnostics() },
-                        secondaryTitle: "Rescan LAN",
-                        secondaryAction: { store.actions.rescan() },
-                        tertiaryTitle: "Clear Devices",
-                        tertiaryAction: { store.actions.clearDiscoveredDevices() }
+                        secondaryTitle: "Restart Runtime",
+                        secondaryAction: { store.actions.restartRuntime() },
+                        tertiaryTitle: "Export Logs",
+                        tertiaryAction: { store.actions.exportLogs() }
+                    )
+                    SettingsInlineCommandRow(
+                        title: "Clear Logs",
+                        symbolName: "trash",
+                        role: .destructive,
+                        action: { store.actions.clearLogs() }
                     )
                 }
             }
 
         case .settings:
             VStack(alignment: .leading, spacing: 14) {
+                SettingsCard(title: "Receiving") {
+                    SettingsReceivePolicyRow(
+                        selection: Binding(
+                            get: { snapshot.receivePolicy },
+                            set: { store.actions.setReceivePolicy($0) }
+                        )
+                    )
+                    SettingsDestinationRow(
+                        title: "Files",
+                        path: snapshot.downloadDestination,
+                        action: { store.actions.selectDownloadDestination() }
+                    )
+                    SettingsDestinationRow(
+                        title: "Images & Video",
+                        path: snapshot.mediaDestination,
+                        action: { store.actions.selectMediaDestination() }
+                    )
+                }
+
+                SettingsCard(title: "Trusted Devices") {
+                    if snapshot.trustedPeers.isEmpty {
+                        SettingsEmptyStateRow(
+                            title: "No trusted devices",
+                            message: "Trust is only needed for unattended receiving and automation."
+                        )
+                    } else {
+                        ForEach(snapshot.trustedPeers) { peer in
+                            SettingsTrustedPeerRow(
+                                peer: peer,
+                                revokeAction: { store.actions.revokeTrustedPeer(peer.id) }
+                            )
+                        }
+                    }
+                    SettingsInlineCommandRow(
+                        title: "Trust Device…",
+                        symbolName: "person.badge.shield.checkmark",
+                        action: { store.actions.trustKnownDevice() }
+                    )
+                }
+
                 SettingsCard(title: "Network") {
                     SettingsToggleRow(
                         title: "Compatibility Mode",
@@ -307,6 +475,13 @@ struct AirSendSettingsView: View {
                     )
 
                     SettingsValueRow(title: "Current transport", value: snapshot.protocolLabel)
+                }
+
+                SettingsCard(title: "History") {
+                    SettingsHistoryLimitRow(
+                        value: snapshot.historyLimitPerDirection,
+                        action: { store.actions.setHistoryLimitPerDirection($0) }
+                    )
                 }
 
                 SettingsCard(title: "Startup & Updates") {
@@ -343,6 +518,14 @@ struct AirSendSettingsView: View {
                         secondaryAction: { store.actions.clearDiscoveredDevices() }
                     )
                 }
+
+                SettingsCard(title: "Android") {
+                    SettingsInlineCommandRow(
+                        title: "Open AirSend Repository",
+                        symbolName: "arrow.up.right.square",
+                        action: { store.actions.openAndroidRepository() }
+                    )
+                }
             }
         }
     }
@@ -350,8 +533,9 @@ struct AirSendSettingsView: View {
     private var quickActionsCard: some View {
         SettingsCard(title: "Quick Actions") {
             SettingsButtonRow(
-                primaryTitle: "Rescan",
+                primaryTitle: snapshot.isDiscoveryRefreshing ? "Refreshing…" : "Refresh Devices",
                 primaryAction: { store.actions.rescan() },
+                primaryDisabled: snapshot.isDiscoveryRefreshing,
                 secondaryTitle: "Add by IP",
                 secondaryAction: { store.actions.addDeviceByIP() },
                 tertiaryTitle: "Broadcast",
@@ -387,6 +571,280 @@ private struct WindowDragSurface: View {
             .gesture(WindowDragGesture())
             .allowsWindowActivationEvents(true)
             .accessibilityHidden(true)
+    }
+}
+
+private struct SettingsSidebarSeparator: View {
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0.00),
+                            .init(color: .black.opacity(0.018), location: 0.18),
+                            .init(color: .clear, location: 0.46),
+                            .init(color: .white.opacity(0.012), location: 0.66),
+                            .init(color: .clear, location: 1.00),
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .blur(radius: 5)
+
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            .clear,
+                            .white.opacity(0.030),
+                            .white.opacity(0.014),
+                            .clear,
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 0.5)
+                .offset(x: -4)
+                .blur(radius: 1.0)
+        }
+        .padding(.vertical, 28)
+        .compositingGroup()
+    }
+}
+
+private struct SettingsSidebarBackground: View {
+    var body: some View {
+        LinearGradient(
+            colors: [
+                .white.opacity(0.010),
+                .clear,
+                .black.opacity(0.010),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+}
+
+private struct SettingsSidebarEdgeFade: View {
+    var body: some View {
+        LinearGradient(
+            colors: [
+                .clear,
+                .white.opacity(0.010),
+                .clear,
+            ],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+    }
+}
+
+private enum SettingsVariableBlurDirection {
+    case blurredTopClearBottom
+    case blurredBottomClearTop
+}
+
+private struct SettingsVariableBlurView: NSViewRepresentable {
+    let maxBlurRadius: CGFloat
+    let direction: SettingsVariableBlurDirection
+    let falloffExponent: CGFloat
+    let clearTailFraction: CGFloat
+    let tailAlphaFloor: CGFloat
+
+    func makeNSView(context: Context) -> SettingsVariableBlurNSView {
+        SettingsVariableBlurNSView(
+            maxBlurRadius: maxBlurRadius,
+            direction: direction,
+            falloffExponent: falloffExponent,
+            clearTailFraction: clearTailFraction,
+            tailAlphaFloor: tailAlphaFloor
+        )
+    }
+
+    func updateNSView(_ view: SettingsVariableBlurNSView, context: Context) {
+        view.update(
+            maxBlurRadius: maxBlurRadius,
+            direction: direction,
+            falloffExponent: falloffExponent,
+            clearTailFraction: clearTailFraction,
+            tailAlphaFloor: tailAlphaFloor
+        )
+    }
+}
+
+private final class SettingsVariableBlurNSView: NSVisualEffectView {
+    private var maxBlurRadius: CGFloat
+    private var direction: SettingsVariableBlurDirection
+    private var falloffExponent: CGFloat
+    private var clearTailFraction: CGFloat
+    private var tailAlphaFloor: CGFloat
+
+    init(
+        maxBlurRadius: CGFloat,
+        direction: SettingsVariableBlurDirection,
+        falloffExponent: CGFloat,
+        clearTailFraction: CGFloat,
+        tailAlphaFloor: CGFloat
+    ) {
+        self.maxBlurRadius = maxBlurRadius
+        self.direction = direction
+        self.falloffExponent = falloffExponent
+        self.clearTailFraction = clearTailFraction
+        self.tailAlphaFloor = tailAlphaFloor
+        super.init(frame: .zero)
+        wantsLayer = true
+        material = .hudWindow
+        blendingMode = .withinWindow
+        state = .active
+        isEmphasized = false
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func update(
+        maxBlurRadius: CGFloat,
+        direction: SettingsVariableBlurDirection,
+        falloffExponent: CGFloat,
+        clearTailFraction: CGFloat,
+        tailAlphaFloor: CGFloat
+    ) {
+        self.maxBlurRadius = maxBlurRadius
+        self.direction = direction
+        self.falloffExponent = falloffExponent
+        self.clearTailFraction = clearTailFraction
+        self.tailAlphaFloor = tailAlphaFloor
+        installVariableBlur()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        DispatchQueue.main.async { [weak self] in
+            self?.installVariableBlur()
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        installVariableBlur()
+    }
+
+    private func installVariableBlur() {
+        guard let materialLayer = layer?.sublayers?.first else {
+            layer?.opacity = 0
+            return
+        }
+        guard let backdropLayer = findBackdropLayer(in: materialLayer),
+              let variableBlur = makeVariableBlurFilter() else {
+            layer?.opacity = 0
+            return
+        }
+
+        layer?.opacity = 1
+        materialLayer.backgroundColor = nil
+        materialLayer.isOpaque = false
+        materialLayer.sublayers?.forEach { sublayer in
+            if sublayer !== backdropLayer {
+                sublayer.opacity = 0
+                sublayer.isHidden = true
+            }
+        }
+        backdropLayer.backgroundColor = nil
+        backdropLayer.isOpaque = false
+        backdropLayer.filters = [variableBlur]
+        backdropLayer.setValue(NSScreen.main?.backingScaleFactor ?? 2, forKey: "scale")
+    }
+
+    private func findBackdropLayer(in layer: CALayer) -> CALayer? {
+        if layer.name == "backdrop" || String(describing: type(of: layer)).contains("CABackdropLayer") {
+            return layer
+        }
+        for sublayer in layer.sublayers ?? [] {
+            if let match = findBackdropLayer(in: sublayer) {
+                return match
+            }
+        }
+        return nil
+    }
+
+    private func makeVariableBlurFilter() -> NSObject? {
+        let className = String("retliFAC".reversed())
+        let selectorName = String(":epyThtiWretlif".reversed())
+        guard let filterClass = NSClassFromString(className) as? NSObject.Type,
+              let filter = filterClass
+                .perform(NSSelectorFromString(selectorName), with: "variableBlur")?
+                .takeUnretainedValue() as? NSObject,
+              let maskImage = makeGradientImage() else {
+            return nil
+        }
+
+        filter.setValue(maxBlurRadius, forKey: "inputRadius")
+        filter.setValue(maskImage, forKey: "inputMaskImage")
+        filter.setValue(true, forKey: "inputNormalizeEdges")
+        return filter
+    }
+
+    private func makeGradientImage(width: Int = 32, height: Int = 256) -> CGImage? {
+        let exponent = max(1.4, min(falloffExponent, 5.0))
+        let clearTail = max(0, min(clearTailFraction, 0.42))
+        let tailFloor = max(0, min(tailAlphaFloor, 0.20))
+        let rowCount = max(height - 1, 1)
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+
+        for row in 0..<height {
+            let topToBottom = CGFloat(row) / CGFloat(rowCount)
+            let directionalAlpha: CGFloat
+            switch direction {
+            case .blurredBottomClearTop:
+                directionalAlpha = topToBottom
+            case .blurredTopClearBottom:
+                directionalAlpha = 1 - topToBottom
+            }
+            let mixedAlpha: CGFloat
+            if directionalAlpha <= clearTail {
+                let tailProgress = clearTail > 0 ? directionalAlpha / clearTail : 1
+                mixedAlpha = tailFloor * smoothStep(tailProgress)
+            } else {
+                let normalizedAlpha = (directionalAlpha - clearTail) / (1 - clearTail)
+                let curvedAlpha = pow(normalizedAlpha, exponent)
+                mixedAlpha = tailFloor + ((1 - tailFloor) * curvedAlpha)
+            }
+            let alpha = UInt8((mixedAlpha * 255).rounded())
+
+            for column in 0..<width {
+                let offset = ((row * width) + column) * 4
+                pixels[offset] = 0
+                pixels[offset + 1] = 0
+                pixels[offset + 2] = 0
+                pixels[offset + 3] = alpha
+            }
+        }
+
+        let data = Data(pixels) as CFData
+        guard let provider = CGDataProvider(data: data) else { return nil }
+        return CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true,
+            intent: .defaultIntent
+        )
+    }
+
+    private func smoothStep(_ value: CGFloat) -> CGFloat {
+        let x = max(0, min(value, 1))
+        return x * x * (3 - (2 * x))
     }
 }
 
@@ -470,15 +928,12 @@ private struct SettingsHealthStatusRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(snapshot.healthTone.tintColor.opacity(0.14))
-                    .frame(width: 42, height: 42)
-
-                Image(systemName: snapshot.healthTone.statusSymbolName)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(snapshot.healthTone.tintColor)
-            }
+            SettingsGlowIcon(
+                symbolName: snapshot.healthTone.connectionSymbolName,
+                tint: snapshot.healthTone.tintColor,
+                size: 40,
+                cornerRadius: 13
+            )
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -529,7 +984,7 @@ private struct SettingsConnectionOverviewRow: View {
             }
 
             HStack(spacing: 8) {
-                SettingsMetricChip(title: "Visible", value: "\(snapshot.nearbyDevices.count)")
+                SettingsMetricChip(title: "Visible", value: "\(snapshot.discoveredDeviceCount)")
                 SettingsMetricChip(title: "Remembered", value: "\(snapshot.rememberedDeviceCount)")
                 SettingsMetricChip(title: "Transport", value: snapshot.protocolLabel)
             }
@@ -608,10 +1063,16 @@ private struct SettingsGlowIcon: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(.black.opacity(0.14))
-
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(tint.opacity(0.018))
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            tint.opacity(0.15),
+                            tint.opacity(0.085),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
 
             Circle()
                 .fill(
@@ -673,15 +1134,12 @@ private struct SettingsCurrentTargetRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color(nsColor: .systemBlue).opacity(0.14))
-                        .frame(width: 40, height: 40)
-
-                    Image(systemName: snapshot.selectedTargetIsBroadcast ? "square.grid.2x2.fill" : "dot.radiowaves.left.and.right")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Color(nsColor: .systemBlue))
-                }
+                SettingsGlowIcon(
+                    symbolName: snapshot.selectedTargetIsBroadcast ? "square.grid.2x2.fill" : "dot.radiowaves.left.and.right",
+                    tint: Color(nsColor: .systemBlue),
+                    size: 40,
+                    cornerRadius: 13
+                )
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
@@ -718,10 +1176,19 @@ private struct SettingsDevicesSummaryRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            Text(summaryText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if snapshot.isDiscoveryRefreshing {
+                ProgressView()
+                    .controlSize(.small)
+                Text(snapshot.discoveryRefreshSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(summaryText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             Spacer(minLength: 8)
 
@@ -738,7 +1205,7 @@ private struct SettingsDevicesSummaryRow: View {
     }
 
     private var summaryText: String {
-        let count = snapshot.nearbyDevices.count
+        let count = snapshot.discoveredDeviceCount
         if count == 0 {
             return "Waiting for other AirSend devices on this LAN."
         }
@@ -752,80 +1219,74 @@ private struct SettingsDevicesSummaryRow: View {
 private struct SettingsDeviceRow: View {
     let device: AirSendSettingsDeviceSummary
     let isCompatibilityModeEnabled: Bool
-    let action: () -> Void
+    let selectAction: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .fill(Color(nsColor: .systemBlue).opacity(device.isSelected ? 0.20 : 0.12))
-                        .frame(width: 40, height: 40)
+        HStack(alignment: .top, spacing: 12) {
+            Button(action: selectAction) {
+                HStack(alignment: .top, spacing: 12) {
+                    SettingsGlowIcon(
+                        symbolName: iconName,
+                        tint: device.isOnline ? Color(nsColor: .systemBlue) : Color(nsColor: .systemGray),
+                        size: 40,
+                        cornerRadius: 13
+                    )
 
-                    Image(systemName: iconName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Color(nsColor: .systemBlue))
-                }
-
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 6) {
-                        Text(device.title)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.primary)
-
-                        if device.isSelected {
-                            SettingsBadge(title: "Selected", tone: .accent)
-                        }
-                    }
-
-                    Text("\(device.deviceType) • \(device.model)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-
-                    ViewThatFits(in: .horizontal) {
+                    VStack(alignment: .leading, spacing: 5) {
                         HStack(spacing: 6) {
-                            metadataChips
+                            Text(device.title)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+
+                            if device.isSelected {
+                                SettingsBadge(title: "Selected", tone: .accent)
+                            }
+                            if device.isManual {
+                                SettingsBadge(title: "Manual", tone: .neutral)
+                            }
                         }
 
-                        VStack(alignment: .leading, spacing: 6) {
-                            metadataChips
+                        Text("\(device.deviceType) • \(device.model)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 6) { metadataChips }
+                            VStack(alignment: .leading, spacing: 6) { metadataChips }
                         }
                     }
+
+                    Spacer(minLength: 8)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .trailing, spacing: 7) {
+                SettingsBadge(title: device.statusLabel, tone: .neutral)
+
+                if device.isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color(nsColor: .systemBlue))
+                        .frame(width: 18, height: 18)
+                        .accessibilityLabel("Selected target")
                 }
 
-                Spacer(minLength: 10)
-
-                VStack(alignment: .trailing, spacing: 6) {
-                    SettingsBadge(title: device.statusLabel, tone: .neutral)
-
-                    if device.peerCount > 1 {
-                        SettingsBadge(title: "\(device.peerCount) peers", tone: .neutral)
-                    }
-
-                    Text("ID \(device.fingerprintSuffix)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-
-                    Text(verbatim: "Port \(device.port)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                Text("ID \(device.fingerprintSuffix)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(device.isSelected ? .white.opacity(0.06) : .clear)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(device.isSelected ? .white.opacity(0.08) : .clear, lineWidth: 1)
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .frame(width: 92, alignment: .trailing)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(device.isSelected ? .white.opacity(0.06) : .clear)
+        }
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(.separator.opacity(0.22))
@@ -865,20 +1326,468 @@ private struct SettingsDeviceRow: View {
     }
 }
 
+private struct SettingsManualPeerRow: View {
+    let peer: AirSendManualPeerSummary
+    let removeAction: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            SettingsGlowIcon(
+                symbolName: "point.3.connected.trianglepath.dotted",
+                tint: Color(nsColor: .systemTeal),
+                size: 34,
+                cornerRadius: 11
+            )
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(peer.alias)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(peer.endpoint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            if let fingerprint = peer.fingerprintSuffix {
+                SettingsMetaChip(title: "ID \(fingerprint)")
+            } else {
+                SettingsBadge(title: "HTTP", tone: .neutral)
+            }
+
+            Button(role: .destructive, action: removeAction) {
+                Image(systemName: "trash")
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .help("Remove manual device")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(.separator.opacity(0.24)).frame(height: 1)
+        }
+    }
+}
+
+private struct SettingsTrustedPeerRow: View {
+    let peer: AirSendTrustedPeerSummary
+    let revokeAction: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            SettingsGlowIcon(
+                symbolName: "checkmark.shield.fill",
+                tint: peer.isOnline ? Color(nsColor: .systemGreen) : Color(nsColor: .systemGray),
+                size: 34,
+                cornerRadius: 11
+            )
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(peer.title)
+                    .font(.system(size: 13, weight: .semibold))
+                Text("ID \(peer.fingerprintSuffix)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            SettingsBadge(title: peer.isOnline ? "Online" : "Offline", tone: .neutral)
+
+            Button("Revoke", role: .destructive, action: revokeAction)
+                .buttonStyle(.bordered)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(.separator.opacity(0.24)).frame(height: 1)
+        }
+    }
+}
+
+private struct SettingsTransferHistoryHeader: View {
+    @Binding var filter: AirSendTransferHistoryFilter
+    let clearAction: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Picker("Direction", selection: $filter) {
+                ForEach(AirSendTransferHistoryFilter.allCases) { item in
+                    Text(item.rawValue).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 220)
+
+            Spacer(minLength: 8)
+
+            Button(role: .destructive, action: clearAction) {
+                Image(systemName: "trash")
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.borderless)
+            .help("Clear \(filter.rawValue.lowercased()) history")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(.separator.opacity(0.28)).frame(height: 1)
+        }
+    }
+}
+
+private struct SettingsTransferRow: View {
+    let transfer: AirSendTransferSummary
+    let cancelAction: () -> Void
+    let retryAction: () -> Void
+    let revealAction: () -> Void
+    let shareAction: () -> Void
+    let deleteAction: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            SettingsTransferPreview(
+                path: transfer.previewPath,
+                fallbackSymbol: transfer.direction == "incoming" ? "arrow.down" : "arrow.up",
+                tint: directionTint
+            )
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 7) {
+                    Text(transfer.fileTitle)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                    SettingsTransferStatusChip(status: transfer.status)
+                }
+
+                Text("\(transfer.direction == "incoming" ? "From" : "To") \(transfer.peerTitle) · \(transfer.timeLabel)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                if transfer.canCancel {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ProgressView(value: transfer.progress)
+                            .progressViewStyle(.linear)
+                        Text(transfer.byteProgress)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .frame(height: 25, alignment: .top)
+                } else if let failure = transfer.failureMessage, !failure.isEmpty {
+                    Text(failure)
+                        .font(.caption2)
+                        .foregroundStyle(Color(nsColor: .systemOrange))
+                        .lineLimit(2)
+                } else if let preview = transfer.previewText, !preview.isEmpty {
+                    Text(preview)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                } else {
+                    Text(transfer.byteProgress)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            HStack(spacing: 7) {
+                if transfer.canCancel {
+                    SettingsIconCommand(symbol: "xmark", help: "Cancel transfer", role: .destructive, action: cancelAction)
+                }
+                if transfer.canRetry {
+                    SettingsIconCommand(symbol: "arrow.clockwise", help: "Retry transfer", action: retryAction)
+                }
+                if transfer.hasAvailableFiles {
+                    SettingsIconCommand(symbol: "folder", help: "Show in Finder", action: revealAction)
+                    SettingsIconCommand(symbol: "square.and.arrow.up", help: "Share", action: shareAction)
+                }
+                if !transfer.canCancel {
+                    SettingsIconCommand(symbol: "trash", help: "Delete history item", role: .destructive, action: deleteAction)
+                }
+            }
+            .frame(minWidth: 30, alignment: .trailing)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(.separator.opacity(0.24)).frame(height: 1)
+        }
+    }
+
+    private var directionTint: Color {
+        transfer.direction == "incoming" ? Color(nsColor: .systemGreen) : Color(nsColor: .systemBlue)
+    }
+}
+
+private struct SettingsTransferPreview: View {
+    let path: String?
+    let fallbackSymbol: String
+    let tint: Color
+
+    @State private var thumbnail: NSImage?
+
+    var body: some View {
+        Group {
+            if let thumbnail {
+                Image(nsImage: thumbnail)
+                    .resizable()
+                    .scaledToFill()
+                    .accessibilityLabel("File preview")
+            } else {
+                SettingsGlowIcon(
+                    symbolName: fallbackSymbol,
+                    tint: tint,
+                    size: 38,
+                    cornerRadius: 8
+                )
+            }
+        }
+        .frame(width: 38, height: 38)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .task(id: path) {
+            thumbnail = nil
+            guard let path, FileManager.default.fileExists(atPath: path) else { return }
+            let request = QLThumbnailGenerator.Request(
+                fileAt: URL(fileURLWithPath: path),
+                size: NSSize(width: 76, height: 76),
+                scale: NSScreen.main?.backingScaleFactor ?? 2,
+                representationTypes: .thumbnail
+            )
+            thumbnail = try? await QLThumbnailGenerator.shared
+                .generateBestRepresentation(for: request)
+                .nsImage
+        }
+    }
+}
+
+private struct SettingsTransferStatusChip: View {
+    let status: String
+
+    var body: some View {
+        Text(label)
+            .font(.caption2)
+            .foregroundStyle(tint)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(tint.opacity(0.12)))
+    }
+
+    private var label: String {
+        switch status {
+        case "awaitingAcceptance": return "Waiting"
+        case "preparing": return "Preparing"
+        case "transferring": return "Transferring"
+        case "completed": return "Completed"
+        case "failed": return "Failed"
+        case "cancelled": return "Cancelled"
+        case "declined": return "Declined"
+        default: return status.capitalized
+        }
+    }
+
+    private var tint: Color {
+        switch status {
+        case "completed": return Color(nsColor: .systemGreen)
+        case "failed", "declined": return Color(nsColor: .systemOrange)
+        case "cancelled": return Color(nsColor: .secondaryLabelColor)
+        default: return Color(nsColor: .systemBlue)
+        }
+    }
+}
+
+private struct SettingsIconCommand: View {
+    let symbol: String
+    let help: String
+    var role: ButtonRole? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(role: role, action: action) {
+            Image(systemName: symbol)
+                .frame(width: 18, height: 18)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(role == .destructive ? Color(nsColor: .systemRed) : .secondary)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
+private struct SettingsDiagnosticRow: View {
+    let diagnostic: AirSendDiagnosticSummary
+
+    var body: some View {
+        HStack(spacing: 12) {
+            SettingsGlowIcon(
+                symbolName: diagnostic.symbolName,
+                tint: diagnostic.tone.tintColor,
+                size: 34,
+                cornerRadius: 11
+            )
+            VStack(alignment: .leading, spacing: 3) {
+                Text(diagnostic.title)
+                    .font(.system(size: 13, weight: .medium))
+                if let detail = diagnostic.detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 10)
+            Text(diagnostic.value)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(diagnostic.tone.tintColor)
+                .multilineTextAlignment(.trailing)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(.separator.opacity(0.24)).frame(height: 1)
+        }
+    }
+}
+
+private struct SettingsLogTailView: View {
+    let lines: [String]
+
+    var body: some View {
+        if lines.isEmpty {
+            SettingsEmptyStateRow(title: "No log entries", message: "Run diagnostics to refresh the log view.")
+        } else {
+            ScrollView(.vertical) {
+                Text(lines.joined(separator: "\n"))
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            }
+            .frame(minHeight: 150, maxHeight: 230)
+            .background(.black.opacity(0.12))
+        }
+    }
+}
+
+private struct SettingsReceivePolicyRow: View {
+    @Binding var selection: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("Receive requests")
+            Spacer(minLength: 12)
+            Picker("Receive requests", selection: $selection) {
+                Text("Ask").tag("ask")
+                Text("Trusted Only").tag("trusted_only")
+                Text("Off").tag("off")
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 260)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(.separator.opacity(0.28)).frame(height: 1)
+        }
+    }
+}
+
+private struct SettingsDestinationRow: View {
+    let title: String
+    let path: String
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                Text(path)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 12)
+            Button(action: action) {
+                Image(systemName: "folder")
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.bordered)
+            .help("Choose folder")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(.separator.opacity(0.28)).frame(height: 1)
+        }
+    }
+}
+
+private struct SettingsHistoryLimitRow: View {
+    let value: Int
+    let action: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("Items per direction")
+            Spacer(minLength: 12)
+            Picker("Items per direction", selection: Binding(
+                get: { value },
+                set: { newValue in action(newValue) }
+            )) {
+                ForEach([10, 30, 100, 300], id: \.self) { limit in
+                    Text("\(limit)").tag(limit)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 110)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+}
+
+private struct SettingsInlineCommandRow: View {
+    let title: String
+    let symbolName: String
+    var role: ButtonRole? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(role: role, action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: symbolName)
+                    .frame(width: 18, height: 18)
+                Text(title)
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(role == .destructive ? Color(nsColor: .systemRed) : .primary)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+}
+
 private struct SettingsActivityRow: View {
     let activity: AirSendActivitySummary
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(activity.tone.tintColor.opacity(0.12))
-                    .frame(width: 28, height: 28)
-
-                Image(systemName: activity.symbolName)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(activity.tone.tintColor)
-            }
+            SettingsGlowIcon(
+                symbolName: activity.symbolName,
+                tint: activity.tone.tintColor,
+                size: 28,
+                cornerRadius: 9
+            )
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(activity.title)
@@ -1112,6 +2021,7 @@ private struct SettingsValueRow: View {
 private struct SettingsButtonRow: View {
     let primaryTitle: String
     let primaryAction: () -> Void
+    var primaryDisabled = false
     var secondaryTitle: String? = nil
     var secondaryAction: (() -> Void)? = nil
     var tertiaryTitle: String? = nil
@@ -1132,6 +2042,7 @@ private struct SettingsButtonRow: View {
         HStack(spacing: 8) {
             Button(primaryTitle, action: primaryAction)
                 .buttonStyle(.borderedProminent)
+                .disabled(primaryDisabled)
 
             if let secondaryTitle, let secondaryAction {
                 Button(secondaryTitle, action: secondaryAction)

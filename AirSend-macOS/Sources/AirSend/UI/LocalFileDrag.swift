@@ -1,4 +1,5 @@
 import Cocoa
+import UniformTypeIdentifiers
 
 enum LocalFileDrag {
     static let legacyFilenamesType = NSPasteboard.PasteboardType("NSFilenamesPboardType")
@@ -39,6 +40,32 @@ enum LocalFileDrag {
         let typeNames: Set<String>
         let hasLegacyFinderFileList: Bool
         let hasSuspiciousRichContentMarkers: Bool
+    }
+
+    struct MetadataEvidence {
+        let hasFileRelatedType: Bool
+        let hasLegacyFinderFileList: Bool
+        let hasSuspiciousRichContentMarkers: Bool
+
+        var canBeLocalFileDrag: Bool {
+            hasFileRelatedType && (hasLegacyFinderFileList || !hasSuspiciousRichContentMarkers)
+        }
+    }
+
+    static func metadataEvidence(from pasteboard: NSPasteboard) -> MetadataEvidence {
+        let typeNames = pasteboardTypeNames(from: pasteboard)
+        let hasLegacyFinderFileList = typeNames.contains(legacyFilenamesType.rawValue)
+            || (pasteboard.propertyList(forType: legacyFilenamesType) as? [String])?.isEmpty == false
+        let hasFileRelatedType = typeNames.contains(NSPasteboard.PasteboardType.fileURL.rawValue)
+            || hasLegacyFinderFileList
+            || typeNames.contains { typeName in
+                UTType(typeName)?.conforms(to: .fileURL) == true
+            }
+        return MetadataEvidence(
+            hasFileRelatedType: hasFileRelatedType,
+            hasLegacyFinderFileList: hasLegacyFinderFileList,
+            hasSuspiciousRichContentMarkers: !typeNames.isDisjoint(with: suspiciousRichContentTypes)
+        )
     }
 
     static func validLocalFileURLs(from pasteboard: NSPasteboard) -> [URL] {

@@ -119,17 +119,18 @@ final class ScreenshotWatcher {
 
     private func verifyStableFile(_ url: URL) {
         let firstSize = fileSize(url)
-        Task.detached(priority: .utility) { [weak self] in
+        Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled else { return }
-            let secondSize = Self.fileSizeAtPath(url.path)
-            await MainActor.run {
-                guard let self,
-                      firstSize > 0,
-                      firstSize == secondSize,
-                      FileManager.default.fileExists(atPath: url.path) else { return }
-                self.onScreenshot?(url)
-            }
+            let path = url.path
+            let secondSize = await Task.detached(priority: .utility) {
+                Self.fileSizeAtPath(path)
+            }.value
+            guard let self,
+                  firstSize > 0,
+                  firstSize == secondSize,
+                  FileManager.default.fileExists(atPath: path) else { return }
+            self.onScreenshot?(url)
         }
     }
 

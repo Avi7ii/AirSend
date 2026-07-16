@@ -9,6 +9,7 @@
 .build/
 Packages/
 Package.resolved
+!AirSend-macOS/Package.resolved
 .swiftpm/
 
 # Xcode (in case you open it in Xcode)

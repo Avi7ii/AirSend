@@ -3,6 +3,9 @@ import ApplicationServices
 import Foundation
 
 final class DockAccessibilityDragMonitor: @unchecked Sendable {
+    private static let dragBeganNotification = "AXDraggingSourceDragBegan"
+    private static let dragEndedNotification = "AXDraggingSourceDragEnded"
+
     enum Event: Sendable {
         case began([URL])
         case ended
@@ -41,8 +44,8 @@ final class DockAccessibilityDragMonitor: @unchecked Sendable {
         let applicationElement = AXUIElementCreateApplication(dock.processIdentifier)
         let notifications = [
             kAXSelectedChildrenChangedNotification,
-            NSAccessibility.Notification.NSAccessibilityDraggingSourceDragBegan.rawValue,
-            NSAccessibility.Notification.NSAccessibilityDraggingSourceDragEnded.rawValue,
+            Self.dragBeganNotification,
+            Self.dragEndedNotification,
         ]
         let userInfo = Unmanaged.passUnretained(self).toOpaque()
         for notification in notifications {
@@ -88,7 +91,7 @@ final class DockAccessibilityDragMonitor: @unchecked Sendable {
             return
         }
 
-        if notification == NSAccessibility.Notification.NSAccessibilityDraggingSourceDragBegan.rawValue {
+        if notification == Self.dragBeganNotification {
             let urls = freshCandidateURLs()
             Task { @MainActor [weak self] in
                 self?.handler?(.began(urls))
@@ -96,7 +99,7 @@ final class DockAccessibilityDragMonitor: @unchecked Sendable {
             return
         }
 
-        if notification == NSAccessibility.Notification.NSAccessibilityDraggingSourceDragEnded.rawValue {
+        if notification == Self.dragEndedNotification {
             Task { @MainActor [weak self] in
                 self?.handler?(.ended)
             }

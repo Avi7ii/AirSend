@@ -225,7 +225,7 @@ impl TransferService {
             .values()
             .cloned()
             .collect::<Vec<_>>();
-        records.sort_by(|left, right| right.started_at_ms.cmp(&left.started_at_ms));
+        records.sort_by_key(|record| std::cmp::Reverse(record.started_at_ms));
         records
     }
 
@@ -524,20 +524,15 @@ impl TransferService {
                         file.transferred_bytes = file.size;
                         file.status = FileTransferStatus::Completed;
                     }
-                    TransferStatus::Cancelled => {
-                        if !matches!(file.status, FileTransferStatus::Completed) {
-                            file.status = FileTransferStatus::Cancelled;
-                        }
+                    TransferStatus::Cancelled | TransferStatus::Declined
+                        if !matches!(file.status, FileTransferStatus::Completed) =>
+                    {
+                        file.status = FileTransferStatus::Cancelled;
                     }
-                    TransferStatus::Declined => {
-                        if !matches!(file.status, FileTransferStatus::Completed) {
-                            file.status = FileTransferStatus::Cancelled;
-                        }
-                    }
-                    TransferStatus::Failed => {
-                        if !matches!(file.status, FileTransferStatus::Completed) {
-                            file.status = FileTransferStatus::Failed;
-                        }
+                    TransferStatus::Failed
+                        if !matches!(file.status, FileTransferStatus::Completed) =>
+                    {
+                        file.status = FileTransferStatus::Failed;
                     }
                     _ => {}
                 }

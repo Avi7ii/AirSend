@@ -564,7 +564,7 @@ actor HTTPTransferServer {
                 )
                 response.shouldKeepAlive = shouldKeepAlive
                 
-                connection.send(content: response.serialize(), completion: .contentProcessed({ error in
+                connection.send(content: response.serialize(), completion: .contentProcessed({ [self] error in
                     if shouldKeepAlive && error == nil {
                         Task { [weak self] in await self?.processIncomingRequest(connection) }
                     } else {
@@ -619,7 +619,7 @@ actor HTTPTransferServer {
             response.shouldKeepAlive = shouldKeepAlive
 
             // 5. Send Response
-            connection.send(content: response.serialize(), completion: .contentProcessed({ error in
+            connection.send(content: response.serialize(), completion: .contentProcessed({ [self] error in
                 if let error = error {
                     logTransfer("❌ Response send error: \(error)")
                     connection.cancel()

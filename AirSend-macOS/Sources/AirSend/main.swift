@@ -1270,6 +1270,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     // Drag Handoff
     private var globalDragEventMonitor: Any?
     private var localDragEventMonitor: Any?
+    private let dockAccessibilityDragMonitor = DockAccessibilityDragMonitor()
     private var dragEvaluationWorkItem: DispatchWorkItem?
     private var lastDragEvaluationUptime: TimeInterval = 0
     private var dragReleaseMonitorTimer: Timer?
@@ -1284,6 +1285,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private var currentDragAllowsFallbackRecovery = false
     private var dragPreviewActivationPoint: NSPoint?
     private var hasEnteredCompactDropTarget = false
+    private var isSemanticDockDragActive = false
+    private var semanticDockDragURLs: [URL] = []
     private var dragStartQuartzLocation: CGPoint?
     private var initialDragWindowFrames: [CGWindowID: CGRect] = [:]
     private var hasCapturedInitialDragWindowFrames = false
@@ -1306,6 +1309,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         guard globalDragEventMonitor == nil, localDragEventMonitor == nil else { return }
         lastIdleDragPasteboardChangeCount = NSPasteboard(name: .drag).changeCount
 
+        let dockMonitorStarted = dockAccessibilityDragMonitor.start { [weak self] event in
+            self?.handleSemanticDockDragEvent(event)
+        }
+        if !dockMonitorStarted {
+            FileLogger.log("ℹ️ [DragHandoff] Dock AX drag events unavailable; native drag handling remains active.")
+        }
+
         globalDragEventMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
         ) { [weak self] event in
@@ -1325,6 +1335,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     }
 
     private func stopDragProximityMonitoring() {
+        dockAccessibilityDragMonitor.stop()
         dragEvaluationWorkItem?.cancel()
         dragEvaluationWorkItem = nil
         dragPreviewExitWorkItem?.cancel()
@@ -1359,6 +1370,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             resetObservedDragGesture()
         default:
             break
+        }
+    }
+
+    private func handleSemanticDockDragEvent(_ event: DockAccessibilityDragMonitor.Event) {
+        switch event {
+        case let .began(urls):
+            let validURLs = filterValidLocalDropURLs(urls)
+            guard !validURLs.isEmpty else { return }
+            if let activeDragSessionID,
+               resolvedDragSessionID == activeDragSessionID {
+                clearTransientDragState()
+            }
+            guard activeDragSessionID == nil else { return }
+            isSemanticDockDragActive = true
+            semanticDockDragURLs = validURLs
+            resetObservedDragGesture(startingAt: NSEvent.mouseLocation)
+            FileLogger.log("📌 [DragHandoff] Dock AX drag armed with \(validURLs.count) verified file(s): \(validURLs.map(\.lastPathComponent).joined(separator: ", "))")
+        case .ended:
+            guard isSemanticDockDragActive else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+                guard let self else { return }
+                self.handleDragReleaseIfNeeded(trigger: "dock-ax-drag-ended")
+                self.isSemanticDockDragActive = false
+                self.semanticDockDragURLs = []
+            }
         }
     }
 
@@ -1558,9 +1594,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
 
         guard !dragGestureRejected else { return }
-        guard hasFreshDragPasteboardPayload else { return }
-        let metadata = LocalFileDrag.metadataEvidence(from: dragPasteboard)
-        guard metadata.canBeLocalFileDrag else { return }
+        let semanticURLs = isSemanticDockDragActive
+            ? filterValidLocalDropURLs(semanticDockDragURLs)
+            : []
+        let hasSemanticDockEvidence = !semanticURLs.isEmpty
+        let hasNativeFileDragEvidence = hasFreshDragPasteboardPayload
+            && LocalFileDrag.metadataEvidence(from: dragPasteboard).canBeLocalFileDrag
+        guard hasNativeFileDragEvidence || hasSemanticDockEvidence else { return }
         captureInitialDragWindowFramesIfNeeded()
 
         guard let triggerFrame = statusBarActivationFrame() else { return }
@@ -1568,7 +1608,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         guard isWithinActivationBand else { return }
 
         let inspection = LocalFileDrag.inspectLocalFileDrag(from: dragPasteboard)
-        let urls = inspection.looksLikeStrictLocalFileDrag ? inspection.urls : []
+        let nativeURLs = inspection.looksLikeStrictLocalFileDrag ? inspection.urls : []
+        let urls = hasSemanticDockEvidence ? semanticURLs : nativeURLs
 
         if currentGestureMovedWindow() {
             dragGestureRejected = true
@@ -1581,19 +1622,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             location: CGPoint(x: mouseLocation.x, y: mouseLocation.y),
             hasRecognizedPayload: true,
             hasResolvedFileURLs: !urls.isEmpty,
-            hasFreshPayloadEvidence: hasFreshDragPasteboardPayload,
+            hasFreshPayloadEvidence: hasFreshDragPasteboardPayload || hasSemanticDockEvidence,
             isWithinActivationBand: isWithinActivationBand
         )
 
         guard activationDecision.shouldActivate else { return }
 
         let idlePasteboardDescription = lastIdleDragPasteboardChangeCount.map(String.init) ?? "none"
-        let payloadState = urls.isEmpty ? "candidate metadata; URLs pending" : "\(urls.count) verified file(s)"
+        let payloadSource = hasSemanticDockEvidence ? "Dock AX event" : "native pasteboard"
+        let payloadState = urls.isEmpty ? "candidate metadata; URLs pending" : "\(urls.count) verified file(s) via \(payloadSource)"
         FileLogger.log("🧲 [DragProximity] Status-bar activation band triggered with \(payloadState). pasteboard=\(dragPasteboard.changeCount) idle=\(idlePasteboardDescription) triggerFrame=\(triggerFrame.debugDescription)")
         beginDropZonePreview(
             with: urls,
             isFileDragCandidate: true,
-            allowFallbackRecovery: activationDecision.allowsFallbackRecovery
+            allowFallbackRecovery: hasSemanticDockEvidence || activationDecision.allowsFallbackRecovery,
+            usesReleaseWatchdog: !hasSemanticDockEvidence
         )
     }
 
@@ -1796,7 +1839,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         with urls: [URL],
         isFileDragCandidate: Bool = false,
         verifiedByAppKit: Bool = false,
-        allowFallbackRecovery: Bool = false
+        allowFallbackRecovery: Bool = false,
+        usesReleaseWatchdog: Bool = true
     ) {
         guard !urls.isEmpty || isFileDragCandidate else { return }
         if let activeDragSessionID,
@@ -1817,7 +1861,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         dropZoneWindow.prepareForDragPreview()
         beginDragSession(with: urls)
         currentDragAllowsFallbackRecovery = !urls.isEmpty && (verifiedByAppKit || allowFallbackRecovery)
-        startDragReleaseMonitoring()
+        if usesReleaseWatchdog {
+            startDragReleaseMonitoring()
+        }
         dropZoneWindow.prewarmForDrag(under: statusItem)
         dropZoneWindow.setPreviewDragActive(true)
         dropZoneWindow.setPreviewHoverActive(false)

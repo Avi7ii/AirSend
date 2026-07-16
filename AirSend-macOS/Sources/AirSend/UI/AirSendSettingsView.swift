@@ -14,6 +14,12 @@ private enum AirSendSettingsMetrics {
     static let transferViewportMaximumHeight: CGFloat = 320
     static let transferViewportMinimumCap: CGFloat = 240
     static let transferEstimatedRowHeight: CGFloat = 78
+    static let transferRowEntranceOffset: CGFloat = 6
+    static let transferRowEntranceMaximumBlur: CGFloat = 3
+    static let transferRowEntranceDuration: TimeInterval = 0.68
+    static let transferRowEntranceStaggerMilliseconds = 50
+    static let transferRowEntranceMaximumStaggerIndex = 3
+    static let transferRowEntranceInitialOpacity = 0.18
     static let actionCornerRadius: CGFloat = 7
     static let pageEntranceOffset: CGFloat = 14
     static let pageEntranceDuration: TimeInterval = 0.78
@@ -713,7 +719,10 @@ struct AirSendSettingsView: View {
                     ScrollView(.vertical) {
                         SettingsEntranceGate(
                             trigger: trigger,
-                            spacing: AirSendSettingsMetrics.transferRowSpacing
+                            spacing: AirSendSettingsMetrics.transferRowSpacing,
+                            activationDelay: TimeInterval(
+                                startOrder * AirSendSettingsMetrics.pageEntranceStaggerMilliseconds
+                            ) / 1_000
                         ) {
                             ForEach(
                                 Array(selectedTransferActivity.enumerated()),
@@ -735,9 +744,9 @@ struct AirSendSettingsView: View {
                                     shareAction: { store.actions.shareTransfer(transfer.id) },
                                     deleteAction: { store.actions.deleteHistory(transfer.id) }
                                 )
-                                .settingsPageEntrance(
+                                .settingsTransferRowEntrance(
                                     trigger: "\(trigger)|row=transfer-\(transfer.id)",
-                                    order: startOrder + index
+                                    index: index
                                 )
                                 .id(transfer.id)
                             }
@@ -1448,6 +1457,11 @@ private extension View {
         SettingsCardSurfaceEntranceHost(order: order, content: self)
             .id("settings-card-surface|\(trigger)|\(order)")
     }
+
+    func settingsTransferRowEntrance(trigger: String, index: Int) -> some View {
+        SettingsTransferRowEntranceHost(index: index, content: self)
+            .id("settings-transfer-row|\(trigger)")
+    }
 }
 
 private struct SettingsPageEntranceHost<Content: View>: View {
@@ -1586,9 +1600,91 @@ private struct SettingsCardSurfaceEntranceHost<Content: View>: View {
     }
 }
 
+private struct SettingsTransferRowEntranceHost<Content: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let index: Int
+    let content: Content
+
+    @AirSendState private var focusProgress: CGFloat = 0
+    @AirSendState private var motionProgress: CGFloat = 0
+    @AirSendState private var hasEnteredViewport = false
+
+    private var delay: TimeInterval {
+        let staggerIndex = min(
+            max(index, 0),
+            AirSendSettingsMetrics.transferRowEntranceMaximumStaggerIndex
+        )
+        return TimeInterval(
+            staggerIndex * AirSendSettingsMetrics.transferRowEntranceStaggerMilliseconds
+        ) / 1_000
+    }
+
+    var body: some View {
+        let focus = reduceMotion ? 1 : min(max(focusProgress, 0), 1)
+        let motion = reduceMotion ? 1 : motionProgress
+        let reveal = smoothStep(min(1, focus / 0.46))
+        let opacity = reduceMotion
+            ? 1
+            : AirSendSettingsMetrics.transferRowEntranceInitialOpacity
+                + ((1 - AirSendSettingsMetrics.transferRowEntranceInitialOpacity) * reveal)
+
+        content
+            .opacity(opacity)
+            .blur(
+                radius: reduceMotion
+                    ? 0
+                    : max(
+                        0.001,
+                        AirSendSettingsMetrics.transferRowEntranceMaximumBlur * (1 - focus)
+                    )
+            )
+            .offset(y: AirSendSettingsMetrics.transferRowEntranceOffset * (1 - motion))
+            .onScrollVisibilityChange(threshold: 0.06) { isVisible in
+                guard isVisible, !hasEnteredViewport else { return }
+                hasEnteredViewport = true
+            }
+            .task(id: hasEnteredViewport) {
+                guard hasEnteredViewport, !reduceMotion else { return }
+
+                // Keep the initial state on screen for one frame before animating.
+                try? await Task.sleep(for: .milliseconds(24))
+                guard !Task.isCancelled else { return }
+
+                withAnimation(
+                    .timingCurve(
+                        0.16,
+                        1.0,
+                        0.30,
+                        1.0,
+                        duration: AirSendSettingsMetrics.transferRowEntranceDuration
+                    )
+                    .delay(delay)
+                ) {
+                    focusProgress = 1
+                }
+
+                withAnimation(
+                    .spring(
+                        duration: AirSendSettingsMetrics.transferRowEntranceDuration,
+                        bounce: 0.04
+                    )
+                    .delay(delay)
+                ) {
+                    motionProgress = 1
+                }
+            }
+    }
+
+    private func smoothStep(_ value: CGFloat) -> CGFloat {
+        value * value * (3 - (2 * value))
+    }
+}
+
 private struct SettingsEntranceGate<Content: View>: View {
     let trigger: String
     let spacing: CGFloat
+    let activationDelay: TimeInterval
     let content: Content
 
     @AirSendState private var isPresented = false
@@ -1596,10 +1692,12 @@ private struct SettingsEntranceGate<Content: View>: View {
     init(
         trigger: String,
         spacing: CGFloat,
+        activationDelay: TimeInterval = 0,
         @ViewBuilder content: () -> Content
     ) {
         self.trigger = trigger
         self.spacing = spacing
+        self.activationDelay = activationDelay
         self.content = content()
     }
 
@@ -1616,7 +1714,13 @@ private struct SettingsEntranceGate<Content: View>: View {
                 isPresented = false
             }
 
-            try? await Task.sleep(for: .milliseconds(16))
+            let activationDelayMilliseconds = max(
+                0,
+                Int((activationDelay * 1_000).rounded())
+            )
+            try? await Task.sleep(
+                for: .milliseconds(16 + activationDelayMilliseconds)
+            )
             guard !Task.isCancelled else { return }
 
             withAnimation(
@@ -2516,7 +2620,7 @@ private struct SettingsTransferRow: View {
                         .progressViewStyle(.linear)
                     Text(transfer.byteProgress)
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                 }
                 .frame(height: 25, alignment: .top)
             } else if let failure = transfer.failureMessage, !failure.isEmpty {
@@ -2532,7 +2636,7 @@ private struct SettingsTransferRow: View {
             } else {
                 Text(transfer.byteProgress)
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
         }
     }

@@ -39,8 +39,8 @@ android {
     defaultConfig {
         applicationId = project.findProperty("APP_ID") as String? ?: "com.airsend"
 
-        versionCode = 351
-        versionName = "3.5.1"
+        versionCode = 500
+        versionName = "5.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("boolean", "INTERNET_ACCESS_ENABLED", "true")

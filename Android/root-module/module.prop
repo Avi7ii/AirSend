@@ -1,7 +1,7 @@
 id=airsend_daemon
 name=AirSend Daemon
-version=v3.5.1
-versionCode=351
+version=v5.0.0
+versionCode=500
 author=AirSend
 description=AirSend system daemon for secure LocalSend-compatible discovery, transfer, history, and clipboard sync.
 updateJson=

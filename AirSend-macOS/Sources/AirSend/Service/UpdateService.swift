@@ -15,7 +15,7 @@ final class UpdateService {
     var onStatusChange: (() -> Void)?
 
     var currentVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "3.5.0"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "5.0.0"
     }
 
     var isUpdateReady: Bool {

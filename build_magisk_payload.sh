@@ -15,6 +15,7 @@ DAEMON_TARGET_ABI="${DAEMON_TARGET_ABI:-arm64-v8a}"
 APK_VARIANT="${APK_VARIANT:-debug}" # debug | release
 
 DAEMON_DST="$MAGISK_DIR/system/bin/airsend_daemon"
+DAEMON_APP_ASSET="$ANDROID_DIR/app/src/main/assets/airsend_daemon"
 APK_DST_DIR="$MAGISK_DIR/system/app/AirSend"
 APK_DST="$APK_DST_DIR/AirSend.apk"
 ZIP_OUTPUT="${ZIP_OUTPUT:-$ROOT_DIR/AirSend_Magisk_${MODULE_VERSION}.zip}"
@@ -213,8 +214,11 @@ build_daemon() {
   local daemon_src="$DAEMON_DIR/target/aarch64-linux-android/release/airsend_daemon"
   [[ -f "$daemon_src" ]] || fail "daemon output not found: $daemon_src"
 
+  replace_file_atomic "$daemon_src" "$DAEMON_APP_ASSET" 0755
   replace_file_atomic "$daemon_src" "$DAEMON_DST" 0755
+  verify_same_hash "$daemon_src" "$DAEMON_APP_ASSET"
   verify_same_hash "$daemon_src" "$DAEMON_DST"
+  log "Daemon replaced at: $DAEMON_APP_ASSET"
   log "Daemon replaced at: $DAEMON_DST"
 }
 
@@ -305,6 +309,7 @@ main() {
   build_apk
   package_magisk_module
   log "Done. Magisk payload updated:"
+  log "  - $DAEMON_APP_ASSET"
   log "  - $DAEMON_DST"
   log "  - $APK_DST"
   log "  - $ZIP_OUTPUT"

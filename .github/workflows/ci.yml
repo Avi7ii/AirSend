@@ -37,6 +37,7 @@ jobs:
           bash -n build_magisk_payload.sh
           bash -n magisk_module/service.sh
           bash -n tools/test_magisk_service_version_guard.sh
+          bash -n tools/test_airsend_version_alignment.sh
           bash -n tools/prepare_release_assets.sh
           bash -n tools/test_prepare_release_assets.sh
           bash -n tools/test_airsend_parity_matrix.sh
@@ -55,6 +56,7 @@ jobs:
           test -x tools/prepare_release_assets.sh
           test -x tools/test_prepare_release_assets.sh
           test -x tools/test_magisk_service_version_guard.sh
+          test -x tools/test_airsend_version_alignment.sh
           test -x tools/test_airsend_parity_matrix.sh
 
       - name: Test release asset completeness guard
@@ -62,6 +64,9 @@ jobs:
 
       - name: Test Magisk APK version guard
         run: tools/test_magisk_service_version_guard.sh
+
+      - name: Test AirSend version alignment
+        run: tools/test_airsend_version_alignment.sh
 
       - name: Test Android to macOS capability matrix
         run: tools/test_airsend_parity_matrix.sh

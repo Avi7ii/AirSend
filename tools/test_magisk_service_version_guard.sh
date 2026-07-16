@@ -17,10 +17,10 @@ assert_eq() {
   fi
 }
 
-assert_eq "install" "$(decide_apk_sync missing 351)"
-assert_eq "install" "$(decide_apk_sync 350 351)"
-assert_eq "keep" "$(decide_apk_sync 351 351)"
-assert_eq "keep" "$(decide_apk_sync 352 351)"
-assert_eq "error" "$(decide_apk_sync 351 invalid)"
+assert_eq "install" "$(decide_apk_sync missing 500)"
+assert_eq "install" "$(decide_apk_sync 499 500)"
+assert_eq "keep" "$(decide_apk_sync 500 500)"
+assert_eq "keep" "$(decide_apk_sync 501 500)"
+assert_eq "error" "$(decide_apk_sync 500 invalid)"
 
 printf 'magisk service version guard tests passed\n'

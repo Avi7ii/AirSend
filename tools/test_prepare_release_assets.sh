@@ -23,10 +23,10 @@ SOURCE_DIR="$TMP_DIR/source"
 mkdir -p "$RELEASE_DIR" "$SOURCE_DIR"
 
 write_fake_zip "$RELEASE_DIR/AirSend-v9.9.9-macOS.zip"
-write_fake_zip "$SOURCE_DIR/AirSend_Magisk_v3.5.0.zip"
+write_fake_zip "$SOURCE_DIR/AirSend_Magisk_v5.0.0.zip"
 
 AIRSEND_RELEASE_ASSET_SOURCE="$SOURCE_DIR" "$SCRIPT" "$RELEASE_DIR" >/tmp/airsend-release-assets-ok.log
-test -s "$RELEASE_DIR/AirSend_Magisk_v3.5.0.zip" || fail "expected latest Magisk asset to be copied"
+test -s "$RELEASE_DIR/AirSend_Magisk_v5.0.0.zip" || fail "expected latest Magisk asset to be copied"
 grep -q "Release assets ready" /tmp/airsend-release-assets-ok.log || fail "expected success summary"
 
 NO_MAC_DIR="$TMP_DIR/no-mac"

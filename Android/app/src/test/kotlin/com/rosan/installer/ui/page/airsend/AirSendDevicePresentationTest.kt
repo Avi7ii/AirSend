@@ -27,8 +27,8 @@ class AirSendDevicePresentationTest {
     @Test
     fun subtitleUsesModelSecureTransportAndVersion() {
         assertEquals(
-            "macOS · HTTPS · 3.5.0",
-            peer(model = "macOS", type = "desktop", version = "3.5.0").deviceSubtitle()
+            "macOS · HTTPS · 5.0.0",
+            peer(model = "macOS", type = "desktop", version = "5.0.0").deviceSubtitle()
         )
     }
 

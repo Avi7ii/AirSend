@@ -3,6 +3,8 @@ import AirSendConsoleSupport
 import QuartzCore
 import SwiftUI
 
+private typealias AirSendState<Value> = SwiftUI.State<Value>
+
 private enum AirSendSettingsMetrics {
     static let cardCornerRadius: CGFloat = 12
     static let cardContentInset: CGFloat = 14
@@ -13,6 +15,18 @@ private enum AirSendSettingsMetrics {
     static let transferViewportMinimumCap: CGFloat = 240
     static let transferEstimatedRowHeight: CGFloat = 78
     static let actionCornerRadius: CGFloat = 7
+    static let pageEntranceOffset: CGFloat = 14
+    static let pageEntranceDuration: TimeInterval = 0.78
+    static let pageEntranceBounce = 0.10
+    static let pageEntranceMaximumBlur: CGFloat = 6
+    static let pageEntranceRevealFraction: CGFloat = 0.38
+    static let pageEntranceSurfaceOffset: CGFloat = 8
+    static let pageEntranceSurfaceDuration: TimeInterval = 0.72
+    static let pageEntranceSurfaceBounce = 0.05
+    static let pageEntranceStaggerMilliseconds = 78
+    static let pageEntranceMaximumStaggerIndex = 28
+    static let pageSectionSlotCount = 11
+    static let pageTransitionTriggerDuration: TimeInterval = 0.001
 }
 
 private enum AirSendSettingsCategory: String, CaseIterable, Identifiable {
@@ -72,6 +86,68 @@ private enum AirSendTransferHistoryFilter: String, CaseIterable, Identifiable {
     var symbolName: String { self == .outgoing ? "arrow.up" : "arrow.down" }
 }
 
+private enum AirSendSettingsPageSection: String, Identifiable {
+    case statusOverview
+    case statusHealth
+    case statusQuickActions
+    case statusRecentActivity
+    case devicesCurrentTarget
+    case devicesLAN
+    case devicesManual
+    case transfersMode
+    case transfersActivity
+    case transfersQueue
+    case transfersOptions
+    case settingsAutomation
+    case settingsReceiving
+    case settingsTrustedDevices
+    case settingsNetwork
+    case settingsHistory
+    case settingsUpdates
+    case settingsDiagnostics
+    case settingsDiagnosticTools
+    case settingsLogs
+    case settingsIdentity
+    case settingsAbout
+
+    var id: String { rawValue }
+
+    var order: Int {
+        switch self {
+        case .statusOverview, .devicesCurrentTarget, .transfersMode, .settingsAutomation:
+            return 2
+        case .statusHealth, .devicesLAN, .transfersActivity:
+            return 4
+        case .settingsReceiving:
+            return 6
+        case .transfersQueue:
+            return 7
+        case .statusQuickActions, .devicesManual:
+            return 9
+        case .settingsTrustedDevices, .transfersOptions:
+            return 10
+        case .statusRecentActivity:
+            return 11
+        case .settingsNetwork:
+            return 14
+        case .settingsHistory:
+            return 17
+        case .settingsUpdates:
+            return 19
+        case .settingsDiagnostics:
+            return 23
+        case .settingsDiagnosticTools:
+            return 26
+        case .settingsLogs:
+            return 28
+        case .settingsIdentity:
+            return 30
+        case .settingsAbout:
+            return 32
+        }
+    }
+}
+
 struct AirSendSettingsView: View {
     private let topInset: CGFloat = 52
     private let edgeBlurHeight: CGFloat = 54
@@ -86,11 +162,13 @@ struct AirSendSettingsView: View {
 
     @ObservedObject var store: AirSendSettingsStore
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @AppStorage("airsend.console.selectedCategory.v2")
     private var selectedCategoryRawValue = AirSendSettingsCategory.status.rawValue
 
-    @State private var transferHistoryFilter = AirSendTransferHistoryFilter.outgoing
-    @State private var selectedTransferID: String?
+    @AirSendState private var transferHistoryFilter = AirSendTransferHistoryFilter.outgoing
+    @AirSendState private var selectedTransferID: String?
 
     private var snapshot: AirSendSettingsSnapshot {
         store.snapshot
@@ -118,6 +196,10 @@ struct AirSendSettingsView: View {
     private var selectedTransferActivity: [AirSendTransferSummary] {
         (selectedActiveTransfers + selectedTransferHistory)
             .sorted { $0.startedAt > $1.startedAt }
+    }
+
+    private var transferContentEntranceID: String {
+        "\(AirSendSettingsCategory.transfers.rawValue).\(transferHistoryFilter.rawValue)"
     }
 
     var body: some View {
@@ -196,7 +278,7 @@ struct AirSendSettingsView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(AirSendSettingsCategory.allCases) { category in
                             Button {
-                                selectedCategoryRawValue = category.rawValue
+                                selectCategory(category)
                             } label: {
                                 HStack(spacing: 10) {
                                     Image(systemName: category.symbol)
@@ -231,9 +313,11 @@ struct AirSendSettingsView: View {
                         Text(selectedCategory.title)
                             .font(.title2)
                             .fontWeight(.semibold)
+                            .settingsPageEntrance(trigger: selectedCategory.rawValue, order: 0)
                         Text(selectedCategory.subtitle)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+                            .settingsPageEntrance(trigger: selectedCategory.rawValue, order: 1)
                     }
 
                     pageContent(for: selectedCategory, availableHeight: proxy.size.height)
@@ -249,416 +333,792 @@ struct AirSendSettingsView: View {
         }
     }
 
-    @ViewBuilder
-    private func pageContent(for category: AirSendSettingsCategory, availableHeight: CGFloat) -> some View {
-        switch category {
-        case .status:
-            VStack(alignment: .leading, spacing: 14) {
-                SettingsCard(title: "Status") {
-                    SettingsConnectionOverviewRow(
-                        snapshot: snapshot,
-                        action: { store.actions.runDiagnostics() }
-                    )
-                }
+    private var animatedTransferHistoryFilter: Binding<AirSendTransferHistoryFilter> {
+        Binding(
+            get: { transferHistoryFilter },
+            set: { selectTransferHistoryFilter($0) }
+        )
+    }
 
-                SettingsCard(title: "Health") {
-                    ForEach(primaryDiagnostics) { diagnostic in
-                        SettingsDiagnosticRow(diagnostic: diagnostic)
-                    }
+    private func pageContent(
+        for category: AirSendSettingsCategory,
+        availableHeight: CGFloat
+    ) -> some View {
+        let sections = pageSections(for: category)
 
-                    SettingsToggleRow(
-                        title: "Clipboard Sync",
-                        detail: "Sync copied text and images to the current Android target.",
-                        isOn: Binding(
-                            get: { snapshot.clipboardSyncEnabled },
-                            set: { store.actions.setClipboardSyncEnabled($0) }
-                        )
-                    )
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(0..<AirSendSettingsMetrics.pageSectionSlotCount, id: \.self) { slot in
+                let section = slot < sections.count ? sections[slot] : nil
+                let trigger = section.map {
+                    sectionEntranceTrigger(for: $0, category: category)
+                } ?? "empty|\(slot)"
+                let rowStartOrder = section == .transfersMode
+                    ? (section?.order ?? 0)
+                    : (section?.order ?? 0) + 2
 
-                    SettingsToggleRow(
-                        title: "Screenshot Sync",
-                        detail: "Send new macOS screenshots to one trusted target.",
-                        isOn: Binding(
-                            get: { snapshot.screenshotSyncEnabled },
-                            set: { store.actions.setScreenshotSyncEnabled($0) }
-                        )
-                    )
-                }
-
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 14) {
-                        statusQuickActionsCard
-                        recentActivityCard
-                    }
-
-                    VStack(alignment: .leading, spacing: 14) {
-                        statusQuickActionsCard
-                        recentActivityCard
-                    }
-                }
-            }
-
-        case .devices:
-            VStack(alignment: .leading, spacing: 14) {
-                SettingsCard(title: "Current Target") {
-                    SettingsCurrentTargetRow(snapshot: snapshot)
-                }
-
-                SettingsCard(
-                    title: "LAN Devices",
+                SettingsAnimatedCard(
+                    title: section.flatMap { pageSectionTitle($0) },
+                    trigger: "\(trigger)|section=\(section?.id ?? "empty")",
+                    order: section?.order ?? 0,
+                    usesCardBackground: section.map { $0 != .transfersMode } ?? false,
                     headerAccessory: {
-                        SettingsDiscoveryHeaderActions(
-                            isRefreshing: snapshot.isDiscoveryRefreshing,
-                            refreshAction: { store.actions.rescan() },
-                            addByIPAction: { store.actions.addDeviceByIP() },
-                            broadcastAction: { store.actions.selectBroadcastTarget() }
+                        pageSectionHeaderAccessory(section)
+                    },
+                    content: {
+                        pageSectionRows(
+                            section,
+                            trigger: trigger,
+                            startOrder: rowStartOrder,
+                            availableHeight: availableHeight
                         )
                     }
-                ) {
-                    SettingsDevicesSummaryRow(snapshot: snapshot)
-
-                    if snapshot.nearbyDevices.isEmpty {
-                        SettingsEmptyStateRow(
-                            title: "No devices found",
-                            message: "Make sure the other device is on the same LAN, then rescan."
-                        )
-                    } else {
-                        ForEach(snapshot.nearbyDevices) { device in
-                            SettingsDeviceRow(
-                                device: device,
-                                isCompatibilityModeEnabled: snapshot.compatibilityModeEnabled,
-                                selectAction: {
-                                    store.actions.selectDeviceTarget(device.id)
-                                }
-                            )
-                        }
-                    }
-                }
-
-                SettingsCard(title: "Manual Devices") {
-                    if snapshot.manualPeers.isEmpty {
-                        SettingsEmptyStateRow(
-                            title: "No manual devices",
-                            message: "Direct endpoints appear here."
-                        )
-                    } else {
-                        ForEach(snapshot.manualPeers) { peer in
-                            SettingsManualPeerRow(
-                                peer: peer,
-                                removeAction: { store.actions.removeManualPeer(peer.id) }
-                            )
-                        }
-                    }
-                    SettingsInlineCommandRow(
-                        title: "Add Manual Device",
-                        symbolName: "plus",
-                        action: { store.actions.addDeviceByIP() }
-                    )
-                }
-
-            }
-
-        case .transfers:
-            let transferViewportMaximumHeight = min(
-                AirSendSettingsMetrics.transferViewportMaximumHeight,
-                max(
-                    AirSendSettingsMetrics.transferViewportMinimumCap,
-                    availableHeight * AirSendSettingsMetrics.transferViewportHeightRatio
                 )
-            )
-            let estimatedTransferContentHeight =
-                CGFloat(selectedTransferActivity.count) * AirSendSettingsMetrics.transferEstimatedRowHeight
-                + CGFloat(max(0, selectedTransferActivity.count - 1)) * AirSendSettingsMetrics.transferRowSpacing
-                + AirSendSettingsMetrics.cardContentInset * 2
-            let transferViewportHeight = min(
-                transferViewportMaximumHeight,
-                max(
-                    AirSendSettingsMetrics.transferViewportMinimumHeight,
-                    estimatedTransferContentHeight
-                )
-            )
-
-            VStack(alignment: .leading, spacing: 14) {
-                SettingsTransferModeBar(
-                    filter: $transferHistoryFilter,
-                    historyCount: selectedTransferHistory.count,
-                    clearAction: { requestClearSelectedHistory() }
-                )
-
-                SettingsCard(title: "Activity") {
-                    if selectedTransferActivity.isEmpty {
-                        SettingsTransferEmptyState(direction: transferHistoryFilter)
-                    } else {
-                        ScrollViewReader { scrollProxy in
-                            ScrollView(.vertical) {
-                                LazyVStack(spacing: AirSendSettingsMetrics.transferRowSpacing) {
-                                    ForEach(selectedTransferActivity) { transfer in
-                                        SettingsTransferRow(
-                                            transfer: transfer,
-                                            isSelected: selectedTransferID == transfer.id,
-                                            selectAction: { selectedTransferID = transfer.id },
-                                            previewAction: {
-                                                store.actions.previewTransfer(
-                                                    transfer.id,
-                                                    selectedTransferActivity.map(\.id)
-                                                )
-                                            },
-                                            cancelAction: { store.actions.cancelTransfer(transfer.id) },
-                                            retryAction: { store.actions.retryTransfer(transfer.id) },
-                                            revealAction: { store.actions.revealTransfer(transfer.id) },
-                                            shareAction: { store.actions.shareTransfer(transfer.id) },
-                                            deleteAction: { store.actions.deleteHistory(transfer.id) }
-                                        )
-                                        .id(transfer.id)
-                                    }
-                                }
-                                .padding(AirSendSettingsMetrics.cardContentInset)
-                            }
-                            .frame(height: transferViewportHeight)
-                            .scrollContentBackground(.hidden)
-                            .onChange(of: selectedTransferID) { _, id in
-                                guard let id else { return }
-                                withAnimation(.easeOut(duration: 0.16)) {
-                                    scrollProxy.scrollTo(id)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if transferHistoryFilter == .outgoing {
-                    SettingsCard(title: "Transfer Queue") {
-                        SettingsTransferActionRow(
-                            title: "Choose Files",
-                            detail: snapshot.canSendToSelectedTarget
-                                ? "Send to \(snapshot.selectedTargetTitle)"
-                                : "Choose an online target first",
-                            symbolName: "folder.badge.plus",
-                            isEnabled: snapshot.canSendToSelectedTarget,
-                            action: { store.actions.chooseFilesToSend() }
-                        )
-                        SettingsTransferActionRow(
-                            title: "Nearby Targets",
-                            detail: "\(snapshot.selectedTargetTitle) · \(snapshot.discoveredDeviceCount) online",
-                            symbolName: snapshot.selectedTargetIsBroadcast
-                                ? "square.grid.2x2"
-                                : "dot.radiowaves.left.and.right",
-                            action: { selectedCategoryRawValue = AirSendSettingsCategory.devices.rawValue }
-                        )
-                    }
-
-                    SettingsCard(title: "Send Options") {
-                        SettingsTransferActionRow(
-                            title: "Send Clipboard",
-                            detail: "Text or image from the clipboard",
-                            symbolName: "clipboard",
-                            isEnabled: snapshot.canSendToSelectedTarget,
-                            action: { store.actions.sendClipboardNow() }
-                        )
-                    }
-                } else {
-                    SettingsCard(title: "Transfer Queue") {
-                        SettingsTransferInfoRow(
-                            title: "Receive Requests",
-                            detail: selectedActiveTransfers.isEmpty
-                                ? "No active requests"
-                                : "\(selectedActiveTransfers.count) active",
-                            symbolName: "tray.and.arrow.down"
-                        )
-                    }
-
-                    SettingsCard(title: "Receive Options") {
-                        SettingsReceivePolicyRow(
-                            selection: Binding(
-                                get: { snapshot.receivePolicy },
-                                set: { store.actions.setReceivePolicy($0) }
-                            )
-                        )
-                        SettingsDestinationRow(
-                            title: "Files",
-                            path: snapshot.downloadDestination,
-                            action: { store.actions.selectDownloadDestination() }
-                        )
-                        SettingsDestinationRow(
-                            title: "Images & Video",
-                            path: snapshot.mediaDestination,
-                            action: { store.actions.selectMediaDestination() }
-                        )
-                    }
-                }
+                .padding(.top, section == nil || slot == 0 ? 0 : 14)
             }
-            .onAppear { reconcileTransferSelection() }
-            .onChange(of: transferHistoryFilter) { _, _ in
-                selectedTransferID = selectedTransferActivity.first?.id
-            }
-            .onChange(of: selectedTransferActivity.map(\.id)) { _, _ in
+        }
+        .onAppear {
+            if category == .transfers {
                 reconcileTransferSelection()
             }
-            .onChange(of: store.quickLookSelectionID) { _, id in
-                guard let id,
-                      selectedTransferActivity.contains(where: { $0.id == id }) else { return }
-                selectedTransferID = id
+        }
+        .onChange(of: category) { _, newCategory in
+            if newCategory == .transfers {
+                reconcileTransferSelection()
+            }
+        }
+        .onChange(of: transferHistoryFilter) { _, _ in
+            selectedTransferID = selectedTransferActivity.first?.id
+        }
+        .onChange(of: selectedTransferActivity.map(\.id)) { _, _ in
+            reconcileTransferSelection()
+        }
+        .onChange(of: store.quickLookSelectionID) { _, id in
+            guard let id,
+                  selectedTransferActivity.contains(where: { $0.id == id }) else { return }
+            selectedTransferID = id
+        }
+    }
+
+    private func pageSections(
+        for category: AirSendSettingsCategory
+    ) -> [AirSendSettingsPageSection] {
+        switch category {
+        case .status:
+            return [
+                .statusOverview,
+                .statusHealth,
+                .statusQuickActions,
+                .statusRecentActivity,
+            ]
+        case .devices:
+            return [.devicesCurrentTarget, .devicesLAN, .devicesManual]
+        case .transfers:
+            return [.transfersMode, .transfersActivity, .transfersQueue, .transfersOptions]
+        case .settings:
+            return [
+                .settingsAutomation,
+                .settingsReceiving,
+                .settingsTrustedDevices,
+                .settingsNetwork,
+                .settingsHistory,
+                .settingsUpdates,
+                .settingsDiagnostics,
+                .settingsDiagnosticTools,
+                .settingsLogs,
+                .settingsIdentity,
+                .settingsAbout,
+            ]
+        }
+    }
+
+    private func pageSectionTitle(
+        _ section: AirSendSettingsPageSection
+    ) -> String? {
+        switch section {
+        case .statusOverview:
+            return "Status"
+        case .statusHealth:
+            return "Health"
+        case .statusQuickActions:
+            return "Quick Actions"
+        case .statusRecentActivity:
+            return "Recent Activity"
+        case .devicesCurrentTarget:
+            return "Current Target"
+        case .devicesLAN:
+            return "LAN Devices"
+        case .devicesManual:
+            return "Manual Devices"
+        case .transfersMode:
+            return nil
+        case .transfersActivity:
+            return "Activity"
+        case .transfersQueue:
+            return "Transfer Queue"
+        case .transfersOptions:
+            return transferHistoryFilter == .outgoing ? "Send Options" : "Receive Options"
+        case .settingsAutomation:
+            return "Automation"
+        case .settingsReceiving:
+            return "Receiving"
+        case .settingsTrustedDevices:
+            return "Trusted Devices"
+        case .settingsNetwork:
+            return "Network"
+        case .settingsHistory:
+            return "History"
+        case .settingsUpdates:
+            return "Startup & Updates"
+        case .settingsDiagnostics:
+            return "Diagnostics"
+        case .settingsDiagnosticTools:
+            return "Diagnostic Tools"
+        case .settingsLogs:
+            return "Logs"
+        case .settingsIdentity:
+            return "Identity"
+        case .settingsAbout:
+            return "About"
+        }
+    }
+
+    private func sectionEntranceTrigger(
+        for section: AirSendSettingsPageSection,
+        category: AirSendSettingsCategory
+    ) -> String {
+        switch section {
+        case .transfersActivity, .transfersQueue, .transfersOptions:
+            return transferContentEntranceID
+        default:
+            return category.rawValue
+        }
+    }
+
+    @ViewBuilder
+    private func pageSectionHeaderAccessory(
+        _ section: AirSendSettingsPageSection?
+    ) -> some View {
+        if section == .devicesLAN {
+            SettingsDiscoveryHeaderActions(
+                isRefreshing: snapshot.isDiscoveryRefreshing,
+                refreshAction: { store.actions.rescan() },
+                addByIPAction: { store.actions.addDeviceByIP() },
+                broadcastAction: { store.actions.selectBroadcastTarget() }
+            )
+        }
+    }
+
+    private func transferViewportHeight(availableHeight: CGFloat) -> CGFloat {
+        let maximumHeight = min(
+            AirSendSettingsMetrics.transferViewportMaximumHeight,
+            max(
+                AirSendSettingsMetrics.transferViewportMinimumCap,
+                availableHeight * AirSendSettingsMetrics.transferViewportHeightRatio
+            )
+        )
+        let estimatedContentHeight =
+            CGFloat(selectedTransferActivity.count) * AirSendSettingsMetrics.transferEstimatedRowHeight
+            + CGFloat(max(0, selectedTransferActivity.count - 1)) * AirSendSettingsMetrics.transferRowSpacing
+            + AirSendSettingsMetrics.cardContentInset * 2
+
+        return min(
+            maximumHeight,
+            max(
+                AirSendSettingsMetrics.transferViewportMinimumHeight,
+                estimatedContentHeight
+            )
+        )
+    }
+
+    @ViewBuilder
+    private func pageSectionRows(
+        _ section: AirSendSettingsPageSection?,
+        trigger: String,
+        startOrder: Int,
+        availableHeight: CGFloat
+    ) -> some View {
+        switch section {
+        case .statusOverview:
+            SettingsConnectionOverviewRow(
+                snapshot: snapshot,
+                action: { store.actions.runDiagnostics() }
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=status-overview",
+                order: startOrder
+            )
+
+        case .statusHealth:
+            let diagnosticCount = primaryDiagnostics.count
+
+            ForEach(Array(primaryDiagnostics.enumerated()), id: \.element.id) { index, diagnostic in
+                SettingsDiagnosticRow(diagnostic: diagnostic)
+                    .settingsPageEntrance(
+                        trigger: "\(trigger)|row=status-diagnostic-\(diagnostic.id)",
+                        order: startOrder + index
+                    )
             }
 
-        case .settings:
-            VStack(alignment: .leading, spacing: 14) {
-                SettingsCard(title: "Automation") {
-                    SettingsToggleRow(
-                        title: "Clipboard Sync",
-                        detail: "Sync copied text and images to the current Android target.",
-                        isOn: Binding(
-                            get: { snapshot.clipboardSyncEnabled },
-                            set: { store.actions.setClipboardSyncEnabled($0) }
-                        )
-                    )
+            SettingsToggleRow(
+                title: "Clipboard Sync",
+                detail: "Sync copied text and images to the current Android target.",
+                isOn: Binding(
+                    get: { snapshot.clipboardSyncEnabled },
+                    set: { store.actions.setClipboardSyncEnabled($0) }
+                )
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=status-clipboard",
+                order: startOrder + diagnosticCount
+            )
 
-                    SettingsToggleRow(
-                        title: "Screenshot Sync",
-                        detail: "Watch new screenshots and send them to one trusted target.",
-                        isOn: Binding(
-                            get: { snapshot.screenshotSyncEnabled },
-                            set: { store.actions.setScreenshotSyncEnabled($0) }
-                        )
-                    )
+            SettingsToggleRow(
+                title: "Screenshot Sync",
+                detail: "Send new macOS screenshots to one trusted target.",
+                isOn: Binding(
+                    get: { snapshot.screenshotSyncEnabled },
+                    set: { store.actions.setScreenshotSyncEnabled($0) }
+                )
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=status-screenshot",
+                order: startOrder + diagnosticCount + 1
+            )
 
-                    SettingsValueRow(
-                        title: "Screenshot watcher",
-                        value: snapshot.screenshotWatcherStatus,
-                        detail: snapshot.screenshotWatchFolder
+        case .statusQuickActions:
+            SettingsButtonRow(
+                primaryTitle: "Run Diagnostics",
+                primaryAction: { store.actions.runDiagnostics() },
+                secondaryTitle: snapshot.isDiscoveryRefreshing ? "Refreshing…" : "Refresh Devices",
+                secondaryAction: { store.actions.rescan() },
+                tertiaryTitle: "Restart Runtime",
+                tertiaryAction: { store.actions.restartRuntime() }
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=status-quick-actions",
+                order: startOrder
+            )
+
+        case .statusRecentActivity:
+            Group {
+                if snapshot.recentActivities.isEmpty {
+                    SettingsEmptyStateRow(
+                        title: "No recent activity",
+                        message: "Discovery, transfers, and diagnostics will appear here."
+                    )
+                } else {
+                    SettingsActivityList(
+                        activities: snapshot.recentActivities,
+                        maximumVisibleRows: 3
                     )
                 }
+            }
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=status-recent-activity",
+                order: startOrder
+            )
 
-                SettingsCard(title: "Receiving") {
-                    SettingsReceivePolicyRow(
-                        selection: Binding(
-                            get: { snapshot.receivePolicy },
-                            set: { store.actions.setReceivePolicy($0) }
-                        )
+        case .devicesCurrentTarget:
+            SettingsCurrentTargetRow(snapshot: snapshot)
+                .settingsPageEntrance(
+                    trigger: "\(trigger)|row=current-target",
+                    order: startOrder
+                )
+
+        case .devicesLAN:
+            SettingsDevicesSummaryRow(snapshot: snapshot)
+                .settingsPageEntrance(
+                    trigger: "\(trigger)|row=lan-summary",
+                    order: startOrder
+                )
+
+            if snapshot.nearbyDevices.isEmpty {
+                SettingsEmptyStateRow(
+                    title: "No devices found",
+                    message: "Make sure the other device is on the same LAN, then rescan."
+                )
+                .settingsPageEntrance(
+                    trigger: "\(trigger)|row=lan-empty",
+                    order: startOrder + 1
+                )
+            } else {
+                ForEach(Array(snapshot.nearbyDevices.enumerated()), id: \.element.id) { index, device in
+                    SettingsDeviceRow(
+                        device: device,
+                        isCompatibilityModeEnabled: snapshot.compatibilityModeEnabled,
+                        selectAction: {
+                            store.actions.selectDeviceTarget(device.id)
+                        }
                     )
-                    SettingsDestinationRow(
-                        title: "Files",
-                        path: snapshot.downloadDestination,
-                        action: { store.actions.selectDownloadDestination() }
-                    )
-                    SettingsDestinationRow(
-                        title: "Images & Video",
-                        path: snapshot.mediaDestination,
-                        action: { store.actions.selectMediaDestination() }
+                    .settingsPageEntrance(
+                        trigger: "\(trigger)|row=lan-device-\(device.id)",
+                        order: startOrder + index + 1
                     )
                 }
+            }
 
-                SettingsCard(title: "Trusted Devices") {
-                    if snapshot.trustedPeers.isEmpty {
-                        SettingsEmptyStateRow(
-                            title: "No trusted devices",
-                            message: "Trust is only needed for unattended receiving and automation."
-                        )
-                    } else {
-                        ForEach(snapshot.trustedPeers) { peer in
-                            SettingsTrustedPeerRow(
-                                peer: peer,
-                                revokeAction: { store.actions.revokeTrustedPeer(peer.id) }
-                            )
+        case .devicesManual:
+            if snapshot.manualPeers.isEmpty {
+                SettingsEmptyStateRow(
+                    title: "No manual devices",
+                    message: "Direct endpoints appear here."
+                )
+                .settingsPageEntrance(
+                    trigger: "\(trigger)|row=manual-empty",
+                    order: startOrder
+                )
+            } else {
+                ForEach(Array(snapshot.manualPeers.enumerated()), id: \.element.id) { index, peer in
+                    SettingsManualPeerRow(
+                        peer: peer,
+                        removeAction: { store.actions.removeManualPeer(peer.id) }
+                    )
+                    .settingsPageEntrance(
+                        trigger: "\(trigger)|row=manual-peer-\(peer.id)",
+                        order: startOrder + index
+                    )
+                }
+            }
+
+            SettingsInlineCommandRow(
+                title: "Add Manual Device",
+                symbolName: "plus",
+                action: { store.actions.addDeviceByIP() }
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=manual-add",
+                order: startOrder + snapshot.manualPeers.count + 1
+            )
+
+        case .transfersMode:
+            SettingsTransferModeBar(
+                filter: animatedTransferHistoryFilter,
+                historyCount: selectedTransferHistory.count,
+                clearAction: { requestClearSelectedHistory() }
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=transfer-mode",
+                order: startOrder
+            )
+
+        case .transfersActivity:
+            if selectedTransferActivity.isEmpty {
+                SettingsTransferEmptyState(direction: transferHistoryFilter)
+                    .settingsPageEntrance(
+                        trigger: "\(trigger)|row=transfer-activity-empty",
+                        order: startOrder
+                    )
+            } else {
+                ScrollViewReader { scrollProxy in
+                    ScrollView(.vertical) {
+                        SettingsEntranceGate(
+                            trigger: trigger,
+                            spacing: AirSendSettingsMetrics.transferRowSpacing
+                        ) {
+                            ForEach(
+                                Array(selectedTransferActivity.enumerated()),
+                                id: \.element.id
+                            ) { index, transfer in
+                                SettingsTransferRow(
+                                    transfer: transfer,
+                                    isSelected: selectedTransferID == transfer.id,
+                                    selectAction: { selectedTransferID = transfer.id },
+                                    previewAction: {
+                                        store.actions.previewTransfer(
+                                            transfer.id,
+                                            selectedTransferActivity.map(\.id)
+                                        )
+                                    },
+                                    cancelAction: { store.actions.cancelTransfer(transfer.id) },
+                                    retryAction: { store.actions.retryTransfer(transfer.id) },
+                                    revealAction: { store.actions.revealTransfer(transfer.id) },
+                                    shareAction: { store.actions.shareTransfer(transfer.id) },
+                                    deleteAction: { store.actions.deleteHistory(transfer.id) }
+                                )
+                                .settingsPageEntrance(
+                                    trigger: "\(trigger)|row=transfer-\(transfer.id)",
+                                    order: startOrder + index
+                                )
+                                .id(transfer.id)
+                            }
+                        }
+                        .padding(AirSendSettingsMetrics.cardContentInset)
+                    }
+                    .frame(height: transferViewportHeight(availableHeight: availableHeight))
+                    .scrollContentBackground(.hidden)
+                    .onChange(of: selectedTransferID) { _, id in
+                        guard let id else { return }
+                        withAnimation(.easeOut(duration: 0.16)) {
+                            scrollProxy.scrollTo(id)
                         }
                     }
-                    SettingsInlineCommandRow(
-                        title: "Trust Device…",
-                        symbolName: "person.badge.shield.checkmark",
-                        action: { store.actions.trustKnownDevice() }
-                    )
                 }
+            }
 
-                SettingsCard(title: "Network") {
-                    SettingsToggleRow(
-                        title: "Compatibility Mode",
-                        detail: "Use the simpler HTTP path on tricky networks.",
-                        isOn: Binding(
-                            get: { snapshot.compatibilityModeEnabled },
-                            set: { store.actions.setCompatibilityModeEnabled($0) }
-                        )
+        case .transfersQueue:
+            if transferHistoryFilter == .outgoing {
+                SettingsTransferActionRow(
+                    title: "Choose Files",
+                    detail: snapshot.canSendToSelectedTarget
+                        ? "Send to \(snapshot.selectedTargetTitle)"
+                        : "Choose an online target first",
+                    symbolName: "folder.badge.plus",
+                    isEnabled: snapshot.canSendToSelectedTarget,
+                    action: { store.actions.chooseFilesToSend() }
+                )
+                .settingsPageEntrance(
+                    trigger: "\(trigger)|row=queue-choose-files",
+                    order: startOrder
+                )
+
+                SettingsTransferActionRow(
+                    title: "Nearby Targets",
+                    detail: "\(snapshot.selectedTargetTitle) · \(snapshot.discoveredDeviceCount) online",
+                    symbolName: snapshot.selectedTargetIsBroadcast
+                        ? "square.grid.2x2"
+                        : "dot.radiowaves.left.and.right",
+                    action: { selectCategory(.devices) }
+                )
+                .settingsPageEntrance(
+                    trigger: "\(trigger)|row=queue-nearby-targets",
+                    order: startOrder + 1
+                )
+            } else {
+                SettingsTransferInfoRow(
+                    title: "Receive Requests",
+                    detail: selectedActiveTransfers.isEmpty
+                        ? "No active requests"
+                        : "\(selectedActiveTransfers.count) active",
+                    symbolName: "tray.and.arrow.down"
+                )
+                .settingsPageEntrance(
+                    trigger: "\(trigger)|row=queue-receive-requests",
+                    order: startOrder
+                )
+            }
+
+        case .transfersOptions:
+            if transferHistoryFilter == .outgoing {
+                SettingsTransferActionRow(
+                    title: "Send Clipboard",
+                    detail: "Text or image from the clipboard",
+                    symbolName: "clipboard",
+                    isEnabled: snapshot.canSendToSelectedTarget,
+                    action: { store.actions.sendClipboardNow() }
+                )
+                .settingsPageEntrance(
+                    trigger: "\(trigger)|row=options-send-clipboard",
+                    order: startOrder
+                )
+            } else {
+                SettingsReceivePolicyRow(
+                    selection: Binding(
+                        get: { snapshot.receivePolicy },
+                        set: { store.actions.setReceivePolicy($0) }
                     )
+                )
+                .settingsPageEntrance(
+                    trigger: "\(trigger)|row=options-receive-policy",
+                    order: startOrder
+                )
 
-                    SettingsValueRow(title: "Current transport", value: snapshot.protocolLabel)
-                }
+                SettingsDestinationRow(
+                    title: "Files",
+                    path: snapshot.downloadDestination,
+                    action: { store.actions.selectDownloadDestination() }
+                )
+                .settingsPageEntrance(
+                    trigger: "\(trigger)|row=options-files",
+                    order: startOrder + 1
+                )
 
-                SettingsCard(title: "History") {
-                    SettingsHistoryLimitRow(
-                        value: snapshot.historyLimitPerDirection,
-                        action: { store.actions.setHistoryLimitPerDirection($0) }
+                SettingsDestinationRow(
+                    title: "Images & Video",
+                    path: snapshot.mediaDestination,
+                    action: { store.actions.selectMediaDestination() }
+                )
+                .settingsPageEntrance(
+                    trigger: "\(trigger)|row=options-media",
+                    order: startOrder + 2
+                )
+            }
+
+        case .settingsAutomation:
+            SettingsToggleRow(
+                title: "Clipboard Sync",
+                detail: "Sync copied text and images to the current Android target.",
+                isOn: Binding(
+                    get: { snapshot.clipboardSyncEnabled },
+                    set: { store.actions.setClipboardSyncEnabled($0) }
+                )
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=automation-clipboard",
+                order: startOrder
+            )
+
+            SettingsToggleRow(
+                title: "Screenshot Sync",
+                detail: "Watch new screenshots and send them to one trusted target.",
+                isOn: Binding(
+                    get: { snapshot.screenshotSyncEnabled },
+                    set: { store.actions.setScreenshotSyncEnabled($0) }
+                )
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=automation-screenshot",
+                order: startOrder + 1
+            )
+
+            SettingsValueRow(
+                title: "Screenshot watcher",
+                value: snapshot.screenshotWatcherStatus,
+                detail: snapshot.screenshotWatchFolder
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=automation-watcher",
+                order: startOrder + 2
+            )
+
+        case .settingsReceiving:
+            SettingsReceivePolicyRow(
+                selection: Binding(
+                    get: { snapshot.receivePolicy },
+                    set: { store.actions.setReceivePolicy($0) }
+                )
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=receiving-policy",
+                order: startOrder
+            )
+
+            SettingsDestinationRow(
+                title: "Files",
+                path: snapshot.downloadDestination,
+                action: { store.actions.selectDownloadDestination() }
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=receiving-files",
+                order: startOrder + 1
+            )
+
+            SettingsDestinationRow(
+                title: "Images & Video",
+                path: snapshot.mediaDestination,
+                action: { store.actions.selectMediaDestination() }
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=receiving-media",
+                order: startOrder + 2
+            )
+
+        case .settingsTrustedDevices:
+            if snapshot.trustedPeers.isEmpty {
+                SettingsEmptyStateRow(
+                    title: "No trusted devices",
+                    message: "Trust is only needed for unattended receiving and automation."
+                )
+                .settingsPageEntrance(
+                    trigger: "\(trigger)|row=trusted-empty",
+                    order: startOrder
+                )
+            } else {
+                ForEach(Array(snapshot.trustedPeers.enumerated()), id: \.element.id) { index, peer in
+                    SettingsTrustedPeerRow(
+                        peer: peer,
+                        revokeAction: { store.actions.revokeTrustedPeer(peer.id) }
                     )
-                }
-
-                SettingsCard(title: "Startup & Updates") {
-                    SettingsToggleRow(
-                        title: "Launch at login",
-                        detail: "Start AirSend when you sign in.",
-                        isOn: Binding(
-                            get: { snapshot.launchAtLoginEnabled },
-                            set: { store.actions.setLaunchAtLoginEnabled($0) }
-                        )
-                    )
-
-                    SettingsToggleRow(
-                        title: "Auto-check for updates",
-                        detail: "Check in the background and download new builds automatically.",
-                        isOn: Binding(
-                            get: { snapshot.autoUpdateEnabled },
-                            set: { store.actions.setAutoUpdateEnabled($0) }
-                        )
-                    )
-
-                    SettingsButtonRow(
-                        primaryTitle: "Check for Updates",
-                        primaryAction: { store.actions.checkForUpdates() }
-                    )
-                }
-
-                SettingsCard(title: "Diagnostics") {
-                    ForEach(snapshot.diagnostics) { diagnostic in
-                        SettingsDiagnosticRow(diagnostic: diagnostic)
-                    }
-                }
-
-                SettingsCard(title: "Diagnostic Tools") {
-                    SettingsButtonRow(
-                        primaryTitle: "Run Diagnostics",
-                        primaryAction: { store.actions.runDiagnostics() },
-                        secondaryTitle: "Restart Runtime",
-                        secondaryAction: { store.actions.restartRuntime() },
-                        tertiaryTitle: "Export Logs",
-                        tertiaryAction: { store.actions.exportLogs() }
-                    )
-                }
-
-                SettingsCard(title: "Logs") {
-                    SettingsLogTailView(lines: snapshot.logTail)
-                    SettingsInlineCommandRow(
-                        title: "Clear Logs",
-                        symbolName: "trash",
-                        role: .destructive,
-                        action: { store.actions.clearLogs() }
-                    )
-                }
-
-                SettingsCard(title: "Identity") {
-                    SettingsValueRow(title: "Fingerprint", value: snapshot.fingerprintSuffix)
-                    SettingsButtonRow(
-                        primaryTitle: "Reset Identity",
-                        primaryAction: { store.actions.resetIdentity() },
-                        secondaryTitle: "Clear Devices",
-                        secondaryAction: { store.actions.clearDiscoveredDevices() }
-                    )
-                }
-
-                SettingsCard(title: "About") {
-                    SettingsValueRow(title: "Version", value: snapshot.currentVersion)
-                    SettingsInlineCommandRow(
-                        title: "Open AirSend Repository",
-                        symbolName: "arrow.up.right.square",
-                        action: { store.actions.openAndroidRepository() }
+                    .settingsPageEntrance(
+                        trigger: "\(trigger)|row=trusted-peer-\(peer.id)",
+                        order: startOrder + index
                     )
                 }
             }
+
+            SettingsInlineCommandRow(
+                title: "Trust Device…",
+                symbolName: "person.badge.shield.checkmark",
+                action: { store.actions.trustKnownDevice() }
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=trusted-add",
+                order: startOrder + snapshot.trustedPeers.count + 1
+            )
+
+        case .settingsNetwork:
+            SettingsToggleRow(
+                title: "Compatibility Mode",
+                detail: "Use the simpler HTTP path on tricky networks.",
+                isOn: Binding(
+                    get: { snapshot.compatibilityModeEnabled },
+                    set: { store.actions.setCompatibilityModeEnabled($0) }
+                )
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=network-compatibility",
+                order: startOrder
+            )
+
+            SettingsValueRow(title: "Current transport", value: snapshot.protocolLabel)
+                .settingsPageEntrance(
+                    trigger: "\(trigger)|row=network-transport",
+                    order: startOrder + 1
+                )
+
+        case .settingsHistory:
+            SettingsHistoryLimitRow(
+                value: snapshot.historyLimitPerDirection,
+                action: { store.actions.setHistoryLimitPerDirection($0) }
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=history-limit",
+                order: startOrder
+            )
+
+        case .settingsUpdates:
+            SettingsToggleRow(
+                title: "Launch at login",
+                detail: "Start AirSend when you sign in.",
+                isOn: Binding(
+                    get: { snapshot.launchAtLoginEnabled },
+                    set: { store.actions.setLaunchAtLoginEnabled($0) }
+                )
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=updates-launch",
+                order: startOrder
+            )
+
+            SettingsToggleRow(
+                title: "Auto-check for updates",
+                detail: "Check in the background and download new builds automatically.",
+                isOn: Binding(
+                    get: { snapshot.autoUpdateEnabled },
+                    set: { store.actions.setAutoUpdateEnabled($0) }
+                )
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=updates-auto-check",
+                order: startOrder + 1
+            )
+
+            SettingsButtonRow(
+                primaryTitle: "Check for Updates",
+                primaryAction: { store.actions.checkForUpdates() }
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=updates-check",
+                order: startOrder + 2
+            )
+
+        case .settingsDiagnostics:
+            ForEach(Array(snapshot.diagnostics.enumerated()), id: \.element.id) { index, diagnostic in
+                SettingsDiagnosticRow(diagnostic: diagnostic)
+                    .settingsPageEntrance(
+                        trigger: "\(trigger)|row=diagnostic-\(diagnostic.id)",
+                        order: startOrder + index
+                    )
+            }
+
+        case .settingsDiagnosticTools:
+            SettingsButtonRow(
+                primaryTitle: "Run Diagnostics",
+                primaryAction: { store.actions.runDiagnostics() },
+                secondaryTitle: "Restart Runtime",
+                secondaryAction: { store.actions.restartRuntime() },
+                tertiaryTitle: "Export Logs",
+                tertiaryAction: { store.actions.exportLogs() }
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=diagnostic-tools",
+                order: startOrder
+            )
+
+        case .settingsLogs:
+            SettingsLogTailView(lines: snapshot.logTail)
+                .settingsPageEntrance(
+                    trigger: "\(trigger)|row=logs-tail",
+                    order: startOrder
+                )
+
+            SettingsInlineCommandRow(
+                title: "Clear Logs",
+                symbolName: "trash",
+                role: .destructive,
+                action: { store.actions.clearLogs() }
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=logs-clear",
+                order: startOrder + 1
+            )
+
+        case .settingsIdentity:
+            SettingsValueRow(title: "Fingerprint", value: snapshot.fingerprintSuffix)
+                .settingsPageEntrance(
+                    trigger: "\(trigger)|row=identity-fingerprint",
+                    order: startOrder
+                )
+
+            SettingsButtonRow(
+                primaryTitle: "Reset Identity",
+                primaryAction: { store.actions.resetIdentity() },
+                secondaryTitle: "Clear Devices",
+                secondaryAction: { store.actions.clearDiscoveredDevices() }
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=identity-actions",
+                order: startOrder + 1
+            )
+
+        case .settingsAbout:
+            SettingsValueRow(title: "Version", value: snapshot.currentVersion)
+                .settingsPageEntrance(
+                    trigger: "\(trigger)|row=about-version",
+                    order: startOrder
+                )
+
+            SettingsInlineCommandRow(
+                title: "Open AirSend Repository",
+                symbolName: "arrow.up.right.square",
+                action: { store.actions.openAndroidRepository() }
+            )
+            .settingsPageEntrance(
+                trigger: "\(trigger)|row=about-repository",
+                order: startOrder + 1
+            )
+
+        case nil:
+            EmptyView()
+        }
+    }
+
+    private func selectCategory(_ category: AirSendSettingsCategory) {
+        guard category != selectedCategory else { return }
+
+        if reduceMotion {
+            selectedCategoryRawValue = category.rawValue
+            return
+        }
+
+        withAnimation(
+            .linear(duration: AirSendSettingsMetrics.pageTransitionTriggerDuration)
+        ) {
+            selectedCategoryRawValue = category.rawValue
+        }
+    }
+
+    private func selectTransferHistoryFilter(_ filter: AirSendTransferHistoryFilter) {
+        guard filter != transferHistoryFilter else { return }
+
+        if reduceMotion {
+            transferHistoryFilter = filter
+            return
+        }
+
+        withAnimation(
+            .linear(duration: AirSendSettingsMetrics.pageTransitionTriggerDuration)
+        ) {
+            transferHistoryFilter = filter
         }
     }
 
@@ -685,36 +1145,6 @@ struct AirSendSettingsView: View {
         selectedTransferID = selectedTransferActivity.first?.id
     }
 
-    private var statusQuickActionsCard: some View {
-        SettingsCard(title: "Quick Actions") {
-            SettingsButtonRow(
-                primaryTitle: "Run Diagnostics",
-                primaryAction: { store.actions.runDiagnostics() },
-                secondaryTitle: snapshot.isDiscoveryRefreshing ? "Refreshing…" : "Refresh Devices",
-                secondaryAction: { store.actions.rescan() },
-                tertiaryTitle: "Restart Runtime",
-                tertiaryAction: { store.actions.restartRuntime() }
-            )
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    private var recentActivityCard: some View {
-        SettingsCard(title: "Recent Activity") {
-            if snapshot.recentActivities.isEmpty {
-                SettingsEmptyStateRow(
-                    title: "No recent activity",
-                    message: "Discovery, transfers, and diagnostics will appear here."
-                )
-            } else {
-                SettingsActivityList(
-                    activities: snapshot.recentActivities,
-                    maximumVisibleRows: 3
-                )
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
 }
 
 private struct WindowDragSurface: View {
@@ -1008,6 +1438,194 @@ private extension View {
             .gesture(WindowDragGesture(), including: .gesture)
             .allowsWindowActivationEvents(true)
     }
+
+    func settingsPageEntrance(trigger: String, order: Int) -> some View {
+        SettingsPageEntranceHost(order: order, content: self)
+            .id("settings-page-entrance|\(trigger)|\(order)")
+    }
+
+    func settingsCardSurfaceEntrance(trigger: String, order: Int) -> some View {
+        SettingsCardSurfaceEntranceHost(order: order, content: self)
+            .id("settings-card-surface|\(trigger)|\(order)")
+    }
+}
+
+private struct SettingsPageEntranceHost<Content: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let order: Int
+    let content: Content
+
+    @AirSendState private var focusProgress: CGFloat = 0
+    @AirSendState private var motionProgress: CGFloat = 0
+
+    private var delay: TimeInterval {
+        let staggerIndex = min(
+            max(order, 0),
+            AirSendSettingsMetrics.pageEntranceMaximumStaggerIndex
+        )
+        return TimeInterval(
+            staggerIndex * AirSendSettingsMetrics.pageEntranceStaggerMilliseconds
+        ) / 1_000
+    }
+
+    var body: some View {
+        let focus = reduceMotion ? 1 : min(max(focusProgress, 0), 1)
+        let motion = reduceMotion ? 1 : motionProgress
+        let reveal = min(
+            1,
+            focus / AirSendSettingsMetrics.pageEntranceRevealFraction
+        )
+
+        content
+            .opacity(smoothStep(reveal))
+            .blur(
+                radius: reduceMotion
+                    ? 0
+                    : max(
+                        0.001,
+                        AirSendSettingsMetrics.pageEntranceMaximumBlur * (1 - focus)
+                    )
+            )
+            .offset(y: AirSendSettingsMetrics.pageEntranceOffset * (1 - motion))
+            .task {
+                guard !reduceMotion else { return }
+
+                try? await Task.sleep(for: .milliseconds(16))
+                guard !Task.isCancelled else { return }
+
+                withAnimation(
+                    .timingCurve(
+                        0.16,
+                        1.0,
+                        0.30,
+                        1.0,
+                        duration: AirSendSettingsMetrics.pageEntranceDuration
+                    )
+                    .delay(delay)
+                ) {
+                    focusProgress = 1
+                }
+
+                withAnimation(
+                    .spring(
+                        duration: AirSendSettingsMetrics.pageEntranceDuration,
+                        bounce: AirSendSettingsMetrics.pageEntranceBounce
+                    )
+                    .delay(delay)
+                ) {
+                    motionProgress = 1
+                }
+            }
+    }
+
+    private func smoothStep(_ value: CGFloat) -> CGFloat {
+        value * value * (3 - (2 * value))
+    }
+}
+
+private struct SettingsCardSurfaceEntranceHost<Content: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let order: Int
+    let content: Content
+
+    @AirSendState private var revealProgress: CGFloat = 0
+    @AirSendState private var motionProgress: CGFloat = 0
+
+    private var delay: TimeInterval {
+        let staggerIndex = min(
+            max(order, 0),
+            AirSendSettingsMetrics.pageEntranceMaximumStaggerIndex
+        )
+        return TimeInterval(
+            staggerIndex * AirSendSettingsMetrics.pageEntranceStaggerMilliseconds
+        ) / 1_000
+    }
+
+    var body: some View {
+        let reveal = reduceMotion ? 1 : min(max(revealProgress, 0), 1)
+        let motion = reduceMotion ? 1 : motionProgress
+
+        content
+            .opacity(smoothStep(min(1, reveal / 0.58)))
+            .offset(y: AirSendSettingsMetrics.pageEntranceSurfaceOffset * (1 - motion))
+            .task {
+                guard !reduceMotion else { return }
+
+                try? await Task.sleep(for: .milliseconds(16))
+                guard !Task.isCancelled else { return }
+
+                withAnimation(
+                    .timingCurve(
+                        0.16,
+                        1.0,
+                        0.30,
+                        1.0,
+                        duration: AirSendSettingsMetrics.pageEntranceSurfaceDuration
+                    )
+                    .delay(delay)
+                ) {
+                    revealProgress = 1
+                }
+
+                withAnimation(
+                    .spring(
+                        duration: AirSendSettingsMetrics.pageEntranceSurfaceDuration,
+                        bounce: AirSendSettingsMetrics.pageEntranceSurfaceBounce
+                    )
+                    .delay(delay)
+                ) {
+                    motionProgress = 1
+                }
+            }
+    }
+
+    private func smoothStep(_ value: CGFloat) -> CGFloat {
+        value * value * (3 - (2 * value))
+    }
+}
+
+private struct SettingsEntranceGate<Content: View>: View {
+    let trigger: String
+    let spacing: CGFloat
+    let content: Content
+
+    @AirSendState private var isPresented = false
+
+    init(
+        trigger: String,
+        spacing: CGFloat,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.trigger = trigger
+        self.spacing = spacing
+        self.content = content()
+    }
+
+    var body: some View {
+        LazyVStack(spacing: spacing) {
+            if isPresented {
+                content
+            }
+        }
+        .task(id: trigger) {
+            var resetTransaction = Transaction(animation: nil)
+            resetTransaction.disablesAnimations = true
+            withTransaction(resetTransaction) {
+                isPresented = false
+            }
+
+            try? await Task.sleep(for: .milliseconds(16))
+            guard !Task.isCancelled else { return }
+
+            withAnimation(
+                .linear(duration: AirSendSettingsMetrics.pageTransitionTriggerDuration)
+            ) {
+                isPresented = true
+            }
+        }
+    }
 }
 
 private struct SettingsSidebarButtonStyle: ButtonStyle {
@@ -1029,6 +1647,7 @@ private struct SettingsSidebarButtonStyle: ButtonStyle {
             .clipShape(shape)
             .contentShape(shape)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.16), value: isSelected)
     }
 
     private func background(for isPressed: Bool) -> some ShapeStyle {
@@ -1042,63 +1661,91 @@ private struct SettingsSidebarButtonStyle: ButtonStyle {
     }
 }
 
-private struct SettingsCard<Content: View, HeaderAccessory: View>: View {
-    let title: String
+private struct SettingsAnimatedCard<Content: View, HeaderAccessory: View>: View {
+    let title: String?
+    let trigger: String
+    let order: Int
+    let usesCardBackground: Bool
     let headerAccessory: HeaderAccessory
     let content: Content
 
     init(
-        title: String,
-        @ViewBuilder content: () -> Content
-    ) where HeaderAccessory == EmptyView {
-        self.title = title
-        self.headerAccessory = EmptyView()
-        self.content = content()
-    }
-
-    init(
-        title: String,
+        title: String?,
+        trigger: String,
+        order: Int,
+        usesCardBackground: Bool,
         @ViewBuilder headerAccessory: () -> HeaderAccessory,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
+        self.trigger = trigger
+        self.order = order
+        self.usesCardBackground = usesCardBackground
         self.headerAccessory = headerAccessory()
         self.content = content()
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 14) {
-                Text(title.uppercased())
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
+        VStack(alignment: .leading, spacing: title == nil ? 0 : 8) {
+            if let title {
+                HStack(alignment: .center, spacing: 14) {
+                    Text(title.uppercased())
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                        .settingsPageEntrance(
+                            trigger: "\(trigger)|card-title=\(title)",
+                            order: order
+                        )
 
-                headerAccessory
+                    headerAccessory
+                        .settingsPageEntrance(
+                            trigger: "\(trigger)|card-accessory=\(title)",
+                            order: order + 1
+                        )
 
-                Spacer(minLength: 0)
+                    Spacer(minLength: 0)
+                }
             }
 
             VStack(alignment: .leading, spacing: 0) {
                 content
             }
-            .background(
-                RoundedRectangle(cornerRadius: AirSendSettingsMetrics.cardCornerRadius, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                .white.opacity(0.030),
-                                .black.opacity(0.035),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+            .background {
+                if usesCardBackground {
+                    SettingsAnimatedCardSurface()
+                        .settingsCardSurfaceEntrance(
+                            trigger: "\(trigger)|card-surface=\(title ?? "plain")",
+                            order: order + 2
                         )
-                    )
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: AirSendSettingsMetrics.cardCornerRadius, style: .continuous)
-                    .strokeBorder(.white.opacity(0.09), lineWidth: 1)
+                }
             }
+        }
+    }
+}
+
+private struct SettingsAnimatedCardSurface: View {
+    var body: some View {
+        RoundedRectangle(
+            cornerRadius: AirSendSettingsMetrics.cardCornerRadius,
+            style: .continuous
+        )
+        .fill(
+            LinearGradient(
+                colors: [
+                    .white.opacity(0.030),
+                    .black.opacity(0.035),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .overlay {
+            RoundedRectangle(
+                cornerRadius: AirSendSettingsMetrics.cardCornerRadius,
+                style: .continuous
+            )
+            .strokeBorder(.white.opacity(0.09), lineWidth: 1)
         }
     }
 }
@@ -1624,6 +2271,7 @@ private struct SettingsTransferModeBar: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            .tint(Color(nsColor: .systemBlue))
             .frame(width: 240)
 
             HStack {
@@ -1757,7 +2405,7 @@ private struct SettingsTransferRow: View {
     let deleteAction: () -> Void
 
     @FocusState private var isPreviewFocused: Bool
-    @State private var isPreviewHovered = false
+    @AirSendState private var isPreviewHovered = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
@@ -1991,7 +2639,7 @@ private struct SettingsIconCommand: View {
     let help: String
     var role: ButtonRole? = nil
     let action: () -> Void
-    @State private var isHovered = false
+    @AirSendState private var isHovered = false
 
     var body: some View {
         Button(role: role, action: action) {

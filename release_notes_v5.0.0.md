@@ -1,0 +1,41 @@
+# AirSend v5.0.0
+
+## 中文
+
+AirSend 5.0 不是一次普通更新，而是一次完整的跨端重塑：更漂亮、更原生，也更可靠。
+
+### Features
+
+- 全新 Android 液态玻璃界面，将 Material 3、Monet 动态取色、多彩主题与悬浮玻璃组件融为一体。
+- 全新原生 macOS 玻璃控制台，把状态、设备、传输与设置收进一个通透、轻盈的桌面体验。
+- 真正完整的跨端控制中心：实时进度、持久历史、Direct Share、运行诊断、剪贴板与截图同步一应俱全。
+
+### Improvements
+
+- DropZone 全面进化：Finder 与 Dock 堆栈都能自然触发，支持连续发送，并适配 macOS 26/27 与不同 Dock 位置。
+- 精简玻璃合成与状态刷新，在保留视觉质感的同时显著降低 macOS 渲染负载和功耗。
+- 强化设备发现、网络恢复、Android 后台运行与传输可靠性，并将全平台版本统一为 5.0.0。
+
+## English
+
+AirSend 5.0 is more than a routine update—it is a complete cross-platform reinvention: more beautiful, more native, and more reliable.
+
+### Features
+
+- A new liquid-glass Android experience blending Material 3, Monet dynamic color, rich themes, and floating translucent components.
+- A new native macOS glass console that brings status, devices, transfers, and settings into one light, beautifully layered desktop experience.
+- A truly complete cross-device control center with live progress, persistent history, Direct Share, diagnostics, clipboard sync, and automatic screenshot delivery.
+
+### Improvements
+
+- A fully evolved DropZone: natural Finder and Dock stack activation, consecutive sends, and support for macOS 26/27 across every Dock position.
+- Leaner glass compositing and state updates preserve the visual polish while significantly reducing macOS rendering load and power usage.
+- Stronger discovery, network recovery, Android background execution, and transfer reliability, with every platform aligned on version 5.0.0.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Avi7ii/AirSend/v5.0.0/docs/assets/screenshots/v5.0/airsend-v5-android-overview.jpg" width="680" alt="AirSend 5.0 Android console overview">
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Avi7ii/AirSend/v5.0.0/docs/assets/screenshots/v5.0/airsend-v5-macos-console.jpg" width="100%" alt="AirSend 5.0 macOS console">
+</p>

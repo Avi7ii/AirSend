@@ -121,6 +121,40 @@ AirSend 3.0.0 新增了一个**默认关闭、需手动开启**的 `HTTP 兼容�
 
 ---
 
+<h2 align="center">✨ AirSend 5.0：跨端重塑</h2>
+
+<p align="center"><b>Android 液态玻璃 × Material 3 · 原生 macOS 玻璃控制台</b></p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/v5.0/airsend-v5-android-overview.jpg" width="720" alt="AirSend 5.0 Android 控制台纵览">
+</p>
+
+<p align="center"><sub>Android 控制台：状态、设备、传输活动与可深度定制的 Material 主题</sub></p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/v5.0/airsend-v5-macos-console.jpg" width="100%" alt="AirSend 5.0 macOS 原生玻璃控制台">
+</p>
+
+<p align="center"><sub>macOS 原生玻璃控制台：设备、传输、自动化与完整运行设置</sub></p>
+
+<h3 align="center">🎨 一套界面，多种气质</h3>
+
+<p align="center">Material 3、Monet 动态取色与半透明悬浮组件共同组成 AirSend 的 Android 视觉系统。</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/v5.0/airsend-v5-android-pink.jpg" width="100%" alt="AirSend Android 粉红主题">
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/v5.0/airsend-v5-android-green.jpg" width="100%" alt="AirSend Android 墨绿主题">
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/v5.0/airsend-v5-android-purple.jpg" width="100%" alt="AirSend Android 深紫主题">
+</p>
+
+---
+
 <h2 align="center">🕸️ 架构总览</h2>
 
 下图面向开发者展示 AirSend 的底层工程架构，包括进程边界、技术栈、IPC、LocalSend-compatible API 适配层以及复杂网络恢复路径。

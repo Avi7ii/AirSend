@@ -121,6 +121,40 @@ AirSend 3.0.0 adds a **manual, default-off** `HTTP Compatibility Mode` specifica
 
 ---
 
+<h2 align="center">✨ AirSend 5.0: Reimagined Across Platforms</h2>
+
+<p align="center"><b>Android liquid glass × Material 3 · Native macOS glass console</b></p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/v5.0/airsend-v5-android-overview.jpg" width="720" alt="AirSend 5.0 Android console overview">
+</p>
+
+<p align="center"><sub>Android console: status, devices, transfer activity, and deeply customizable Material themes</sub></p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/v5.0/airsend-v5-macos-console.jpg" width="100%" alt="AirSend 5.0 native macOS glass console">
+</p>
+
+<p align="center"><sub>Native macOS glass console: devices, transfers, automation, and complete runtime controls</sub></p>
+
+<h3 align="center">🎨 One interface, many moods</h3>
+
+<p align="center">Material 3, Monet dynamic color, and translucent floating components shape AirSend's Android visual system.</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/v5.0/airsend-v5-android-pink.jpg" width="100%" alt="AirSend Android pink theme">
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/v5.0/airsend-v5-android-green.jpg" width="100%" alt="AirSend Android deep green theme">
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/v5.0/airsend-v5-android-purple.jpg" width="100%" alt="AirSend Android deep purple theme">
+</p>
+
+---
+
 <h2 align="center">🕸️ Architecture Overview</h2>
 
 The developer-facing diagram below maps AirSend's low-level runtime boundaries, technology stack, IPC, LocalSend-compatible API adapter, and complex-LAN recovery paths.

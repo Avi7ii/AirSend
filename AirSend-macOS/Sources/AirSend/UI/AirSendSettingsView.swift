@@ -320,7 +320,6 @@ struct AirSendSettingsView: View {
                 .padding(.top, detailContentTopInset)
                 .padding(.bottom, 34)
                 .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .topLeading)
-                .draggableBlankArea()
             }
             .scrollContentBackground(.hidden)
             .background(Color.clear)
@@ -1262,12 +1261,6 @@ private struct SettingsEdgeFade: View {
 }
 
 private extension View {
-    func draggableBlankArea() -> some View {
-        contentShape(Rectangle())
-            .gesture(WindowDragGesture(), including: .gesture)
-            .allowsWindowActivationEvents(true)
-    }
-
     func settingsPageEntrance(trigger: String, order: Int) -> some View {
         SettingsPageEntranceHost(order: order, content: self)
             .id("settings-page-entrance|\(trigger)|\(order)")
@@ -1922,6 +1915,7 @@ private struct SettingsGlowIcon: View {
         }
         .frame(width: size, height: size)
         .clipped()
+        .drawingGroup(opaque: false, colorMode: .nonLinear)
     }
 }
 
@@ -2175,7 +2169,7 @@ private struct SettingsTrustedPeerRow: View {
         HStack(spacing: 12) {
             SettingsGlowIcon(
                 symbolName: "checkmark.shield.fill",
-                tint: peer.isOnline ? Color(nsColor: .systemGreen) : Color(nsColor: .systemGray),
+                tint: Color(nsColor: .systemBlue),
                 size: 34,
                 cornerRadius: 11
             )
@@ -2210,15 +2204,7 @@ private struct SettingsTransferModeBar: View {
 
     var body: some View {
         ZStack {
-            Picker("Direction", selection: $filter) {
-                ForEach(AirSendTransferHistoryFilter.allCases) { item in
-                    Label(item.rawValue, systemImage: item.symbolName)
-                        .tag(item)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .tint(Color(nsColor: .systemBlue))
+            SettingsTransferTabs(filter: $filter)
             .frame(width: 240)
 
             HStack {
@@ -2233,6 +2219,78 @@ private struct SettingsTransferModeBar: View {
             }
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+private struct SettingsTransferTabs: View {
+    @Binding var filter: AirSendTransferHistoryFilter
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(AirSendTransferHistoryFilter.allCases) { item in
+                SettingsTransferTabButton(
+                    item: item,
+                    isSelected: filter == item,
+                    action: { filter = item }
+                )
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(.white.opacity(0.085))
+                .frame(height: 1)
+                .allowsHitTesting(false)
+        }
+        .animation(.easeOut(duration: 0.18), value: filter)
+    }
+}
+
+private struct SettingsTransferTabButton: View {
+    let item: AirSendTransferHistoryFilter
+    let isSelected: Bool
+    let action: () -> Void
+
+    @AirSendState private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 7) {
+                HStack(spacing: 6) {
+                    Image(systemName: item.symbolName)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(
+                            isSelected
+                                ? Color(nsColor: .systemBlue)
+                                : Color.secondary
+                        )
+
+                    Text(item.rawValue)
+                        .font(
+                            .system(
+                                size: 13,
+                                weight: isSelected ? .semibold : .medium
+                            )
+                        )
+                        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                }
+                .opacity(isSelected || isHovered ? 1 : 0.78)
+
+                Rectangle()
+                    .fill(
+                        isSelected
+                            ? Color(nsColor: .systemBlue)
+                            : Color.clear
+                    )
+                    .frame(height: 2)
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .accessibilityLabel(item.rawValue)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
@@ -2683,19 +2741,78 @@ private struct SettingsReceivePolicyRow: View {
         HStack(spacing: 12) {
             Text("Receive requests")
             Spacer(minLength: 12)
-            Picker("Receive requests", selection: $selection) {
-                Text("Ask").tag("ask")
-                Text("Trusted Only").tag("trusted_only")
-                Text("Off").tag("off")
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            SettingsBlueSegmentedControl(
+                labels: ["Ask", "Trusted Only", "Off"],
+                selectedIndex: Binding(
+                    get: { receivePolicyOptions.firstIndex(of: selection) ?? 0 },
+                    set: { index in
+                        guard receivePolicyOptions.indices.contains(index) else { return }
+                        selection = receivePolicyOptions[index]
+                    }
+                )
+            )
             .frame(width: 260)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .overlay(alignment: .bottom) {
             Rectangle().fill(.separator.opacity(0.28)).frame(height: 1)
+        }
+    }
+
+    private let receivePolicyOptions = ["ask", "trusted_only", "off"]
+}
+
+private struct SettingsBlueSegmentedControl: NSViewRepresentable {
+    let labels: [String]
+    var systemImages: [String] = []
+    @Binding var selectedIndex: Int
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(selectedIndex: $selectedIndex)
+    }
+
+    func makeNSView(context: Context) -> NSSegmentedControl {
+        let control = NSSegmentedControl(
+            labels: labels,
+            trackingMode: .selectOne,
+            target: context.coordinator,
+            action: #selector(Coordinator.selectionChanged(_:))
+        )
+        control.segmentStyle = .roundRect
+        control.segmentDistribution = .fillEqually
+        control.selectedSegmentBezelColor = .systemBlue
+        configureImages(for: control)
+        return control
+    }
+
+    func updateNSView(_ control: NSSegmentedControl, context: Context) {
+        context.coordinator.selectedIndex = $selectedIndex
+        control.selectedSegment = selectedIndex
+        control.selectedSegmentBezelColor = .systemBlue
+    }
+
+    private func configureImages(for control: NSSegmentedControl) {
+        for index in labels.indices where systemImages.indices.contains(index) {
+            let image = NSImage(
+                systemSymbolName: systemImages[index],
+                accessibilityDescription: labels[index]
+            )
+            control.setImage(image, forSegment: index)
+            control.setImageScaling(.scaleProportionallyDown, forSegment: index)
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var selectedIndex: Binding<Int>
+
+        init(selectedIndex: Binding<Int>) {
+            self.selectedIndex = selectedIndex
+        }
+
+        @objc func selectionChanged(_ sender: NSSegmentedControl) {
+            selectedIndex.wrappedValue = sender.selectedSegment
         }
     }
 }

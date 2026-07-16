@@ -1,6 +1,5 @@
 import AppKit
 import AirSendConsoleSupport
-import QuartzCore
 import SwiftUI
 
 private typealias AirSendState<Value> = SwiftUI.State<Value>
@@ -155,14 +154,9 @@ private enum AirSendSettingsPageSection: String, Identifiable {
 }
 
 struct AirSendSettingsView: View {
-    private let topInset: CGFloat = 52
     private let edgeBlurHeight: CGFloat = 54
     private let topEdgeBlurHeight: CGFloat = 76
     private let edgeBlurSidebarOffset: CGFloat = 236
-    private let edgeBlurMaxRadius: CGFloat = 5.5
-    private let edgeBlurFalloffExponent: CGFloat = 2.05
-    private let edgeBlurClearTailFraction: CGFloat = 0.18
-    private let edgeBlurTailAlphaFloor: CGFloat = 0.10
     private var sidebarContentTopInset: CGFloat { topEdgeBlurHeight + 8 }
     private var detailContentTopInset: CGFloat { topEdgeBlurHeight - 2 }
 
@@ -229,23 +223,23 @@ struct AirSendSettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .frame(minWidth: 800, minHeight: 520)
         .overlay(alignment: .top) {
-            edgeBlurOverlay(
-                direction: .blurredTopClearBottom,
+            edgeFadeOverlay(
+                direction: .top,
                 height: topEdgeBlurHeight,
                 sidebarOffset: 0
             )
         }
         .overlay(alignment: .bottom) {
-            edgeBlurOverlay(
-                direction: .blurredBottomClearTop,
+            edgeFadeOverlay(
+                direction: .bottom,
                 height: edgeBlurHeight,
                 sidebarOffset: edgeBlurSidebarOffset
             )
         }
     }
 
-    private func edgeBlurOverlay(
-        direction: SettingsVariableBlurDirection,
+    private func edgeFadeOverlay(
+        direction: SettingsEdgeFadeDirection,
         height: CGFloat,
         sidebarOffset: CGFloat
     ) -> some View {
@@ -253,13 +247,7 @@ struct AirSendSettingsView: View {
             Color.clear
                 .frame(width: sidebarOffset)
 
-            SettingsVariableBlurView(
-                maxBlurRadius: edgeBlurMaxRadius,
-                direction: direction,
-                falloffExponent: edgeBlurFalloffExponent,
-                clearTailFraction: edgeBlurClearTailFraction,
-                tailAlphaFloor: edgeBlurTailAlphaFloor
-            )
+            SettingsEdgeFade(direction: direction)
             .frame(maxWidth: .infinity)
             .frame(height: height)
             .allowsHitTesting(false)
@@ -1236,208 +1224,40 @@ private struct SettingsSidebarEdgeFade: View {
     }
 }
 
-private enum SettingsVariableBlurDirection {
-    case blurredTopClearBottom
-    case blurredBottomClearTop
+private enum SettingsEdgeFadeDirection {
+    case top
+    case bottom
 }
 
-private struct SettingsVariableBlurView: NSViewRepresentable {
-    let maxBlurRadius: CGFloat
-    let direction: SettingsVariableBlurDirection
-    let falloffExponent: CGFloat
-    let clearTailFraction: CGFloat
-    let tailAlphaFloor: CGFloat
+private struct SettingsEdgeFade: View {
+    let direction: SettingsEdgeFadeDirection
 
-    func makeNSView(context: Context) -> SettingsVariableBlurNSView {
-        SettingsVariableBlurNSView(
-            maxBlurRadius: maxBlurRadius,
-            direction: direction,
-            falloffExponent: falloffExponent,
-            clearTailFraction: clearTailFraction,
-            tailAlphaFloor: tailAlphaFloor
+    var body: some View {
+        LinearGradient(
+            stops: gradientStops,
+            startPoint: .top,
+            endPoint: .bottom
         )
+        .accessibilityHidden(true)
     }
 
-    func updateNSView(_ view: SettingsVariableBlurNSView, context: Context) {
-        view.update(
-            maxBlurRadius: maxBlurRadius,
-            direction: direction,
-            falloffExponent: falloffExponent,
-            clearTailFraction: clearTailFraction,
-            tailAlphaFloor: tailAlphaFloor
-        )
-    }
-}
-
-private final class SettingsVariableBlurNSView: NSVisualEffectView {
-    private var maxBlurRadius: CGFloat
-    private var direction: SettingsVariableBlurDirection
-    private var falloffExponent: CGFloat
-    private var clearTailFraction: CGFloat
-    private var tailAlphaFloor: CGFloat
-
-    init(
-        maxBlurRadius: CGFloat,
-        direction: SettingsVariableBlurDirection,
-        falloffExponent: CGFloat,
-        clearTailFraction: CGFloat,
-        tailAlphaFloor: CGFloat
-    ) {
-        self.maxBlurRadius = maxBlurRadius
-        self.direction = direction
-        self.falloffExponent = falloffExponent
-        self.clearTailFraction = clearTailFraction
-        self.tailAlphaFloor = tailAlphaFloor
-        super.init(frame: .zero)
-        wantsLayer = true
-        material = .hudWindow
-        blendingMode = .withinWindow
-        state = .active
-        isEmphasized = false
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    func update(
-        maxBlurRadius: CGFloat,
-        direction: SettingsVariableBlurDirection,
-        falloffExponent: CGFloat,
-        clearTailFraction: CGFloat,
-        tailAlphaFloor: CGFloat
-    ) {
-        self.maxBlurRadius = maxBlurRadius
-        self.direction = direction
-        self.falloffExponent = falloffExponent
-        self.clearTailFraction = clearTailFraction
-        self.tailAlphaFloor = tailAlphaFloor
-        installVariableBlur()
-    }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        DispatchQueue.main.async { [weak self] in
-            self?.installVariableBlur()
+    private var gradientStops: [Gradient.Stop] {
+        switch direction {
+        case .top:
+            return [
+                .init(color: .black.opacity(0.18), location: 0.00),
+                .init(color: .black.opacity(0.08), location: 0.36),
+                .init(color: .black.opacity(0.025), location: 0.68),
+                .init(color: .clear, location: 1.00),
+            ]
+        case .bottom:
+            return [
+                .init(color: .clear, location: 0.00),
+                .init(color: .black.opacity(0.02), location: 0.30),
+                .init(color: .black.opacity(0.07), location: 0.66),
+                .init(color: .black.opacity(0.16), location: 1.00),
+            ]
         }
-    }
-
-    override func layout() {
-        super.layout()
-        installVariableBlur()
-    }
-
-    private func installVariableBlur() {
-        guard let materialLayer = layer?.sublayers?.first else {
-            layer?.opacity = 0
-            return
-        }
-        guard let backdropLayer = findBackdropLayer(in: materialLayer),
-              let variableBlur = makeVariableBlurFilter() else {
-            layer?.opacity = 0
-            return
-        }
-
-        layer?.opacity = 1
-        materialLayer.backgroundColor = nil
-        materialLayer.isOpaque = false
-        materialLayer.sublayers?.forEach { sublayer in
-            if sublayer !== backdropLayer {
-                sublayer.opacity = 0
-                sublayer.isHidden = true
-            }
-        }
-        backdropLayer.backgroundColor = nil
-        backdropLayer.isOpaque = false
-        backdropLayer.filters = [variableBlur]
-        backdropLayer.setValue(NSScreen.main?.backingScaleFactor ?? 2, forKey: "scale")
-    }
-
-    private func findBackdropLayer(in layer: CALayer) -> CALayer? {
-        if layer.name == "backdrop" || String(describing: type(of: layer)).contains("CABackdropLayer") {
-            return layer
-        }
-        for sublayer in layer.sublayers ?? [] {
-            if let match = findBackdropLayer(in: sublayer) {
-                return match
-            }
-        }
-        return nil
-    }
-
-    private func makeVariableBlurFilter() -> NSObject? {
-        let className = String("retliFAC".reversed())
-        let selectorName = String(":epyThtiWretlif".reversed())
-        guard let filterClass = NSClassFromString(className) as? NSObject.Type,
-              let filter = filterClass
-                .perform(NSSelectorFromString(selectorName), with: "variableBlur")?
-                .takeUnretainedValue() as? NSObject,
-              let maskImage = makeGradientImage() else {
-            return nil
-        }
-
-        filter.setValue(maxBlurRadius, forKey: "inputRadius")
-        filter.setValue(maskImage, forKey: "inputMaskImage")
-        filter.setValue(true, forKey: "inputNormalizeEdges")
-        return filter
-    }
-
-    private func makeGradientImage(width: Int = 32, height: Int = 256) -> CGImage? {
-        let exponent = max(1.4, min(falloffExponent, 5.0))
-        let clearTail = max(0, min(clearTailFraction, 0.42))
-        let tailFloor = max(0, min(tailAlphaFloor, 0.20))
-        let rowCount = max(height - 1, 1)
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
-
-        for row in 0..<height {
-            let topToBottom = CGFloat(row) / CGFloat(rowCount)
-            let directionalAlpha: CGFloat
-            switch direction {
-            case .blurredBottomClearTop:
-                directionalAlpha = topToBottom
-            case .blurredTopClearBottom:
-                directionalAlpha = 1 - topToBottom
-            }
-            let mixedAlpha: CGFloat
-            if directionalAlpha <= clearTail {
-                let tailProgress = clearTail > 0 ? directionalAlpha / clearTail : 1
-                mixedAlpha = tailFloor * smoothStep(tailProgress)
-            } else {
-                let normalizedAlpha = (directionalAlpha - clearTail) / (1 - clearTail)
-                let curvedAlpha = pow(normalizedAlpha, exponent)
-                mixedAlpha = tailFloor + ((1 - tailFloor) * curvedAlpha)
-            }
-            let alpha = UInt8((mixedAlpha * 255).rounded())
-
-            for column in 0..<width {
-                let offset = ((row * width) + column) * 4
-                pixels[offset] = 0
-                pixels[offset + 1] = 0
-                pixels[offset + 2] = 0
-                pixels[offset + 3] = alpha
-            }
-        }
-
-        let data = Data(pixels) as CFData
-        guard let provider = CGDataProvider(data: data) else { return nil }
-        return CGImage(
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bitsPerPixel: 32,
-            bytesPerRow: width * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-            provider: provider,
-            decode: nil,
-            shouldInterpolate: true,
-            intent: .defaultIntent
-        )
-    }
-
-    private func smoothStep(_ value: CGFloat) -> CGFloat {
-        let x = max(0, min(value, 1))
-        return x * x * (3 - (2 * x))
     }
 }
 

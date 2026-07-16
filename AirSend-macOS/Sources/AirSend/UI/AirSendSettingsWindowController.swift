@@ -261,7 +261,7 @@ private final class AirSendSettingsGlassContainerView: NSVisualEffectView {
         appearance = NSAppearance(named: .vibrantDark)
         material = .hudWindow
         blendingMode = .behindWindow
-        state = .active
+        state = .followsWindowActiveState
         isEmphasized = false
     }
 

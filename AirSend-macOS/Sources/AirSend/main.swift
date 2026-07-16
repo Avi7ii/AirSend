@@ -900,7 +900,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         let controller = AirSendSettingsWindowController(store: store)
         controller.onWindowVisibilityChanged = { [weak self] isVisible in
             self?.setDockIconVisibleForSettingsWindow(isVisible)
-            self?.updateSettingsWindowRelativeTimeTimer(isVisible: isVisible)
+        }
+        controller.onWindowRenderingActivityChanged = { [weak self] isRendering in
+            self?.updateSettingsWindowRelativeTimeTimer(isVisible: isRendering)
+            if isRendering {
+                self?.refreshSettingsWindowIfNeeded()
+            }
         }
         settingsWindowController = controller
         return controller
@@ -937,7 +942,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         let interval = max(1, nextRefreshDate.timeIntervalSince(now))
         let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.refreshSettingsWindowIfNeeded()
+                self?.refreshSettingsWindowIfNeeded(forceRefresh: true)
                 self?.scheduleNextSettingsWindowRelativeTimeRefresh()
             }
         }
@@ -945,8 +950,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         settingsWindowRelativeTimeTimer = timer
     }
 
-    private func refreshSettingsWindowIfNeeded() {
-        settingsWindowController?.store.update(snapshot: makeSettingsSnapshot())
+    private func refreshSettingsWindowIfNeeded(forceRefresh: Bool = false) {
+        guard let controller = settingsWindowController,
+              controller.isActivelyRenderingContent else {
+            return
+        }
+        controller.store.update(
+            snapshot: makeSettingsSnapshot(),
+            forceRefresh: forceRefresh
+        )
     }
     
     private func sortedCandidates(for groupKey: String, devices: [Device]) -> [Device] {

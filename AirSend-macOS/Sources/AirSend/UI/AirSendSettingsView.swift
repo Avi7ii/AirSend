@@ -1350,6 +1350,17 @@ private struct SettingsPageEntranceHost<Content: View>: View {
                 ) {
                     motionProgress = 1
                 }
+
+                let settleMilliseconds = Int(
+                    ((delay + AirSendSettingsMetrics.pageEntranceDuration + 0.08) * 1_000)
+                        .rounded(.up)
+                )
+                try? await Task.sleep(for: .milliseconds(settleMilliseconds))
+                guard !Task.isCancelled else { return }
+                NotificationCenter.default.post(
+                    name: .airSendSettingsEntranceDidSettle,
+                    object: nil
+                )
             }
     }
 
@@ -1493,6 +1504,18 @@ private struct SettingsTransferRowEntranceHost<Content: View>: View {
                 ) {
                     motionProgress = 1
                 }
+
+
+                let settleMilliseconds = Int(
+                    ((delay + AirSendSettingsMetrics.transferRowEntranceDuration + 0.08) * 1_000)
+                        .rounded(.up)
+                )
+                try? await Task.sleep(for: .milliseconds(settleMilliseconds))
+                guard !Task.isCancelled else { return }
+                NotificationCenter.default.post(
+                    name: .airSendSettingsEntranceDidSettle,
+                    object: nil
+                )
             }
     }
 

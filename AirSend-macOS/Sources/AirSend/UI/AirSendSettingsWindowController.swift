@@ -1,6 +1,13 @@
 import Cocoa
 import AirSendConsoleSupport
+import Darwin
 import SwiftUI
+
+extension Notification.Name {
+    static let airSendSettingsEntranceDidSettle = Notification.Name(
+        "AirSendSettingsEntranceDidSettle"
+    )
+}
 
 struct AirSendSettingsDeviceSummary: Identifiable, Hashable {
     let id: String
@@ -85,7 +92,7 @@ struct AirSendDiagnosticSummary: Identifiable, Hashable {
     let tone: AirSendConsoleHealthTone
 }
 
-struct AirSendSettingsSnapshot {
+struct AirSendSettingsSnapshot: Equatable {
     var clipboardSyncEnabled: Bool
     var screenshotSyncEnabled: Bool
     var autoUpdateEnabled: Bool
@@ -171,7 +178,13 @@ final class AirSendSettingsStore: ObservableObject {
         self.actions = actions
     }
 
-    func update(snapshot: AirSendSettingsSnapshot) {
+    func update(snapshot: AirSendSettingsSnapshot, forceRefresh: Bool = false) {
+        guard snapshot != self.snapshot else {
+            if forceRefresh {
+                objectWillChange.send()
+            }
+            return
+        }
         self.snapshot = snapshot
     }
 
@@ -184,11 +197,14 @@ final class AirSendSettingsStore: ObservableObject {
 final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegate {
     private static let defaultSize = NSSize(width: 920, height: 640)
     private static let minimumSize = NSSize(width: 800, height: 520)
+    private static let backgroundBlurRadius: Int32 = 50
 
     let store: AirSendSettingsStore
     var onWindowVisibilityChanged: ((Bool) -> Void)?
+    var onWindowRenderingActivityChanged: ((Bool) -> Void)?
     private let glassContainerView: AirSendSettingsGlassContainerView
     private let hostingView: AirSendSettingsHostingView<AirSendSettingsView>
+    private var didConfigureWindowBackgroundBlur = false
 
     init(store: AirSendSettingsStore) {
         self.store = store
@@ -232,6 +248,13 @@ final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegat
         shouldCascadeWindows = false
         self.window?.delegate = self
         self.window?.identifier = NSUserInterfaceItemIdentifier("AirSendSettingsWindow")
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(settingsEntranceDidSettle(_:)),
+            name: .airSendSettingsEntranceDidSettle,
+            object: nil
+        )
+        configureWindowBackgroundBlurIfNeeded()
     }
 
     @available(*, unavailable)
@@ -241,6 +264,7 @@ final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegat
 
     func showSettingsWindow() {
         guard let window else { return }
+        configureWindowBackgroundBlurIfNeeded()
         onWindowVisibilityChanged?(true)
         if !window.isVisible {
             window.center()
@@ -248,10 +272,67 @@ final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegat
         showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        reportRenderingActivity()
     }
 
     func windowWillClose(_ notification: Notification) {
+        onWindowRenderingActivityChanged?(false)
         onWindowVisibilityChanged?(false)
+    }
+
+    func windowDidMiniaturize(_ notification: Notification) {
+        reportRenderingActivity()
+    }
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        reportRenderingActivity()
+    }
+
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        reportRenderingActivity()
+    }
+
+    var isActivelyRenderingContent: Bool {
+        guard let window else { return false }
+        return window.isVisible
+            && !window.isMiniaturized
+            && window.occlusionState.contains(.visible)
+    }
+
+    private func reportRenderingActivity() {
+        onWindowRenderingActivityChanged?(isActivelyRenderingContent)
+    }
+
+    private func configureWindowBackgroundBlurIfNeeded() {
+        guard !didConfigureWindowBackgroundBlur,
+              let window,
+              AirSendWindowBackgroundBlur.apply(
+                to: window,
+                radius: Self.backgroundBlurRadius
+              ) else {
+            return
+        }
+
+        didConfigureWindowBackgroundBlur = true
+        window.backgroundColor = NSColor.white.withAlphaComponent(0.001)
+        glassContainerView.useWindowLevelBackgroundBlur()
+    }
+
+    @objc private func settingsEntranceDidSettle(_ notification: Notification) {
+        NSObject.cancelPreviousPerformRequests(
+            withTarget: self,
+            selector: #selector(neutralizeSettledEntranceBlurFilters),
+            object: nil
+        )
+        perform(
+            #selector(neutralizeSettledEntranceBlurFilters),
+            with: nil,
+            afterDelay: 0.12
+        )
+    }
+
+    @objc private func neutralizeSettledEntranceBlurFilters() {
+        hostingView.neutralizeSettledEntranceBlurFilters()
     }
 }
 
@@ -267,6 +348,54 @@ private final class AirSendSettingsGlassContainerView: NSVisualEffectView {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    func useWindowLevelBackgroundBlur() {
+        blendingMode = .withinWindow
+    }
+}
+
+@MainActor
+private enum AirSendWindowBackgroundBlur {
+    private typealias DefaultConnectionFunction = @convention(c) () -> UnsafeMutableRawPointer?
+    private typealias SetBlurFunction = @convention(c) (
+        UnsafeMutableRawPointer?,
+        Int,
+        Int32
+    ) -> Int32
+
+    private struct Functions {
+        let defaultConnection: DefaultConnectionFunction
+        let setBlur: SetBlurFunction
+    }
+
+    private static let functions: Functions? = {
+        let frameworkPath = "/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight"
+        guard let handle = dlopen(frameworkPath, RTLD_LAZY | RTLD_LOCAL),
+              let defaultConnectionSymbol = dlsym(handle, "CGSDefaultConnectionForThread"),
+              let setBlurSymbol = dlsym(handle, "CGSSetWindowBackgroundBlurRadius") else {
+            return nil
+        }
+
+        return Functions(
+            defaultConnection: unsafeBitCast(
+                defaultConnectionSymbol,
+                to: DefaultConnectionFunction.self
+            ),
+            setBlur: unsafeBitCast(
+                setBlurSymbol,
+                to: SetBlurFunction.self
+            )
+        )
+    }()
+
+    static func apply(to window: NSWindow, radius: Int32) -> Bool {
+        guard let functions,
+              let connection = functions.defaultConnection() else {
+            return false
+        }
+
+        return functions.setBlur(connection, window.windowNumber, radius) == 0
     }
 }
 
@@ -285,6 +414,38 @@ private final class AirSendSettingsHostingView<Content: View>: NSHostingView<Con
             zeroSafeAreaLayoutGuide.trailingAnchor.constraint(equalTo: trailingAnchor),
             zeroSafeAreaLayoutGuide.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+    }
+
+    func neutralizeSettledEntranceBlurFilters() {
+        guard let layer else { return }
+
+        var neutralizedCount = 0
+        func visit(_ currentLayer: CALayer) {
+            for filter in currentLayer.filters ?? [] {
+                guard String(describing: filter) == "gaussianBlur",
+                      let filterObject = filter as? NSObject,
+                      let radius = filterObject.value(forKey: "inputRadius") as? NSNumber,
+                      radius.doubleValue > 0,
+                      radius.doubleValue <= 0.01 else {
+                    continue
+                }
+                filterObject.setValue(0.0, forKey: "inputRadius")
+                neutralizedCount += 1
+            }
+            currentLayer.sublayers?.forEach(visit)
+        }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        visit(layer)
+        CATransaction.commit()
+
+        if neutralizedCount > 0 {
+            NSLog(
+                "AirSend settings compositor: neutralized %d settled entrance blur filters",
+                neutralizedCount
+            )
+        }
     }
 
     @available(*, unavailable)

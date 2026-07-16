@@ -34,6 +34,10 @@ private enum AirSendSettingsMetrics {
     static let pageTransitionTriggerDuration: TimeInterval = 0.001
 }
 
+private enum AirSendSettingsTextTone {
+    static let secondary = Color.white.opacity(0.60)
+}
+
 private enum AirSendSettingsCategory: String, CaseIterable, Identifiable {
     case status
     case devices
@@ -266,7 +270,7 @@ struct AirSendSettingsView: View {
                             .fontWeight(.semibold)
                         Text("Console")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AirSendSettingsTextTone.secondary)
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
@@ -309,7 +313,7 @@ struct AirSendSettingsView: View {
                             .fontWeight(.semibold)
                             .settingsPageEntrance(trigger: selectedCategory.rawValue, order: 0)
                         Text(selectedCategory.subtitle)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AirSendSettingsTextTone.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                             .settingsPageEntrance(trigger: selectedCategory.rawValue, order: 1)
                     }
@@ -1631,7 +1635,7 @@ private struct SettingsAnimatedCard<Content: View, HeaderAccessory: View>: View 
                 HStack(alignment: .center, spacing: 14) {
                     Text(title.uppercased())
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AirSendSettingsTextTone.secondary)
                         .fixedSize()
                         .settingsPageEntrance(
                             trigger: "\(trigger)|card-title=\(title)",
@@ -1736,11 +1740,11 @@ private struct SettingsHealthStatusRow: View {
 
                 Text(snapshot.healthDetail)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AirSendSettingsTextTone.secondary)
 
                 Text(snapshot.preflightSummary)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AirSendSettingsTextTone.secondary)
             }
 
             Spacer(minLength: 12)
@@ -1803,12 +1807,12 @@ private struct SettingsConnectionOverviewRow: View {
 
                 Text(snapshot.healthDetail)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AirSendSettingsTextTone.secondary)
                     .lineLimit(1)
 
                 Text(snapshot.preflightSummary)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AirSendSettingsTextTone.secondary)
                     .lineLimit(1)
             }
         }
@@ -1836,7 +1840,7 @@ private struct SettingsConnectionOverviewRow: View {
 
                 Text(snapshot.selectedTargetSubtitle)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AirSendSettingsTextTone.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .lineLimit(1)
             }
@@ -1944,7 +1948,7 @@ private struct SettingsCurrentTargetRow: View {
 
                     Text(snapshot.selectedTargetSubtitle)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AirSendSettingsTextTone.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -1972,12 +1976,12 @@ private struct SettingsDevicesSummaryRow: View {
                     .controlSize(.small)
                 Text(snapshot.discoveryRefreshSummary)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AirSendSettingsTextTone.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text(summaryText)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AirSendSettingsTextTone.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -2040,7 +2044,7 @@ private struct SettingsDeviceRow: View {
 
                         Text("\(device.deviceType) • \(device.model)")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AirSendSettingsTextTone.secondary)
                             .lineLimit(1)
 
                         ViewThatFits(in: .horizontal) {
@@ -2067,7 +2071,7 @@ private struct SettingsDeviceRow: View {
 
                 Text("ID \(device.fingerprintSuffix)")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AirSendSettingsTextTone.secondary)
             }
             .frame(width: 92, alignment: .trailing)
         }
@@ -2135,7 +2139,7 @@ private struct SettingsManualPeerRow: View {
                     .font(.system(size: 13, weight: .semibold))
                 Text(peer.endpoint)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AirSendSettingsTextTone.secondary)
             }
 
             Spacer(minLength: 8)
@@ -2179,7 +2183,7 @@ private struct SettingsTrustedPeerRow: View {
                     .font(.system(size: 13, weight: .semibold))
                 Text("ID \(peer.fingerprintSuffix)")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AirSendSettingsTextTone.secondary)
             }
 
             Spacer(minLength: 8)
@@ -2272,7 +2276,11 @@ private struct SettingsTransferTabButton: View {
                                 weight: isSelected ? .semibold : .medium
                             )
                         )
-                        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                        .foregroundStyle(
+                            isSelected
+                                ? Color.primary
+                                : AirSendSettingsTextTone.secondary
+                        )
                 }
                 .opacity(isSelected || isHovered ? 1 : 0.78)
 
@@ -2315,7 +2323,7 @@ private struct SettingsTransferEmptyState: View {
                     : "Incoming transfers will appear here."
             )
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AirSendSettingsTextTone.secondary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
@@ -2346,7 +2354,7 @@ private struct SettingsTransferActionRow: View {
                         .font(.system(size: 13, weight: .medium))
                     Text(detail)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AirSendSettingsTextTone.secondary)
                         .lineLimit(1)
                 }
 
@@ -2388,7 +2396,7 @@ private struct SettingsTransferInfoRow: View {
                     .font(.system(size: 13, weight: .medium))
                 Text(detail)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AirSendSettingsTextTone.secondary)
             }
 
             Spacer(minLength: 8)
@@ -2512,7 +2520,7 @@ private struct SettingsTransferRow: View {
 
             Text("\(transfer.direction == "incoming" ? "From" : "To") \(transfer.peerTitle) · \(transfer.timeLabel)")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AirSendSettingsTextTone.secondary)
                 .lineLimit(1)
 
             if transfer.canCancel {
@@ -2521,7 +2529,7 @@ private struct SettingsTransferRow: View {
                         .progressViewStyle(.linear)
                     Text(transfer.byteProgress)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AirSendSettingsTextTone.secondary)
                 }
                 .frame(height: 25, alignment: .top)
             } else if let failure = transfer.failureMessage, !failure.isEmpty {
@@ -2537,7 +2545,7 @@ private struct SettingsTransferRow: View {
             } else {
                 Text(transfer.byteProgress)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AirSendSettingsTextTone.secondary)
             }
         }
     }
@@ -2658,7 +2666,11 @@ private struct SettingsIconCommand: View {
                 )
         }
         .buttonStyle(.plain)
-        .foregroundStyle(role == .destructive ? Color(nsColor: .systemRed) : .secondary)
+        .foregroundStyle(
+            role == .destructive
+                ? Color(nsColor: .systemRed)
+                : AirSendSettingsTextTone.secondary
+        )
         .background {
             RoundedRectangle(
                 cornerRadius: AirSendSettingsMetrics.actionCornerRadius,
@@ -2695,7 +2707,7 @@ private struct SettingsDiagnosticRow: View {
                 if let detail = diagnostic.detail, !detail.isEmpty {
                     Text(detail)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AirSendSettingsTextTone.secondary)
                         .lineLimit(2)
                 }
             }
@@ -2723,7 +2735,7 @@ private struct SettingsLogTailView: View {
             ScrollView(.vertical) {
                 Text(lines.joined(separator: "\n"))
                     .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AirSendSettingsTextTone.secondary)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
@@ -2828,7 +2840,7 @@ private struct SettingsDestinationRow: View {
                 Text(title)
                 Text(path)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AirSendSettingsTextTone.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -2913,7 +2925,7 @@ private struct SettingsActivityRow: View {
 
                 Text(activity.detail)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AirSendSettingsTextTone.secondary)
                     .lineLimit(2)
             }
 
@@ -3001,7 +3013,7 @@ private struct SettingsMetricChip: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AirSendSettingsTextTone.secondary)
 
             Text(value)
                 .font(.system(size: 12, weight: .semibold))
@@ -3046,7 +3058,7 @@ private struct SettingsMetaChip: View {
     var body: some View {
         Text(title)
             .font(.caption2)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(AirSendSettingsTextTone.secondary)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(
@@ -3066,7 +3078,7 @@ private struct SettingsEmptyStateRow: View {
                 .fontWeight(.medium)
             Text(message)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AirSendSettingsTextTone.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 14)
@@ -3085,7 +3097,7 @@ private struct SettingsToggleRow: View {
                 Text(title)
                 Text(detail)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AirSendSettingsTextTone.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -3121,7 +3133,7 @@ private struct SettingsValueRow: View {
                 if let detail, !detail.isEmpty {
                     Text(detail)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AirSendSettingsTextTone.secondary)
                         .multilineTextAlignment(.trailing)
                 }
             }

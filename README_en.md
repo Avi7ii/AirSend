@@ -148,8 +148,6 @@ AirSend 3.0.0 adds a **manual, default-off** `HTTP Compatibility Mode` specifica
 
 <h3 align="center">🎨 One interface, many moods</h3>
 
-<p align="center">Material 3, Monet dynamic color, and translucent floating components shape AirSend's Android visual system.</p>
-
 
 ---
 

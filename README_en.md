@@ -250,9 +250,9 @@ Runs in `system_server`, hooks `ClipboardService$ClipboardImpl.setPrimaryClip`:
 
 ### 💻 Step 1: macOS Setup
 
-1. Download the latest `AirSend.app` from [Releases](https://github.com/Avi7ii/AirSend/releases/latest)
-2. Drag it into `/Applications` and launch it
-3. Right-click the menu bar icon → **"Launch at Login"** → enable
+1. For a first install, download the latest macOS ZIP from [Releases](https://github.com/Avi7ii/AirSend/releases/latest), then drag `AirSend.app` into `/Applications` and open it
+2. Existing users should upgrade with AirSend's **Check for Updates** action; Sparkle safely quits the old process, atomically replaces the app, and relaunches the new version
+3. Keep **Auto-check for updates** enabled under **Settings → Startup & Updates** for future releases
 
 ### 🤖 Step 2: Android Setup
 

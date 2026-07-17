@@ -245,9 +245,9 @@ Android 端分两种模式：
 
 ### 💻 Step 1：部署 Mac 端
 
-1. 首次安装时，前往 [Releases 页面](https://github.com/Avi7ii/AirSend/releases/latest) 下载最新的 `AirSend.app`
-2. 拖入 `/Applications` 文件夹并打开
-3. 后续更新会在菜单栏自动提示，点击即可重启安装已下载的新版本
+1. 首次安装时，前往 [Releases 页面](https://github.com/Avi7ii/AirSend/releases/latest) 下载最新的 macOS ZIP，将 `AirSend.app` 拖入 `/Applications` 后打开
+2. 已安装用户请使用 AirSend 内的 **Check for Updates** 升级；Sparkle 会安全退出旧进程、原子替换 App，并重新启动新版
+3. 建议在 **Settings → Startup & Updates** 中保持 **Auto-check for updates** 开启
 
 ### 🤖 Step 2：部署 Android 端
 

@@ -4,6 +4,8 @@
 
 AirSend 5.0 不是一次普通更新，而是一次完整的跨端重塑：更漂亮、更原生，也更可靠。
 
+> **macOS 升级提示：** 已安装用户请直接使用 AirSend 内的 **Check for Updates**。Sparkle 会退出旧进程、原子替换 App，并重新启动 5.0.0；ZIP 仅用于首次或手动安装。
+
 ### Features
 
 - 全新 Android 液态玻璃界面，将 Material 3、Monet 动态取色、多彩主题与悬浮玻璃组件融为一体。
@@ -19,6 +21,8 @@ AirSend 5.0 不是一次普通更新，而是一次完整的跨端重塑：更�
 ## English
 
 AirSend 5.0 is more than a routine update—it is a complete cross-platform reinvention: more beautiful, more native, and more reliable.
+
+> **macOS upgrade note:** Existing users should use AirSend's **Check for Updates** action. Sparkle quits the old process, atomically replaces the app, and relaunches 5.0.0; the ZIP is only for first-time or manual installation.
 
 ### Features
 

@@ -125,14 +125,9 @@ AirSend 3.0.0 新增了一个**默认关闭、需手动开启**的 `HTTP 兼容�
 
 <p align="center"><b>Android 液态玻璃 × Material 3 · 原生 macOS 玻璃控制台</b></p>
 
-<p align="center">
-  <img src="docs/assets/screenshots/v5.0/airsend-v5-android-overview.jpg" width="720" alt="AirSend 5.0 Android 控制台纵览">
-</p>
+
 
 <p align="center"><sub>Android 控制台：状态、设备、传输活动与可深度定制的 Material 主题</sub></p>
-
-
-<p align="center">Material 3、Monet 动态取色与半透明悬浮组件共同组成 AirSend 的 Android 视觉系统。</p>
 
 <p align="center">
   <img src="docs/assets/screenshots/v5.0/airsend-v5-android-pink.jpg" width="100%" alt="AirSend Android 粉红主题">
@@ -144,6 +139,10 @@ AirSend 3.0.0 新增了一个**默认关闭、需手动开启**的 `HTTP 兼容�
 
 <p align="center">
   <img src="docs/assets/screenshots/v5.0/airsend-v5-android-purple.jpg" width="100%" alt="AirSend Android 深紫主题">
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/v5.0/airsend-v5-macos-console.jpg" width="100%" alt="AirSend 5.0 native macOS glass console">
 </p>
 
 

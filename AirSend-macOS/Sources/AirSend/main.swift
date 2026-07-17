@@ -2177,6 +2177,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
     private func shouldAcceptIncomingTransfer(_ request: TransferRequest) -> Bool {
         switch runtimeConfiguration.receivePolicy {
+        case .fullAccess:
+            return true
         case .off:
             return false
         case .trustedOnly:
@@ -4514,7 +4516,7 @@ private enum SelfTestRunner {
             port: goodPort,
             deviceModel: model,
             deviceType: deviceType,
-            version: "5.0.0",
+            version: "5.0.1",
             https: deviceUsesHTTPS,
             download: true,
             lastSeen: Date()
@@ -4526,7 +4528,7 @@ private enum SelfTestRunner {
             port: badPort,
             deviceModel: model,
             deviceType: deviceType,
-            version: "5.0.0",
+            version: "5.0.1",
             https: deviceUsesHTTPS,
             download: true,
             lastSeen: Date()

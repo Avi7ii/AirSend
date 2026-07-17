@@ -17,6 +17,8 @@ static NEXT_TEMP_FILE_ID: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceivePolicy {
+    FullAccess,
+    // Legacy 5.0.0 value. Normalization migrates it to full access.
     Ask,
     TrustedOnly,
     Off,
@@ -63,7 +65,7 @@ impl Default for AirSendConfig {
             preferred_target: None,
             manual_peers: Vec::new(),
             trusted_peer_fingerprints: Vec::new(),
-            receive_policy: ReceivePolicy::Ask,
+            receive_policy: ReceivePolicy::FullAccess,
             clipboard_sync_enabled: true,
             screenshot_sync_enabled: true,
             startup_enabled: true,
@@ -138,7 +140,10 @@ impl AirSendConfig {
                 .map(str::to_string),
             manual_peers: peers.into_values().collect(),
             trusted_peer_fingerprints,
-            receive_policy: self.receive_policy.clone(),
+            receive_policy: match &self.receive_policy {
+                ReceivePolicy::Ask => ReceivePolicy::FullAccess,
+                policy => policy.clone(),
+            },
             clipboard_sync_enabled: self.clipboard_sync_enabled,
             screenshot_sync_enabled: self.screenshot_sync_enabled,
             startup_enabled: self.startup_enabled,
@@ -324,9 +329,23 @@ mod tests {
 
         assert!(config.clipboard_sync_enabled);
         assert!(config.screenshot_sync_enabled);
+        assert_eq!(config.receive_policy, ReceivePolicy::FullAccess);
         assert_eq!(
             config.history_limit_per_direction,
             DEFAULT_HISTORY_LIMIT_PER_DIRECTION
+        );
+    }
+
+    #[test]
+    fn migrates_legacy_ask_policy_to_full_access() {
+        let config = AirSendConfig {
+            receive_policy: ReceivePolicy::Ask,
+            ..AirSendConfig::default()
+        };
+
+        assert_eq!(
+            config.normalized().unwrap().receive_policy,
+            ReceivePolicy::FullAccess
         );
     }
 

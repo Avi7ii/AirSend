@@ -379,7 +379,7 @@ class AirSendRuntimeRepositoryImpl(
     }
 
     override suspend fun setReceivePolicy(policy: String) {
-        require(policy in setOf("ask", "trusted_only", "off")) {
+        require(policy in setOf("full_access", "trusted_only", "off")) {
             "Unsupported receive policy: $policy"
         }
         updateConfig(buildJsonObject { put("receivePolicy", policy) })

@@ -40,7 +40,7 @@ data class AirSendRuntimeState(
     val historySchemaVersion: Int? = null,
     val daemonStartedAtMs: Long? = null,
     val preferredTargetId: String? = null,
-    val receivePolicy: String = "ask",
+    val receivePolicy: String = "full_access",
     val trustedPeerFingerprints: Set<String> = emptySet(),
     val downloadDestination: String = "/sdcard/Download/AirSend",
     val mediaDestination: String = "/sdcard/Pictures/AirSend",

@@ -2269,12 +2269,12 @@ private fun MiuixAirSendContentItem(
             MiuixSwitchWidget(
                 title = title,
                 description = description,
-                checked = runtimeState.receivePolicy == "trusted_only",
+                checked = runtimeState.receivePolicy == "full_access",
                 enabled = runtimeState.daemonReachable,
                 onCheckedChange = {
                     onAction(
                         AirSendRuntimeAction.SetReceivePolicy(
-                            if (it) "trusted_only" else "ask"
+                            if (it) "full_access" else "trusted_only"
                         )
                     )
                 }
@@ -2288,7 +2288,7 @@ private fun MiuixAirSendContentItem(
                 enabled = runtimeState.daemonReachable,
                 onCheckedChange = {
                     onAction(
-                        AirSendRuntimeAction.SetReceivePolicy(if (it) "ask" else "off")
+                        AirSendRuntimeAction.SetReceivePolicy(if (it) "full_access" else "off")
                     )
                 }
             )

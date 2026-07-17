@@ -1129,7 +1129,7 @@
     <string name="airsend_pending_receive_count">%1$d 个请求等待处理</string>
     <string name="airsend_receive_options">接收选项</string>
     <string name="airsend_quick_save">快速保存</string>
-    <string name="airsend_quick_save_desc">对可信桌面传输减少二次确认。</string>
+    <string name="airsend_quick_save_desc">自动接收任意 AirSend 设备的传输；关闭后仅允许受信任设备。</string>
     <string name="airsend_save_location">保存位置</string>
     <string name="airsend_save_location_desc">收到的文件会保存到 AirSend 文件夹。</string>
     <string name="airsend_download_destination">文件保存目录</string>

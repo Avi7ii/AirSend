@@ -3,6 +3,32 @@
     <channel>
         <title>AirSend</title>
         <item>
+            <title>5.0.1</title>
+            <pubDate>Fri, 17 Jul 2026 18:52:05 +0800</pubDate>
+            <link>https://github.com/Avi7ii/AirSend</link>
+            <sparkle:version>501</sparkle:version>
+            <sparkle:shortVersionString>5.0.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# AirSend v5.0.1
+
+## 中文
+
+- 双端默认启用 **Full Access**，安装后即可直接传输，无需先确认或建立信任；仍可手动切换为 Trusted Only 或 Off。
+- 修复旧版 `Ask` 接收策略残留，并自动迁移已有默认配置。
+
+> 若软件内更新失效，请卸载旧版后从本页重新安装最新版。
+
+## English
+
+- **Full Access** is now the cross-platform default, so transfers work immediately after installation without prior confirmation or trust setup; Trusted Only and Off remain available.
+- Removes the legacy `Ask` policy from the UI and automatically migrates existing default configurations.
+
+> If the in-app update fails, uninstall the previous version and reinstall the latest release from this page.
+]]></description>
+            <enclosure url="https://github.com/Avi7ii/AirSend/releases/download/v5.0.1/AirSend-v5.0.1-macOS.zip" length="3004025" type="application/octet-stream" sparkle:edSignature="j2RfbW+/8cNKcVTCH+fSwsPFLC/VYgKbQRTfB9dVeIzBnDu5VPC2fhgNJi6Jfy0omAEVaVno/rz7pYXUHu4PBw=="/>
+        </item>
+        <item>
             <title>5.0.0</title>
             <pubDate>Fri, 17 Jul 2026 11:38:12 +0800</pubDate>
             <link>https://github.com/Avi7ii/AirSend</link>

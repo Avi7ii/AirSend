@@ -1150,7 +1150,7 @@
     <string name="airsend_pending_receive_count">%1$d request(s) waiting</string>
     <string name="airsend_receive_options">Receive Options</string>
     <string name="airsend_quick_save">Quick save</string>
-    <string name="airsend_quick_save_desc">Accept trusted desktop transfers without extra confirmation.</string>
+    <string name="airsend_quick_save_desc">Accept transfers from any AirSend device automatically. Turn off to allow trusted devices only.</string>
     <string name="airsend_save_location">Save location</string>
     <string name="airsend_save_location_desc">Received files will be routed to the AirSend folder.</string>
     <string name="airsend_download_destination">File destination</string>

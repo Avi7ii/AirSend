@@ -2754,7 +2754,7 @@ private struct SettingsReceivePolicyRow: View {
             Text("Receive requests")
             Spacer(minLength: 12)
             SettingsBlueSegmentedControl(
-                labels: ["Ask", "Trusted Only", "Off"],
+                labels: ["Full Access", "Trusted Only", "Off"],
                 selectedIndex: Binding(
                     get: { receivePolicyOptions.firstIndex(of: selection) ?? 0 },
                     set: { index in
@@ -2772,7 +2772,7 @@ private struct SettingsReceivePolicyRow: View {
         }
     }
 
-    private let receivePolicyOptions = ["ask", "trusted_only", "off"]
+    private let receivePolicyOptions = ["full_access", "trusted_only", "off"]
 }
 
 private struct SettingsBlueSegmentedControl: NSViewRepresentable {

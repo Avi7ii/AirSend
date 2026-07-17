@@ -89,7 +89,7 @@ actor FileSender {
         self.campusFallback = campusFallback
         self.transferCoordinator = transferCoordinator
         self.artifactStore = artifactStore
-        self.appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "5.0.0"
+        self.appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "5.0.1"
     }
 
     func setOnProgress(_ callback: @escaping @Sendable (Double) -> Void) {

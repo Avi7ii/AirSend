@@ -373,6 +373,7 @@ impl IncomingTransferHandler for DaemonServices {
 
         let config = self.config().await;
         let decision = match config.receive_policy {
+            ReceivePolicy::FullAccess => IncomingDecision::Accept,
             ReceivePolicy::Off => {
                 IncomingDecision::Decline("receiving_disabled", "Receiving is disabled")
             }
@@ -2332,8 +2333,43 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn disconnected_incoming_offer_does_not_leave_an_orphaned_transfer() {
+    async fn full_access_accepts_incoming_offer_without_a_decision() {
         let harness = IpcHarness::new().await;
+        let decision = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            harness.services.authorize(IncomingTransferOffer {
+                session_id: "incoming-full-access".to_string(),
+                sender: DeviceInfo {
+                    alias: "Desktop".to_string(),
+                    fingerprint: "BB22".to_string(),
+                    ..Default::default()
+                },
+                files: HashMap::from([(
+                    "file-1".to_string(),
+                    FileMetadata {
+                        id: "file-1".to_string(),
+                        file_name: "ready.txt".to_string(),
+                        size: 4,
+                        file_type: "text/plain".to_string(),
+                        sha256: None,
+                        preview: None,
+                        metadata: None,
+                    },
+                )]),
+            }),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(decision, IncomingAuthorization::Accept);
+        assert!(harness.services.incoming_decisions.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn disconnected_legacy_ask_offer_does_not_leave_an_orphaned_transfer() {
+        let harness = IpcHarness::new().await;
+        harness.services.config.write().await.receive_policy = ReceivePolicy::Ask;
         let services = harness.services.clone();
         let task = tokio::spawn(async move {
             services

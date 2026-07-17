@@ -1029,7 +1029,7 @@
     <string name="airsend_pending_receive_count">%1$d 個請求等待處理</string>
     <string name="airsend_receive_options">接收選項</string>
     <string name="airsend_quick_save">快速儲存</string>
-    <string name="airsend_quick_save_desc">對可信桌面傳輸減少二次確認。</string>
+    <string name="airsend_quick_save_desc">自動接收任意 AirSend 裝置的傳輸；關閉後僅允許受信任裝置。</string>
     <string name="airsend_save_location">儲存位置</string>
     <string name="airsend_save_location_desc">收到的檔案會儲存到 AirSend 資料夾。</string>
     <string name="airsend_download_destination">檔案儲存目錄</string>

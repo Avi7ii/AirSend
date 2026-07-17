@@ -25,11 +25,11 @@ class AirSendRuntimeRepositoryTest {
         val client = FakeAirSendIpcClient().apply {
             respond(
                 "hello",
-                """{"protocolVersion":1,"daemonVersion":"5.0.0","configVersion":1,"historySchemaVersion":1,"capabilities":["get_state"],"transportProtocol":"https"}"""
+                """{"protocolVersion":1,"daemonVersion":"5.0.1","configVersion":1,"historySchemaVersion":1,"capabilities":["get_state"],"transportProtocol":"https"}"""
             )
             respond(
                 "get_state",
-                """{"protocolVersion":1,"daemonVersion":"5.0.0","configVersion":1,"historySchemaVersion":1,"startedAtMs":10,"peerCount":1,"preferredTarget":"peer-1","historyCount":4,"healthWarnings":["config_recovered"],"tlsFingerprint":"aa:bb","transportProtocol":"https"}"""
+                """{"protocolVersion":1,"daemonVersion":"5.0.1","configVersion":1,"historySchemaVersion":1,"startedAtMs":10,"peerCount":1,"preferredTarget":"peer-1","historyCount":4,"healthWarnings":["config_recovered"],"tlsFingerprint":"aa:bb","transportProtocol":"https"}"""
             )
             respond(
                 "get_peers",
@@ -43,8 +43,8 @@ class AirSendRuntimeRepositoryTest {
                 rootProvider = "Magisk",
                 moduleInstalled = true,
                 moduleEnabled = true,
-                moduleVersion = "v5.0.0",
-                moduleVersionCode = 500,
+                moduleVersion = "v5.0.1",
+                moduleVersionCode = 501,
                 daemonProcessRunning = true
             )
         )
@@ -61,7 +61,7 @@ class AirSendRuntimeRepositoryTest {
         assertTrue(state.daemonProcessRunning)
         assertTrue(state.versionsMatch)
         assertEquals(1, state.protocolVersion)
-        assertEquals("5.0.0", state.daemonVersion)
+        assertEquals("5.0.1", state.daemonVersion)
         assertEquals("https", state.transportProtocol)
         assertEquals(listOf("config_recovered"), state.healthWarnings)
         assertEquals("peer-1", state.preferredTargetId)
@@ -117,11 +117,11 @@ class AirSendRuntimeRepositoryTest {
         val client = FakeAirSendIpcClient().apply {
             respond(
                 "hello",
-                """{"protocolVersion":1,"daemonVersion":"5.0.0","configVersion":1,"historySchemaVersion":1,"capabilities":["get_transfers","get_history"],"transportProtocol":"https"}"""
+                """{"protocolVersion":1,"daemonVersion":"5.0.1","configVersion":1,"historySchemaVersion":1,"capabilities":["get_transfers","get_history"],"transportProtocol":"https"}"""
             )
             respond(
                 "get_state",
-                """{"protocolVersion":1,"daemonVersion":"5.0.0","configVersion":1,"historySchemaVersion":1,"startedAtMs":10,"peerCount":0,"historyCount":2,"activeTransferCount":1,"healthWarnings":[],"tlsFingerprint":"aa:bb","transportProtocol":"https"}"""
+                """{"protocolVersion":1,"daemonVersion":"5.0.1","configVersion":1,"historySchemaVersion":1,"startedAtMs":10,"peerCount":0,"historyCount":2,"activeTransferCount":1,"healthWarnings":[],"tlsFingerprint":"aa:bb","transportProtocol":"https"}"""
             )
             respond("get_peers", "[]")
             respond("get_config", configJson())

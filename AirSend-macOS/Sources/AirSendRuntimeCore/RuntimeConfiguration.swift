@@ -3,6 +3,8 @@ import Foundation
 public let airSendConfigurationVersion = 1
 
 public enum ReceivePolicy: String, Codable, Sendable, CaseIterable {
+    case fullAccess = "full_access"
+    // Legacy 5.0.0 value. Normalization migrates it to full access.
     case ask
     case trustedOnly = "trusted_only"
     case off
@@ -49,7 +51,7 @@ public struct AirSendRuntimeConfiguration: Codable, Equatable, Sendable {
         preferredTargetID: String? = nil,
         manualPeers: [ManualPeer] = [],
         trustedPeerFingerprints: [String] = [],
-        receivePolicy: ReceivePolicy = .ask,
+        receivePolicy: ReceivePolicy = .fullAccess,
         clipboardSyncEnabled: Bool = false,
         clipboardImageSyncEnabled: Bool = false,
         screenshotSyncEnabled: Bool = false,
@@ -111,11 +113,12 @@ public struct AirSendRuntimeConfiguration: Codable, Equatable, Sendable {
         }
 
         let trusted = Set(trustedPeerFingerprints.compactMap { normalizeFingerprint($0) }).sorted()
+        let normalizedReceivePolicy: ReceivePolicy = receivePolicy == .ask ? .fullAccess : receivePolicy
         return AirSendRuntimeConfiguration(
             preferredTargetID: preferredTargetID,
             manualPeers: peersByEndpoint.values.sorted { $0.id < $1.id },
             trustedPeerFingerprints: trusted,
-            receivePolicy: receivePolicy,
+            receivePolicy: normalizedReceivePolicy,
             clipboardSyncEnabled: clipboardSyncEnabled,
             clipboardImageSyncEnabled: clipboardImageSyncEnabled,
             screenshotSyncEnabled: screenshotSyncEnabled,
@@ -178,7 +181,11 @@ public actor RuntimeConfigurationStore {
         do {
             let data = try Data(contentsOf: fileURL)
             let decoded = try decoder.decode(AirSendRuntimeConfiguration.self, from: data)
-            return ConfigurationLoadOutcome(configuration: try decoded.normalized())
+            let normalized = try decoded.normalized()
+            if normalized != decoded {
+                try save(normalized)
+            }
+            return ConfigurationLoadOutcome(configuration: normalized)
         } catch {
             let recoveredURL = recoveryURL()
             try fileManager.moveItem(at: fileURL, to: recoveredURL)

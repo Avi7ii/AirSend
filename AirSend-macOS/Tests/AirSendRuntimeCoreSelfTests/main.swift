@@ -134,6 +134,18 @@ struct AirSendRuntimeCoreSelfTests {
         var configuration = AirSendRuntimeConfiguration()
         try expect(configuration.downloadDestination == "~/Downloads", "files should default to Downloads")
         try expect(configuration.mediaDestination == "~/Downloads", "media should default to Downloads")
+        try expect(configuration.receivePolicy == .fullAccess, "receiving should default to full access")
+
+        var legacyConfiguration = configuration
+        legacyConfiguration.receivePolicy = .ask
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try JSONEncoder().encode(legacyConfiguration).write(to: fileURL)
+        let migrated = try await store.load()
+        try expect(migrated.configuration.receivePolicy == .fullAccess, "legacy ask policy should migrate to full access")
+        let migratedData = try Data(contentsOf: fileURL)
+        let migratedJSON = try JSONSerialization.jsonObject(with: migratedData) as? [String: Any]
+        try expect(migratedJSON?["receivePolicy"] as? String == "full_access", "migration should be persisted")
+
         configuration.preferredTargetID = "peer-1"
         configuration.receivePolicy = .trustedOnly
         configuration.trustedPeerFingerprints = ["AA:BB", "aabb"]

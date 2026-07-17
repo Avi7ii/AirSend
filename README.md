@@ -131,13 +131,6 @@ AirSend 3.0.0 新增了一个**默认关闭、需手动开启**的 `HTTP 兼容�
 
 <p align="center"><sub>Android 控制台：状态、设备、传输活动与可深度定制的 Material 主题</sub></p>
 
-<p align="center">
-  <img src="docs/assets/screenshots/v5.0/airsend-v5-macos-console.jpg" width="100%" alt="AirSend 5.0 macOS 原生玻璃控制台">
-</p>
-
-<p align="center"><sub>macOS 原生玻璃控制台：设备、传输、自动化与完整运行设置</sub></p>
-
-<h3 align="center">🎨 一套界面，多种气质</h3>
 
 <p align="center">Material 3、Monet 动态取色与半透明悬浮组件共同组成 AirSend 的 Android 视觉系统。</p>
 
@@ -152,6 +145,11 @@ AirSend 3.0.0 新增了一个**默认关闭、需手动开启**的 `HTTP 兼容�
 <p align="center">
   <img src="docs/assets/screenshots/v5.0/airsend-v5-android-purple.jpg" width="100%" alt="AirSend Android 深紫主题">
 </p>
+
+
+<p align="center"><sub>macOS 原生玻璃控制台：设备、传输、自动化与完整运行设置</sub></p>
+
+
 
 ---
 

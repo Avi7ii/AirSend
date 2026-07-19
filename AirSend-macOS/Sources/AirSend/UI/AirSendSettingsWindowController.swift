@@ -171,6 +171,7 @@ final class AirSendSettingsStore: ObservableObject {
 
     @Published private(set) var snapshot: AirSendSettingsSnapshot
     @Published private(set) var quickLookSelectionID: String?
+    @Published private(set) var isWindowPresented = false
     let actions: Actions
 
     init(snapshot: AirSendSettingsSnapshot, actions: Actions) {
@@ -190,6 +191,10 @@ final class AirSendSettingsStore: ObservableObject {
 
     func selectTransferFromQuickLook(_ id: String) {
         quickLookSelectionID = id
+    }
+
+    func setWindowPresented(_ isPresented: Bool) {
+        isWindowPresented = isPresented
     }
 }
 
@@ -265,6 +270,7 @@ final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegat
     func showSettingsWindow() {
         guard let window else { return }
         configureWindowBackgroundBlurIfNeeded()
+        store.setWindowPresented(true)
         onWindowVisibilityChanged?(true)
         if !window.isVisible {
             window.center()
@@ -276,6 +282,7 @@ final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegat
     }
 
     func windowWillClose(_ notification: Notification) {
+        store.setWindowPresented(false)
         onWindowRenderingActivityChanged?(false)
         onWindowVisibilityChanged?(false)
     }

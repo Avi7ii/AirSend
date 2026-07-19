@@ -307,18 +307,20 @@ struct AirSendSettingsView: View {
         GeometryReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(selectedCategory.title)
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .settingsPageEntrance(trigger: selectedCategory.rawValue, order: 0)
-                        Text(selectedCategory.subtitle)
-                            .foregroundStyle(AirSendSettingsTextTone.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .settingsPageEntrance(trigger: selectedCategory.rawValue, order: 1)
-                    }
+                    if store.isWindowPresented {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(selectedCategory.title)
+                                .font(.title2)
+                                .fontWeight(.semibold)
+                                .settingsPageEntrance(trigger: selectedCategory.rawValue, order: 0)
+                            Text(selectedCategory.subtitle)
+                                .foregroundStyle(AirSendSettingsTextTone.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .settingsPageEntrance(trigger: selectedCategory.rawValue, order: 1)
+                        }
 
-                    pageContent(for: selectedCategory, availableHeight: proxy.size.height)
+                        pageContent(for: selectedCategory, availableHeight: proxy.size.height)
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, detailContentTopInset)

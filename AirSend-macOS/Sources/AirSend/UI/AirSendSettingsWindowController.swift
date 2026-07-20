@@ -207,7 +207,7 @@ final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegat
     let store: AirSendSettingsStore
     var onWindowVisibilityChanged: ((Bool) -> Void)?
     var onWindowRenderingActivityChanged: ((Bool) -> Void)?
-    private let glassContainerView: AirSendSettingsGlassContainerView
+    private let glassContainer: AirSendSettingsGlassContainer
     private let hostingView: AirSendSettingsHostingView<AirSendSettingsView>
     private var didConfigureWindowBackgroundBlur = false
 
@@ -215,9 +215,9 @@ final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegat
         self.store = store
 
         let rootView = AirSendSettingsView(store: store)
-        let glassContainerView = AirSendSettingsGlassContainerView()
+        let glassContainer = AirSendSettingsGlassContainer()
         let hostingView = AirSendSettingsHostingView(rootView: rootView)
-        self.glassContainerView = glassContainerView
+        self.glassContainer = glassContainer
         self.hostingView = hostingView
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: Self.defaultSize),
@@ -226,17 +226,10 @@ final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegat
             defer: false
         )
 
-        glassContainerView.frame = NSRect(origin: .zero, size: Self.defaultSize)
-        glassContainerView.autoresizingMask = [.width, .height]
-        hostingView.translatesAutoresizingMaskIntoConstraints = false
-        glassContainerView.addSubview(hostingView)
-        NSLayoutConstraint.activate([
-            hostingView.leadingAnchor.constraint(equalTo: glassContainerView.leadingAnchor),
-            hostingView.topAnchor.constraint(equalTo: glassContainerView.topAnchor),
-            hostingView.trailingAnchor.constraint(equalTo: glassContainerView.trailingAnchor),
-            hostingView.bottomAnchor.constraint(equalTo: glassContainerView.bottomAnchor),
-        ])
-        window.contentView = glassContainerView
+        glassContainer.rootView.frame = NSRect(origin: .zero, size: Self.defaultSize)
+        glassContainer.rootView.autoresizingMask = [.width, .height]
+        glassContainer.installContentView(hostingView)
+        window.contentView = glassContainer.rootView
         window.title = "AirSend"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
@@ -270,6 +263,10 @@ final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegat
     func showSettingsWindow() {
         guard let window else { return }
         configureWindowBackgroundBlurIfNeeded()
+        hostingView.setSettledRasterizationEnabled(
+            false,
+            scale: window.backingScaleFactor
+        )
         store.setWindowPresented(true)
         onWindowVisibilityChanged?(true)
         if !window.isVisible {
@@ -311,7 +308,8 @@ final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegat
     }
 
     private func configureWindowBackgroundBlurIfNeeded() {
-        guard !didConfigureWindowBackgroundBlur,
+        guard glassContainer.usesWindowLevelBackgroundBlur,
+              !didConfigureWindowBackgroundBlur,
               let window,
               AirSendWindowBackgroundBlur.apply(
                 to: window,
@@ -321,8 +319,8 @@ final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegat
         }
 
         didConfigureWindowBackgroundBlur = true
-        window.backgroundColor = NSColor.white.withAlphaComponent(0.001)
-        glassContainerView.useWindowLevelBackgroundBlur()
+        window.backgroundColor = .clear
+        glassContainer.useWindowLevelBackgroundBlur()
     }
 
     @objc private func settingsEntranceDidSettle(_ notification: Notification) {
@@ -340,25 +338,93 @@ final class AirSendSettingsWindowController: NSWindowController, NSWindowDelegat
 
     @objc private func neutralizeSettledEntranceBlurFilters() {
         hostingView.neutralizeSettledEntranceBlurFilters()
+        guard let window else { return }
+        hostingView.setSettledRasterizationEnabled(
+            true,
+            scale: window.backingScaleFactor
+        )
     }
 }
 
-private final class AirSendSettingsGlassContainerView: NSVisualEffectView {
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        appearance = NSAppearance(named: .vibrantDark)
-        material = .hudWindow
-        blendingMode = .behindWindow
-        state = .followsWindowActiveState
-        isEmphasized = false
+@MainActor
+private final class AirSendSettingsGlassContainer {
+    private let containerView: NSView
+    private let materialView: NSView
+    private let foregroundView: NSView
+    let usesWindowLevelBackgroundBlur: Bool
+
+    var rootView: NSView {
+        containerView
     }
 
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+    init() {
+        let containerView = NSView(frame: .zero)
+        let foregroundView = NSView(frame: .zero)
+
+        let systemMajorVersion = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        if #available(macOS 26.0, *), systemMajorVersion == 26 {
+            let glassView = NSGlassEffectView()
+            glassView.appearance = NSAppearance(named: .vibrantDark)
+            glassView.style = .regular
+            glassView.cornerRadius = 18
+            glassView.tintColor = nil
+            glassView.wantsLayer = true
+            materialView = glassView
+            usesWindowLevelBackgroundBlur = false
+        } else {
+            let visualEffectView = NSVisualEffectView()
+            visualEffectView.appearance = NSAppearance(named: .vibrantDark)
+            visualEffectView.material = .hudWindow
+            visualEffectView.blendingMode = .behindWindow
+            visualEffectView.state = .active
+            visualEffectView.isEmphasized = false
+            visualEffectView.wantsLayer = true
+            materialView = visualEffectView
+            usesWindowLevelBackgroundBlur = true
+        }
+
+        self.containerView = containerView
+        self.foregroundView = foregroundView
+
+        containerView.wantsLayer = true
+        containerView.layer?.backgroundColor = NSColor.clear.cgColor
+        containerView.layer?.isOpaque = false
+
+        materialView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(materialView)
+
+        foregroundView.translatesAutoresizingMaskIntoConstraints = false
+        foregroundView.wantsLayer = true
+        foregroundView.layer?.backgroundColor = NSColor.clear.cgColor
+        foregroundView.layer?.isOpaque = false
+        containerView.addSubview(foregroundView, positioned: .above, relativeTo: materialView)
+
+        NSLayoutConstraint.activate([
+            materialView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            materialView.topAnchor.constraint(equalTo: containerView.topAnchor),
+            materialView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            materialView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+            foregroundView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            foregroundView.topAnchor.constraint(equalTo: containerView.topAnchor),
+            foregroundView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            foregroundView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+        ])
+    }
+
+    func installContentView(_ contentView: NSView) {
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        foregroundView.addSubview(contentView)
+        NSLayoutConstraint.activate([
+            contentView.leadingAnchor.constraint(equalTo: foregroundView.leadingAnchor),
+            contentView.topAnchor.constraint(equalTo: foregroundView.topAnchor),
+            contentView.trailingAnchor.constraint(equalTo: foregroundView.trailingAnchor),
+            contentView.bottomAnchor.constraint(equalTo: foregroundView.bottomAnchor),
+        ])
     }
 
     func useWindowLevelBackgroundBlur() {
-        blendingMode = .withinWindow
+        guard let visualEffectView = materialView as? NSVisualEffectView else { return }
+        visualEffectView.blendingMode = .withinWindow
     }
 }
 
@@ -453,6 +519,12 @@ private final class AirSendSettingsHostingView<Content: View>: NSHostingView<Con
                 neutralizedCount
             )
         }
+    }
+
+    func setSettledRasterizationEnabled(_ isEnabled: Bool, scale: CGFloat) {
+        guard let layer else { return }
+        layer.shouldRasterize = isEnabled
+        layer.rasterizationScale = max(scale, 1)
     }
 
     @available(*, unavailable)

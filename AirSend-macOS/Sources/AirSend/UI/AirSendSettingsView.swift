@@ -19,6 +19,7 @@ private enum AirSendSettingsMetrics {
     static let transferRowEntranceStaggerMilliseconds = 50
     static let transferRowEntranceMaximumStaggerIndex = 3
     static let transferRowEntranceInitialOpacity = 0.18
+    static let transferInitialPageEntrancePhaseDuration: TimeInterval = 1.65
     static let actionCornerRadius: CGFloat = 7
     static let pageEntranceOffset: CGFloat = 14
     static let pageEntranceDuration: TimeInterval = 0.78
@@ -717,7 +718,7 @@ struct AirSendSettingsView: View {
                             activationDelay: TimeInterval(
                                 startOrder * AirSendSettingsMetrics.pageEntranceStaggerMilliseconds
                             ) / 1_000
-                        ) {
+                        ) { usesInitialPageEntrance in
                             ForEach(
                                 Array(selectedTransferActivity.enumerated()),
                                 id: \.element.id
@@ -743,7 +744,8 @@ struct AirSendSettingsView: View {
                                 )
                                 .settingsTransferRowEntrance(
                                     trigger: "\(trigger)|row=transfer-\(transfer.id)",
-                                    index: index
+                                    index: index,
+                                    style: usesInitialPageEntrance ? .page : .incremental
                                 )
                                 .id(transfer.id)
                             }
@@ -1281,10 +1283,19 @@ private extension View {
             .id("settings-card-surface|\(trigger)|\(order)")
     }
 
-    func settingsTransferRowEntrance(trigger: String, index: Int) -> some View {
-        SettingsTransferRowEntranceHost(index: index, content: self)
+    func settingsTransferRowEntrance(
+        trigger: String,
+        index: Int,
+        style: SettingsTransferRowEntranceStyle
+    ) -> some View {
+        SettingsTransferRowEntranceHost(index: index, style: style, content: self)
             .id("settings-transfer-row|\(trigger)")
     }
+}
+
+private enum SettingsTransferRowEntranceStyle: Equatable {
+    case page
+    case incremental
 }
 
 private struct SettingsPageEntranceHost<Content: View>: View {
@@ -1438,6 +1449,7 @@ private struct SettingsTransferRowEntranceHost<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let index: Int
+    let style: SettingsTransferRowEntranceStyle
     let content: Content
 
     @AirSendState private var focusProgress: CGFloat = 0
@@ -1445,23 +1457,45 @@ private struct SettingsTransferRowEntranceHost<Content: View>: View {
     @AirSendState private var hasEnteredViewport = false
 
     private var delay: TimeInterval {
+        let maximumStaggerIndex = style == .page
+            ? AirSendSettingsMetrics.pageEntranceMaximumStaggerIndex
+            : AirSendSettingsMetrics.transferRowEntranceMaximumStaggerIndex
         let staggerIndex = min(
             max(index, 0),
-            AirSendSettingsMetrics.transferRowEntranceMaximumStaggerIndex
+            maximumStaggerIndex
         )
         return TimeInterval(
-            staggerIndex * AirSendSettingsMetrics.transferRowEntranceStaggerMilliseconds
+            staggerIndex * (style == .page
+                ? AirSendSettingsMetrics.pageEntranceStaggerMilliseconds
+                : AirSendSettingsMetrics.transferRowEntranceStaggerMilliseconds)
         ) / 1_000
     }
 
     var body: some View {
         let focus = reduceMotion ? 1 : min(max(focusProgress, 0), 1)
         let motion = reduceMotion ? 1 : motionProgress
-        let reveal = smoothStep(min(1, focus / 0.46))
+        let revealFraction = style == .page
+            ? AirSendSettingsMetrics.pageEntranceRevealFraction
+            : 0.46
+        let reveal = smoothStep(min(1, focus / revealFraction))
+        let initialOpacity = style == .page
+            ? 0
+            : AirSendSettingsMetrics.transferRowEntranceInitialOpacity
         let opacity = reduceMotion
             ? 1
-            : AirSendSettingsMetrics.transferRowEntranceInitialOpacity
-                + ((1 - AirSendSettingsMetrics.transferRowEntranceInitialOpacity) * reveal)
+            : initialOpacity + ((1 - initialOpacity) * reveal)
+        let maximumBlur = style == .page
+            ? AirSendSettingsMetrics.pageEntranceMaximumBlur
+            : AirSendSettingsMetrics.transferRowEntranceMaximumBlur
+        let entranceOffset = style == .page
+            ? AirSendSettingsMetrics.pageEntranceOffset
+            : AirSendSettingsMetrics.transferRowEntranceOffset
+        let entranceDuration = style == .page
+            ? AirSendSettingsMetrics.pageEntranceDuration
+            : AirSendSettingsMetrics.transferRowEntranceDuration
+        let entranceBounce = style == .page
+            ? AirSendSettingsMetrics.pageEntranceBounce
+            : 0.04
 
         content
             .opacity(opacity)
@@ -1470,19 +1504,33 @@ private struct SettingsTransferRowEntranceHost<Content: View>: View {
                     ? 0
                     : max(
                         0.001,
-                        AirSendSettingsMetrics.transferRowEntranceMaximumBlur * (1 - focus)
+                        maximumBlur * (1 - focus)
                     )
             )
-            .offset(y: AirSendSettingsMetrics.transferRowEntranceOffset * (1 - motion))
+            .offset(y: entranceOffset * (1 - motion))
             .onScrollVisibilityChange(threshold: 0.06) { isVisible in
-                guard isVisible, !hasEnteredViewport else { return }
+                guard style == .incremental,
+                      isVisible,
+                      !hasEnteredViewport else { return }
                 hasEnteredViewport = true
+            }
+            .task(id: style) {
+                guard style == .page, !hasEnteredViewport else { return }
+
+                // Initial page rows share the page's creation frame. Waiting for
+                // individual scroll-visibility callbacks here would add a second,
+                // layout-dependent stagger on top of the standard page stagger.
+                var transaction = Transaction(animation: nil)
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    hasEnteredViewport = true
+                }
             }
             .task(id: hasEnteredViewport) {
                 guard hasEnteredViewport, !reduceMotion else { return }
 
                 // Keep the initial state on screen for one frame before animating.
-                try? await Task.sleep(for: .milliseconds(24))
+                try? await Task.sleep(for: .milliseconds(style == .page ? 16 : 24))
                 guard !Task.isCancelled else { return }
 
                 withAnimation(
@@ -1491,7 +1539,7 @@ private struct SettingsTransferRowEntranceHost<Content: View>: View {
                         1.0,
                         0.30,
                         1.0,
-                        duration: AirSendSettingsMetrics.transferRowEntranceDuration
+                        duration: entranceDuration
                     )
                     .delay(delay)
                 ) {
@@ -1500,8 +1548,8 @@ private struct SettingsTransferRowEntranceHost<Content: View>: View {
 
                 withAnimation(
                     .spring(
-                        duration: AirSendSettingsMetrics.transferRowEntranceDuration,
-                        bounce: 0.04
+                        duration: entranceDuration,
+                        bounce: entranceBounce
                     )
                     .delay(delay)
                 ) {
@@ -1510,7 +1558,7 @@ private struct SettingsTransferRowEntranceHost<Content: View>: View {
 
 
                 let settleMilliseconds = Int(
-                    ((delay + AirSendSettingsMetrics.transferRowEntranceDuration + 0.08) * 1_000)
+                    ((delay + entranceDuration + 0.08) * 1_000)
                         .rounded(.up)
                 )
                 try? await Task.sleep(for: .milliseconds(settleMilliseconds))
@@ -1531,26 +1579,27 @@ private struct SettingsEntranceGate<Content: View>: View {
     let trigger: String
     let spacing: CGFloat
     let activationDelay: TimeInterval
-    let content: Content
+    let content: (Bool) -> Content
 
     @AirSendState private var isPresented = false
+    @AirSendState private var usesInitialPageEntrance = true
 
     init(
         trigger: String,
         spacing: CGFloat,
         activationDelay: TimeInterval = 0,
-        @ViewBuilder content: () -> Content
+        @ViewBuilder content: @escaping (Bool) -> Content
     ) {
         self.trigger = trigger
         self.spacing = spacing
         self.activationDelay = activationDelay
-        self.content = content()
+        self.content = content
     }
 
     var body: some View {
         LazyVStack(spacing: spacing) {
             if isPresented {
-                content
+                content(usesInitialPageEntrance)
             }
         }
         .task(id: trigger) {
@@ -1558,6 +1607,7 @@ private struct SettingsEntranceGate<Content: View>: View {
             resetTransaction.disablesAnimations = true
             withTransaction(resetTransaction) {
                 isPresented = false
+                usesInitialPageEntrance = true
             }
 
             let activationDelayMilliseconds = max(
@@ -1573,6 +1623,17 @@ private struct SettingsEntranceGate<Content: View>: View {
                 .linear(duration: AirSendSettingsMetrics.pageTransitionTriggerDuration)
             ) {
                 isPresented = true
+            }
+
+            try? await Task.sleep(
+                for: .seconds(AirSendSettingsMetrics.transferInitialPageEntrancePhaseDuration)
+            )
+            guard !Task.isCancelled else { return }
+
+            var settleTransaction = Transaction(animation: nil)
+            settleTransaction.disablesAnimations = true
+            withTransaction(settleTransaction) {
+                usesInitialPageEntrance = false
             }
         }
     }
@@ -2785,7 +2846,7 @@ private struct SettingsReceivePolicyRow: View {
         HStack(spacing: 12) {
             Text("Receive requests")
             Spacer(minLength: 12)
-            SettingsBlueSegmentedControl(
+            SettingsReceivePolicyControl(
                 labels: ["Full Access", "Trusted Only", "Off"],
                 selectedIndex: Binding(
                     get: { receivePolicyOptions.firstIndex(of: selection) ?? 0 },
@@ -2795,7 +2856,7 @@ private struct SettingsReceivePolicyRow: View {
                     }
                 )
             )
-            .frame(width: 260)
+            .frame(width: 264)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -2807,57 +2868,92 @@ private struct SettingsReceivePolicyRow: View {
     private let receivePolicyOptions = ["full_access", "trusted_only", "off"]
 }
 
-private struct SettingsBlueSegmentedControl: NSViewRepresentable {
+private struct SettingsReceivePolicyControl: View {
     let labels: [String]
-    var systemImages: [String] = []
     @Binding var selectedIndex: Int
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(selectedIndex: $selectedIndex)
+    @AirSendState private var hoveredIndex: Int?
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(labels.indices, id: \.self) { index in
+                let isSelected = selectedIndex == index
+                let isHovered = hoveredIndex == index
+
+                Button {
+                    selectedIndex = index
+                } label: {
+                    Text(labels[index])
+                        .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
+                        .foregroundStyle(
+                            isSelected
+                                ? Color.white.opacity(0.88)
+                                : Color.white.opacity(isHovered ? 0.72 : 0.62)
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .background {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(segmentFill(isSelected: isSelected, isHovered: isHovered))
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .strokeBorder(
+                            isSelected
+                                ? Color(nsColor: .systemBlue).opacity(0.28)
+                                : .clear,
+                            lineWidth: 0.6
+                        )
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .onHover { isInside in
+                    hoveredIndex = isInside ? index : (hoveredIndex == index ? nil : hoveredIndex)
+                }
+                .accessibilityLabel(labels[index])
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .padding(2)
+        .frame(height: 24)
+        .background {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            .white.opacity(0.024),
+                            .black.opacity(0.020),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .strokeBorder(.white.opacity(0.085), lineWidth: 0.6)
+        }
+        .animation(.easeOut(duration: 0.16), value: selectedIndex)
+        .animation(.easeOut(duration: 0.10), value: hoveredIndex)
     }
 
-    func makeNSView(context: Context) -> NSSegmentedControl {
-        let control = NSSegmentedControl(
-            labels: labels,
-            trackingMode: .selectOne,
-            target: context.coordinator,
-            action: #selector(Coordinator.selectionChanged(_:))
-        )
-        control.segmentStyle = .roundRect
-        control.segmentDistribution = .fillEqually
-        control.selectedSegmentBezelColor = .systemBlue
-        configureImages(for: control)
-        return control
-    }
-
-    func updateNSView(_ control: NSSegmentedControl, context: Context) {
-        context.coordinator.selectedIndex = $selectedIndex
-        control.selectedSegment = selectedIndex
-        control.selectedSegmentBezelColor = .systemBlue
-    }
-
-    private func configureImages(for control: NSSegmentedControl) {
-        for index in labels.indices where systemImages.indices.contains(index) {
-            let image = NSImage(
-                systemSymbolName: systemImages[index],
-                accessibilityDescription: labels[index]
+    private func segmentFill(isSelected: Bool, isHovered: Bool) -> AnyShapeStyle {
+        if isSelected {
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [
+                        Color(nsColor: .controlAccentColor).opacity(0.22),
+                        Color(nsColor: .systemBlue).opacity(0.14),
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
             )
-            control.setImage(image, forSegment: index)
-            control.setImageScaling(.scaleProportionallyDown, forSegment: index)
-        }
-    }
-
-    @MainActor
-    final class Coordinator: NSObject {
-        var selectedIndex: Binding<Int>
-
-        init(selectedIndex: Binding<Int>) {
-            self.selectedIndex = selectedIndex
         }
 
-        @objc func selectionChanged(_ sender: NSSegmentedControl) {
-            selectedIndex.wrappedValue = sender.selectedSegment
-        }
+        return AnyShapeStyle(isHovered ? Color.white.opacity(0.045) : Color.clear)
     }
 }
 
@@ -3203,18 +3299,80 @@ private struct SettingsButtonRow: View {
     private var actionStack: some View {
         HStack(spacing: 8) {
             Button(primaryTitle, action: primaryAction)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(SettingsBlueActionButtonStyle(isProminent: true))
                 .disabled(primaryDisabled)
 
             if let secondaryTitle, let secondaryAction {
                 Button(secondaryTitle, action: secondaryAction)
-                    .buttonStyle(.bordered)
+                    .buttonStyle(SettingsBlueActionButtonStyle())
             }
 
             if let tertiaryTitle, let tertiaryAction {
                 Button(tertiaryTitle, action: tertiaryAction)
-                    .buttonStyle(.bordered)
+                    .buttonStyle(SettingsBlueActionButtonStyle())
             }
         }
+    }
+}
+
+private struct SettingsBlueActionButtonStyle: ButtonStyle {
+    var isProminent = false
+
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+
+        configuration.label
+            .font(.system(size: 11.5, weight: .medium))
+            .foregroundStyle(
+                Color(nsColor: .systemBlue).opacity(isEnabled ? 0.92 : 0.45)
+            )
+            .padding(.horizontal, 9)
+            .frame(height: 20)
+            .background {
+                shape.fill(
+                    LinearGradient(
+                        colors: fillColors(isPressed: configuration.isPressed),
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            }
+            .overlay {
+                shape.strokeBorder(
+                    Color(nsColor: .systemBlue).opacity(borderOpacity),
+                    lineWidth: 0.6
+                )
+            }
+            .contentShape(shape)
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeOut(duration: 0.10), value: configuration.isPressed)
+    }
+
+    private var borderOpacity: Double {
+        guard isEnabled else { return 0.08 }
+        return isProminent ? 0.30 : 0.22
+    }
+
+    private func fillColors(isPressed: Bool) -> [Color] {
+        guard isEnabled else {
+            return [
+                Color(nsColor: .systemBlue).opacity(0.08),
+                Color(nsColor: .systemBlue).opacity(0.04),
+            ]
+        }
+
+        if isProminent {
+            return [
+                Color(nsColor: .controlAccentColor).opacity(isPressed ? 0.24 : 0.18),
+                Color(nsColor: .systemBlue).opacity(isPressed ? 0.17 : 0.11),
+            ]
+        }
+
+        return [
+            Color(nsColor: .controlAccentColor).opacity(isPressed ? 0.19 : 0.13),
+            Color(nsColor: .systemBlue).opacity(isPressed ? 0.13 : 0.08),
+        ]
     }
 }

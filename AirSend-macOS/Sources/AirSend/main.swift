@@ -877,8 +877,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 clearHistory: { [weak self] direction in
                     self?.clearHistory(direction: direction)
                 },
-                previewTransfer: { [weak self] id, orderedIDs in
-                    self?.previewTransfer(id: id, orderedIDs: orderedIDs)
+                previewTransfer: { [weak self] id, orderedIDs, sourceAnchors in
+                    self?.previewTransfer(
+                        id: id,
+                        orderedIDs: orderedIDs,
+                        sourceAnchors: sourceAnchors
+                    )
                 },
                 revealTransfer: { [weak self] id in
                     self?.revealTransfer(id: id)
@@ -3873,7 +3877,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         return urls
     }
 
-    private func previewTransfer(id: String, orderedIDs: [String]) {
+    private func previewTransfer(
+        id: String,
+        orderedIDs: [String],
+        sourceAnchors: [String: AirSendQuickLookAnchor]
+    ) {
         let ids = orderedIDs.contains(id) ? orderedIDs : [id] + orderedIDs
         let groups = ids.compactMap { recordID -> AirSendQuickLookGroup? in
             guard let record = runtimeRecord(id: recordID) else { return nil }
@@ -3889,7 +3897,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                     : (urls.isEmpty ? unavailablePreviewText(fileName: fileName) : nil),
                 fallbackFileName: hasTextPreview
                     ? fileName
-                    : "\(fileName) - unavailable.txt"
+                    : "\(fileName) - unavailable.txt",
+                sourceAnchor: sourceAnchors[recordID]
             )
         }
         guard groups.contains(where: { $0.id == id }) else {

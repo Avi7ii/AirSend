@@ -173,6 +173,7 @@ struct AirSendSettingsView: View {
 
     @AirSendState private var transferHistoryFilter = AirSendTransferHistoryFilter.outgoing
     @AirSendState private var selectedTransferID: String?
+    @AirSendState private var quickLookAnchorRegistry = AirSendQuickLookAnchorRegistry()
 
     private var snapshot: AirSendSettingsSnapshot {
         store.snapshot
@@ -721,14 +722,17 @@ struct AirSendSettingsView: View {
                                 Array(selectedTransferActivity.enumerated()),
                                 id: \.element.id
                             ) { index, transfer in
+                                let orderedIDs = selectedTransferActivity.map(\.id)
                                 SettingsTransferRow(
                                     transfer: transfer,
                                     isSelected: selectedTransferID == transfer.id,
+                                    quickLookAnchor: quickLookAnchorRegistry.anchor(for: transfer.id),
                                     selectAction: { selectedTransferID = transfer.id },
                                     previewAction: {
                                         store.actions.previewTransfer(
                                             transfer.id,
-                                            selectedTransferActivity.map(\.id)
+                                            orderedIDs,
+                                            quickLookAnchorRegistry.anchors(for: orderedIDs)
                                         )
                                     },
                                     cancelAction: { store.actions.cancelTransfer(transfer.id) },
@@ -2411,6 +2415,7 @@ private struct SettingsTransferInfoRow: View {
 private struct SettingsTransferRow: View {
     let transfer: AirSendTransferSummary
     let isSelected: Bool
+    let quickLookAnchor: AirSendQuickLookAnchor
     let selectAction: () -> Void
     let previewAction: () -> Void
     let cancelAction: () -> Void
@@ -2434,6 +2439,9 @@ private struct SettingsTransferRow: View {
             } label: {
                 HStack(alignment: .center, spacing: 12) {
                     SettingsTransferPreview(fileKind: transfer.fileKind)
+                        .background {
+                            SettingsQuickLookAnchorReader(anchor: quickLookAnchor)
+                        }
                     transferDetails
                     Spacer(minLength: 8)
                 }
@@ -2550,6 +2558,28 @@ private struct SettingsTransferRow: View {
                     .foregroundStyle(AirSendSettingsTextTone.secondary)
             }
         }
+    }
+}
+
+private struct SettingsQuickLookAnchorReader: NSViewRepresentable {
+    let anchor: AirSendQuickLookAnchor
+
+    func makeCoordinator() -> AirSendQuickLookAnchor {
+        anchor
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.attach(to: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.attach(to: nsView)
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: AirSendQuickLookAnchor) {
+        coordinator.detach(from: nsView)
     }
 }
 

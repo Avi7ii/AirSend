@@ -161,7 +161,7 @@ final class AirSendSettingsStore: ObservableObject {
         let retryTransfer: (String) -> Void
         let deleteHistory: (String) -> Void
         let clearHistory: (String) -> Void
-        let previewTransfer: (String, [String]) -> Void
+        let previewTransfer: (String, [String], [String: AirSendQuickLookAnchor]) -> Void
         let revealTransfer: (String) -> Void
         let shareTransfer: (String) -> Void
         let exportLogs: () -> Void

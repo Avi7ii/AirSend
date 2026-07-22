@@ -73,7 +73,6 @@ class AirSendRuntimeRepositoryImpl(
                 moduleInstalled = root.moduleInstalled,
                 moduleEnabled = root.moduleEnabled,
                 moduleVersion = root.moduleVersion,
-                moduleVersionCode = root.moduleVersionCode,
                 daemonProcessRunning = root.daemonProcessRunning,
                 appVersion = com.rosan.installer.BuildConfig.VERSION_NAME,
                 appVersionCode = com.rosan.installer.BuildConfig.VERSION_CODE
@@ -84,11 +83,6 @@ class AirSendRuntimeRepositoryImpl(
         }.onSuccess { snapshot ->
             val hello = snapshot.hello
             val daemon = snapshot.daemon
-            val compatibilityWarnings = if (hello.protocolVersion == SUPPORTED_PROTOCOL_VERSION) {
-                emptyList()
-            } else {
-                listOf("protocol_version_mismatch")
-            }
             _state.value = readLocalState(_state.value).copy(
                 daemonReachable = true,
                 peers = snapshot.peers,
@@ -109,7 +103,7 @@ class AirSendRuntimeRepositoryImpl(
                 historyCount = daemon.historyCount,
                 activeTransferCount = daemon.activeTransferCount,
                 transfers = snapshot.transfers,
-                healthWarnings = daemon.healthWarnings + compatibilityWarnings,
+                healthWarnings = daemon.healthWarnings,
                 tlsFingerprint = daemon.tlsFingerprint,
                 tlsReady = daemon.tlsReady,
                 transportProtocol = daemon.transportProtocol,
@@ -574,7 +568,6 @@ class AirSendRuntimeRepositoryImpl(
     )
 
     companion object {
-        private const val SUPPORTED_PROTOCOL_VERSION = 1
         private const val ROOT_DAEMON_START_ATTEMPTS = 20
         private const val ROOT_DAEMON_START_POLL_MS = 100L
         private const val FOREGROUND_SERVICE_STOP_ATTEMPTS = 20

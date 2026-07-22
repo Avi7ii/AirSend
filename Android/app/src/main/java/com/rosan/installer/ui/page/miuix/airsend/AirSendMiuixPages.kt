@@ -119,6 +119,7 @@ import com.rosan.installer.ui.page.airsend.AirSendActivityLayout
 import com.rosan.installer.ui.page.airsend.AirSendContentIcon
 import com.rosan.installer.ui.page.airsend.AirSendContentId
 import com.rosan.installer.ui.page.airsend.AirSendContentItem
+import com.rosan.installer.ui.page.airsend.AirSendHomeStatusTone
 import com.rosan.installer.ui.page.airsend.AirSendDeviceKind
 import com.rosan.installer.ui.page.airsend.AirSendNavigationTarget
 import com.rosan.installer.ui.page.airsend.AirSendPageContent
@@ -126,6 +127,7 @@ import com.rosan.installer.ui.page.airsend.AirSendSection
 import com.rosan.installer.ui.page.airsend.AirSendStatusPlacement
 import com.rosan.installer.ui.page.airsend.deviceKind
 import com.rosan.installer.ui.page.airsend.deviceSubtitle
+import com.rosan.installer.ui.page.airsend.homeStatus
 import com.rosan.installer.ui.page.airsend.runtime.AirSendRuntimeAction
 import com.rosan.installer.ui.page.airsend.runtime.AirSendAuthorizationMode
 import com.rosan.installer.ui.page.airsend.runtime.AirSendRuntimeEvent
@@ -671,42 +673,36 @@ private fun MiuixAirSendStatusCard(
     runtimeState: AirSendRuntimeState,
     onClick: () -> Unit
 ) {
-    val activationPending = runtimeState.lspActivationPending
-    val healthy = runtimeState.backgroundServiceRunning &&
-        runtimeState.rootRuntimeHealthy &&
-        runtimeState.daemonReachable &&
-        runtimeState.tlsReady &&
-        runtimeState.storageReady &&
-        !activationPending
-    val containerColor = when {
-        activationPending -> when {
+    val status = runtimeState.homeStatus()
+    val containerColor = when (status.tone) {
+        AirSendHomeStatusTone.Neutral -> when {
             isDynamicColor -> MiuixTheme.colorScheme.surfaceVariant
             InstallerTheme.isDark -> Color(0xFF2A2A2D)
             else -> Color(0xFFE7E7EA)
         }
-        healthy -> when {
+        AirSendHomeStatusTone.Ready -> when {
             isDynamicColor -> MiuixTheme.colorScheme.secondaryContainer
             InstallerTheme.isDark -> Color(0xFF1A3825)
             else -> Color(0xFFDFFAE4)
         }
-        else -> when {
+        AirSendHomeStatusTone.Critical -> when {
             isDynamicColor -> MiuixTheme.colorScheme.errorContainer
             InstallerTheme.isDark -> Color(0xFF381A1A)
             else -> Color(0xFFFAEEEE)
         }
     }
-    val textContentColor = when {
-        activationPending -> if (isDynamicColor) {
+    val textContentColor = when (status.tone) {
+        AirSendHomeStatusTone.Neutral -> if (isDynamicColor) {
             MiuixTheme.colorScheme.onSurfaceVariantActions
         } else {
             if (InstallerTheme.isDark) Color(0xFFDADAE0) else Color(0xFF4A4A50)
         }
-        healthy -> if (isDynamicColor) {
+        AirSendHomeStatusTone.Ready -> if (isDynamicColor) {
             MiuixTheme.colorScheme.onSecondaryContainer
         } else {
             MiuixTheme.colorScheme.onSurface
         }
-        else -> if (isDynamicColor) {
+        AirSendHomeStatusTone.Critical -> if (isDynamicColor) {
             MiuixTheme.colorScheme.onErrorContainer
         } else {
             MiuixTheme.colorScheme.onSurface
@@ -739,19 +735,19 @@ private fun MiuixAirSendStatusCard(
             ) {
                 Icon(
                     modifier = Modifier.size(170.dp),
-                    imageVector = when {
-                        activationPending -> AppIcons.LSPosed
-                        healthy -> AppIcons.Active
-                        else -> Icons.Rounded.ErrorOutline
+                    imageVector = when (status.tone) {
+                        AirSendHomeStatusTone.Neutral -> AppIcons.Search
+                        AirSendHomeStatusTone.Ready -> AppIcons.Active
+                        AirSendHomeStatusTone.Critical -> Icons.Rounded.ErrorOutline
                     },
-                    tint = when {
-                        activationPending -> textContentColor.copy(alpha = 0.72f)
-                        healthy -> if (isDynamicColor) {
+                    tint = when (status.tone) {
+                        AirSendHomeStatusTone.Neutral -> textContentColor.copy(alpha = 0.72f)
+                        AirSendHomeStatusTone.Ready -> if (isDynamicColor) {
                             MiuixTheme.colorScheme.primary.copy(alpha = 0.8f)
                         } else {
                             miuixHomeStatusCardColorActivated
                         }
-                        else -> if (isDynamicColor) {
+                        AirSendHomeStatusTone.Critical -> if (isDynamicColor) {
                             MiuixTheme.colorScheme.error.copy(alpha = 0.8f)
                         } else {
                             miuixHomeStatusCardColorDeactivated
@@ -773,13 +769,7 @@ private fun MiuixAirSendStatusCard(
                 ) {
                     Text(
                         modifier = Modifier.weight(1f),
-                        text = stringResource(
-                            when {
-                                activationPending -> R.string.airsend_status_pending
-                                healthy -> R.string.airsend_status_ready
-                                else -> R.string.airsend_status_attention
-                            }
-                        ),
+                        text = stringResource(status.titleRes),
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                         color = textContentColor
@@ -794,14 +784,9 @@ private fun MiuixAirSendStatusCard(
                 Spacer(Modifier.height(2.dp))
                 Text(
                     modifier = Modifier.fillMaxWidth(),
-                    text = when {
-                        activationPending -> stringResource(R.string.airsend_status_pending_desc)
-                        healthy -> stringResource(
-                            R.string.airsend_status_ready_desc,
-                            runtimeState.peers.size
-                        )
-                        else -> stringResource(R.string.airsend_status_attention_desc)
-                    },
+                    text = status.descriptionCount?.let { count ->
+                        stringResource(status.descriptionRes, count)
+                    } ?: stringResource(status.descriptionRes),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
                     color = descTextColor
@@ -2460,7 +2445,6 @@ private fun miuixAirSendDescription(
             !runtimeState.rootAvailable -> stringResource(R.string.airsend_no_root_manual_clipboard)
             !runtimeState.moduleInstalled -> stringResource(R.string.airsend_module_not_installed)
             !runtimeState.moduleEnabled -> stringResource(R.string.airsend_module_disabled)
-            !runtimeState.versionsMatch -> stringResource(R.string.airsend_module_version_mismatch)
             runtimeState.reverseClipboardIpcReady -> stringResource(
                 R.string.airsend_lsp_ready,
                 runtimeState.moduleVersion ?: "?"

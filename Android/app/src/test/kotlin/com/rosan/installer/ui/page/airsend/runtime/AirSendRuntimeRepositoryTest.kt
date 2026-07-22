@@ -44,7 +44,6 @@ class AirSendRuntimeRepositoryTest {
                 moduleInstalled = true,
                 moduleEnabled = true,
                 moduleVersion = "v5.0.1",
-                moduleVersionCode = 501,
                 daemonProcessRunning = true
             )
         )
@@ -59,7 +58,6 @@ class AirSendRuntimeRepositoryTest {
         assertEquals("Magisk", state.rootProvider)
         assertTrue(state.moduleInstalled)
         assertTrue(state.daemonProcessRunning)
-        assertTrue(state.versionsMatch)
         assertEquals(1, state.protocolVersion)
         assertEquals("5.0.1", state.daemonVersion)
         assertEquals("https", state.transportProtocol)

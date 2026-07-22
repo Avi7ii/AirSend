@@ -29,6 +29,8 @@ import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -72,10 +74,12 @@ import com.rosan.installer.ui.page.airsend.AirSendActivityLayout
 import com.rosan.installer.ui.page.airsend.AirSendContentIcon
 import com.rosan.installer.ui.page.airsend.AirSendContentId
 import com.rosan.installer.ui.page.airsend.AirSendContentItem
+import com.rosan.installer.ui.page.airsend.AirSendHomeStatusTone
 import com.rosan.installer.ui.page.airsend.AirSendNavigationTarget
 import com.rosan.installer.ui.page.airsend.AirSendPageContent
 import com.rosan.installer.ui.page.airsend.AirSendSection
 import com.rosan.installer.ui.page.airsend.AirSendStatusPlacement
+import com.rosan.installer.ui.page.airsend.homeStatus
 import com.rosan.installer.ui.page.airsend.runtime.AirSendRuntimeAction
 import com.rosan.installer.ui.page.airsend.runtime.AirSendRuntimeEvent
 import com.rosan.installer.ui.page.airsend.runtime.AirSendRuntimeState
@@ -306,9 +310,17 @@ private fun AirSendMaterialPage(
 
 @Composable
 private fun AirSendStatusCard(useBlur: Boolean, runtimeState: AirSendRuntimeState) {
-    val containerColor = MaterialTheme.colorScheme.primaryContainer
-    val contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-    val healthy = runtimeState.backgroundServiceRunning && runtimeState.daemonReachable
+    val status = runtimeState.homeStatus()
+    val containerColor = when (status.tone) {
+        AirSendHomeStatusTone.Neutral -> MaterialTheme.colorScheme.surfaceVariant
+        AirSendHomeStatusTone.Ready -> MaterialTheme.colorScheme.secondaryContainer
+        AirSendHomeStatusTone.Critical -> MaterialTheme.colorScheme.errorContainer
+    }
+    val contentColor = when (status.tone) {
+        AirSendHomeStatusTone.Neutral -> MaterialTheme.colorScheme.onSurfaceVariant
+        AirSendHomeStatusTone.Ready -> MaterialTheme.colorScheme.onSecondaryContainer
+        AirSendHomeStatusTone.Critical -> MaterialTheme.colorScheme.onErrorContainer
+    }
 
     ElevatedCard(
         colors = CardDefaults.cardColors(
@@ -341,7 +353,11 @@ private fun AirSendStatusCard(useBlur: Boolean, runtimeState: AirSendRuntimeStat
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    imageVector = AppIcons.Active,
+                    imageVector = when (status.tone) {
+                        AirSendHomeStatusTone.Neutral -> AppIcons.Search
+                        AirSendHomeStatusTone.Ready -> AppIcons.Active
+                        AirSendHomeStatusTone.Critical -> Icons.Rounded.ErrorOutline
+                    },
                     contentDescription = null,
                     tint = contentColor,
                     modifier = Modifier
@@ -353,18 +369,14 @@ private fun AirSendStatusCard(useBlur: Boolean, runtimeState: AirSendRuntimeStat
                     modifier = Modifier.padding(start = 20.dp)
                 ) {
                     Text(
-                        text = stringResource(
-                            if (healthy) R.string.airsend_status_running else R.string.airsend_status_attention
-                        ),
+                        text = stringResource(status.titleRes),
                         style = MaterialTheme.typography.titleMediumEmphasized,
                         color = contentColor,
                     )
                     Text(
-                        text = if (healthy) {
-                            stringResource(R.string.airsend_status_running_desc, runtimeState.peers.size)
-                        } else {
-                            stringResource(R.string.airsend_status_attention_desc)
-                        },
+                        text = status.descriptionCount?.let { count ->
+                            stringResource(status.descriptionRes, count)
+                        } ?: stringResource(status.descriptionRes),
                         style = MaterialTheme.typography.bodySmallEmphasized,
                         color = contentColor,
                     )

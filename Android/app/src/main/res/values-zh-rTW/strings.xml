@@ -1145,7 +1145,6 @@
     <string name="airsend_daemon_version_reachable">守護程序 %1$s 可存取</string>
     <string name="airsend_module_not_installed">尚未安裝 AirSend Root 模組。</string>
     <string name="airsend_module_disabled">AirSend Root 模組已停用。</string>
-    <string name="airsend_module_version_mismatch">應用程式與 Root 模組版本不一致，請重新啟動或更新模組。</string>
     <string name="airsend_lsp_ready">模組 %1$s · LSPosed 剪貼簿 IPC 已就緒</string>
     <string name="airsend_lsp_reload_required">Root 模組已就緒，需要重新載入 LSPosed / system_server。</string>
     <string name="airsend_no_root_manual_clipboard">無 Root 模式 · AirSend 執行時自動同步剪貼簿</string>

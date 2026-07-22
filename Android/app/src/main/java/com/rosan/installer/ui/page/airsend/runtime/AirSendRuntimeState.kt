@@ -25,7 +25,6 @@ data class AirSendRuntimeState(
     val moduleInstalled: Boolean = false,
     val moduleEnabled: Boolean = false,
     val moduleVersion: String? = null,
-    val moduleVersionCode: Int? = null,
     val daemonProcessRunning: Boolean = false,
     val appVersion: String = "",
     val appVersionCode: Int = 0,
@@ -81,13 +80,6 @@ data class AirSendRuntimeState(
             rootAvailable &&
                 moduleInstalled &&
                 moduleEnabled &&
-                daemonProcessRunning &&
-                versionsMatch
+                daemonProcessRunning
             )
-
-    val versionsMatch: Boolean
-        get() = moduleVersionCode == null || moduleVersionCode == appVersionCode
-
-    val requiresReboot: Boolean
-        get() = moduleInstalled && (!moduleEnabled || !versionsMatch)
 }

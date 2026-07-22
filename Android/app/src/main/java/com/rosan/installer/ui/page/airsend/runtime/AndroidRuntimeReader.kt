@@ -41,7 +41,6 @@ data class RootDaemonSnapshot(
     val moduleInstalled: Boolean = false,
     val moduleEnabled: Boolean = false,
     val moduleVersion: String? = null,
-    val moduleVersionCode: Int? = null,
     val daemonProcessRunning: Boolean = false
 )
 
@@ -99,7 +98,6 @@ class AndroidRuntimeReaderImpl(context: Context) : AndroidRuntimeReader {
                 moduleInstalled = values["moduleInstalled"] == "1",
                 moduleEnabled = values["moduleEnabled"] == "1",
                 moduleVersion = values["moduleVersion"]?.takeIf(String::isNotBlank),
-                moduleVersionCode = values["moduleVersionCode"]?.toIntOrNull(),
                 daemonProcessRunning = values["daemonProcessRunning"] == "1"
             ).also {
                 cachedRootSnapshot = it
@@ -414,7 +412,6 @@ class AndroidRuntimeReaderImpl(context: Context) : AndroidRuntimeReader {
               echo moduleInstalled=1
               [ ! -f "${'$'}MOD/disable" ] && echo moduleEnabled=1 || echo moduleEnabled=0
               sed -n 's/^version=//p' "${'$'}MOD/module.prop" | head -n 1 | sed 's/^/moduleVersion=/'
-              sed -n 's/^versionCode=//p' "${'$'}MOD/module.prop" | head -n 1 | sed 's/^/moduleVersionCode=/'
             else
               echo moduleInstalled=0
               echo moduleEnabled=0

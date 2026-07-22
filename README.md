@@ -21,6 +21,10 @@
   <a href="README_en.md">English</a> | <b>简体中文</b>
 </p>
 
+<p align="center">
+  <a href="SPONSOR.md">❤️ 支持 AirSend</a>
+</p>
+
 <h2 align="center">🤔 这是什么？</h2>
 
 AirSend 是一套专为 **Mac + Android** 用户设计的跨平台互联工具，核心目标是：**让文件传输和剪贴板同步像 AirDrop 一样顺手，而不需要两台 Apple 设备。**

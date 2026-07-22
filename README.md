@@ -352,3 +352,22 @@ Android 端照片保存在 `~/Pictures/AirSend`，其他文件保存在 `~/Downl
 <p align="center">
   <b>AirSend</b> - <i>Simple is the new smart. AirDrop, but for everyone.</i>
 </p>
+
+---
+
+<h2 align="center">☕ 请我喝杯咖啡</h2>
+
+<p align="center">
+  如果 AirSend 曾让 Mac 和 Android 之间少绕一点路，欢迎请我喝杯咖啡。<br>
+  金额不重要，你愿意使用它、记得它，就已经让我很开心了。
+</p>
+
+<p align="center">
+  <a href="SPONSOR.md">
+    <img src="docs/assets/sponsor/wechat-reward.png" width="280" alt="W.W 的微信赞赏码">
+  </a>
+</p>
+
+<p align="center">
+  <a href="SPONSOR.md"><b>❤️ 查看赞助页，了解这个小项目背后的故事</b></a>
+</p>

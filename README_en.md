@@ -355,3 +355,22 @@ Bug reports and PRs are welcome. If this tool is useful to you, giving it a 🌟
 <p align="center">
   <b>AirSend</b> · <i>Simple is the new smart. AirDrop, but for everyone.</i>
 </p>
+
+---
+
+<h2 align="center">☕ Buy me a coffee</h2>
+
+<p align="center">
+  If AirSend has ever made life between your Mac and Android a little easier, you can buy me a coffee.<br>
+  The amount does not matter—knowing that someone finds it useful already means a lot.
+</p>
+
+<p align="center">
+  <a href="SPONSOR.md">
+    <img src="docs/assets/sponsor/wechat-reward.png" width="280" alt="W.W's WeChat appreciation code">
+  </a>
+</p>
+
+<p align="center">
+  <a href="SPONSOR.md"><b>❤️ Visit the sponsor page and read the story behind this little project</b></a>
+</p>

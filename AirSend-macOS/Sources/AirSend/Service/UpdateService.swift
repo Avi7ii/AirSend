@@ -76,9 +76,10 @@ final class UpdateService {
 
     private func showUnavailableAlert() {
         let alert = NSAlert()
-        alert.messageText = "Updates Unavailable"
-        alert.informativeText = updater.unavailableReason ?? "This build cannot use automatic updates."
-        alert.addButton(withTitle: "OK")
+        alert.messageText = AirSendLocalization.localized("Updates Unavailable")
+        alert.informativeText = updater.unavailableReason
+            ?? AirSendLocalization.localized("This build cannot use automatic updates.")
+        alert.addButton(withTitle: AirSendLocalization.localized("OK"))
         alert.runModal()
     }
 }

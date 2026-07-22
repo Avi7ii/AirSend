@@ -776,7 +776,7 @@ class DropZoneWindow: NSPanel {
     var onClickDuringTransfer: (() -> Void)? { get { dropView.onClickDuringTransfer } set { dropView.onClickDuringTransfer = newValue } }
     
     func setStatusText(_ text: String) {
-        dropView.statusLabel?.stringValue = text
+        dropView.statusLabel?.stringValue = AirSendLocalization.localized(text)
     }
 
     var isShowingSuccess: Bool {

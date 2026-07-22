@@ -1,5 +1,6 @@
 import Cocoa
 
+@MainActor
 class UpdateMenuItemView: NSView {
     private let containerView = NSView()
     private let iconContainer = NSView()
@@ -76,12 +77,12 @@ class UpdateMenuItemView: NSView {
 
     private func refreshText() {
         if updateService.isUpdateReady {
-            titleLabel.stringValue = "Update ready, restart now?"
-            versionLabel.stringValue = "v\(updateService.currentVersion) downloaded"
+            titleLabel.stringValue = AirSendLocalization.localized("Update ready, restart now?")
+            versionLabel.stringValue = AirSendLocalization.localized("v\(updateService.currentVersion) downloaded")
             return
         }
 
-        titleLabel.stringValue = "Check for Update"
+        titleLabel.stringValue = AirSendLocalization.localized("Check for Update")
         versionLabel.stringValue = "v\(updateService.currentVersion)"
     }
     

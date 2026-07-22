@@ -58,6 +58,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.rosan.installer.R
+import com.rosan.installer.core.locale.AirSendAppLanguage
+import com.rosan.installer.core.locale.AirSendLocale
 import com.rosan.installer.ui.icons.AppIcons
 import com.rosan.installer.ui.library.FloatingBottomBar
 import com.rosan.installer.ui.library.FloatingBottomBarDefaults
@@ -480,6 +482,31 @@ private fun AirSendMaterialContentItem(
     val target = item.navigationTarget
 
     when {
+        item.id == AirSendContentId.Language -> {
+            val context = LocalContext.current
+            val currentLanguage = AirSendLocale.current(context)
+            BaseWidget(
+                icon = icon,
+                title = title,
+                description = stringResource(
+                    if (currentLanguage == AirSendAppLanguage.SimplifiedChinese) {
+                        R.string.airsend_language_chinese
+                    } else {
+                        R.string.airsend_language_english
+                    }
+                ),
+                onClick = {
+                    AirSendLocale.set(
+                        context,
+                        if (currentLanguage == AirSendAppLanguage.SimplifiedChinese) {
+                            AirSendAppLanguage.English
+                        } else {
+                            AirSendAppLanguage.SimplifiedChinese
+                        }
+                    )
+                }
+            )
+        }
         item.id == AirSendContentId.Startup -> {
             SwitchWidget(
                 icon = icon,
@@ -744,6 +771,7 @@ private fun AirSendContentIcon.asMaterialIcon(): ImageVector =
         AirSendContentIcon.Add -> AppIcons.Add
         AirSendContentIcon.Save -> AppIcons.Save
         AirSendContentIcon.Download -> AppIcons.Download
+        AirSendContentIcon.Language -> AppIcons.Language
         AirSendContentIcon.Theme -> AppIcons.Theme
         AirSendContentIcon.Launcher -> AppIcons.Launcher
         AirSendContentIcon.Security -> AppIcons.DisableAdbVerify

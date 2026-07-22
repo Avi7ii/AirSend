@@ -139,6 +139,7 @@ final class AirSendSettingsStore: ObservableObject {
         let setAutoUpdateEnabled: (Bool) -> Void
         let setLaunchAtLoginEnabled: (Bool) -> Void
         let setCompatibilityModeEnabled: (Bool) -> Void
+        let setLanguage: (String) -> Void
         let sendClipboardNow: () -> Void
         let chooseFilesToSend: () -> Void
         let rescan: () -> Void

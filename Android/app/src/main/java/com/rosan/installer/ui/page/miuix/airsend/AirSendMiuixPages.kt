@@ -101,6 +101,8 @@ import com.airbnb.lottie.compose.rememberLottieDynamicProperties
 import com.airbnb.lottie.compose.rememberLottieDynamicProperty
 import com.airbnb.lottie.value.ScaleXY
 import com.rosan.installer.R
+import com.rosan.installer.core.locale.AirSendAppLanguage
+import com.rosan.installer.core.locale.AirSendLocale
 import com.rosan.installer.ui.icons.AppIcons
 import com.rosan.installer.ui.library.FloatingBottomBar
 import com.rosan.installer.ui.library.FloatingBottomBarItem
@@ -2137,6 +2139,26 @@ private fun MiuixAirSendContentItem(
     val target = item.navigationTarget
 
     when {
+        item.id == AirSendContentId.Language -> {
+            val context = LocalContext.current
+            val languages = AirSendAppLanguage.entries
+            val entries = listOf(
+                DropdownItem(title = stringResource(R.string.airsend_language_chinese)),
+                DropdownItem(title = stringResource(R.string.airsend_language_english))
+            )
+            WindowSpinnerPreference(
+                title = title,
+                summary = description,
+                items = entries,
+                selectedIndex = languages.indexOf(AirSendLocale.current(context))
+                    .coerceAtLeast(0),
+                onSelectedIndexChange = { index ->
+                    languages.getOrNull(index)?.let { language ->
+                        AirSendLocale.set(context, language)
+                    }
+                }
+            )
+        }
         item.id == AirSendContentId.BackgroundService -> {
             MiuixSwitchWidget(
                 title = title,
@@ -2549,6 +2571,7 @@ private fun AirSendContentIcon.asMiuixIcon(): ImageVector =
         AirSendContentIcon.Add -> AppIcons.Add
         AirSendContentIcon.Save -> AppIcons.Save
         AirSendContentIcon.Download -> AppIcons.Download
+        AirSendContentIcon.Language -> AppIcons.Language
         AirSendContentIcon.Theme -> AppIcons.Theme
         AirSendContentIcon.Launcher -> AppIcons.Launcher
         AirSendContentIcon.Security -> AppIcons.DisableAdbVerify

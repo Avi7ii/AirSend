@@ -811,6 +811,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 setCompatibilityModeEnabled: { [weak self] enabled in
                     self?.setCompatibilityModeEnabled(enabled)
                 },
+                setLanguage: { [weak self] rawValue in
+                    AirSendLocalization.setCurrentLanguage(rawValue)
+                    self?.setupMenu()
+                    self?.refreshSettingsWindowIfNeeded(forceRefresh: true)
+                },
                 sendClipboardNow: { [weak self] in
                     self?.sendClipboard()
                 },
@@ -2191,14 +2196,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         case .ask:
             let alert = NSAlert()
             alert.alertStyle = .informational
-            alert.messageText = "Receive from \(request.senderAlias)?"
+            alert.messageText = AirSendLocalization.localized("Receive from \(request.senderAlias)?")
             let names = request.fileNames.prefix(3).joined(separator: "\n")
             let remaining = max(0, request.fileCount - 3)
-            let more = remaining > 0 ? "\n…and \(remaining) more" : ""
+            let more: String
+            if remaining > 0 {
+                more = AirSendLocalization.currentLanguage == .simplifiedChinese
+                    ? "\n…另有 \(remaining) 项"
+                    : "\n…and \(remaining) more"
+            } else {
+                more = ""
+            }
             let size = ByteCountFormatter.string(fromByteCount: request.totalSize, countStyle: .file)
-            alert.informativeText = "\(request.fileCount) item\(request.fileCount == 1 ? "" : "s") · \(size)\n\n\(names)\(more)"
-            alert.addButton(withTitle: "Accept")
-            alert.addButton(withTitle: "Decline")
+            alert.informativeText = AirSendLocalization.currentLanguage == .simplifiedChinese
+                ? "\(request.fileCount) 项 · \(size)\n\n\(names)\(more)"
+                : "\(request.fileCount) item\(request.fileCount == 1 ? "" : "s") · \(size)\n\n\(names)\(more)"
+            alert.addButton(withTitle: AirSendLocalization.localized("Accept"))
+            alert.addButton(withTitle: AirSendLocalization.localized("Decline"))
             alert.buttons.first?.keyEquivalent = "\r"
             return alert.runModal() == .alertFirstButtonReturn
         }
@@ -3368,15 +3382,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         
         if isRequestingInBackground {
             let infoItem = NSMenuItem()
-            infoItem.view = RequestIndicatorView(message: "Waiting for phone...")
+            infoItem.view = RequestIndicatorView(
+                message: AirSendLocalization.localized("Waiting for phone...")
+            )
             infoItem.isEnabled = false
             menu.addItem(infoItem)
             menu.addItem(NSMenuItem.separator())
         }
 
         // Immediate actions stay at the top; configuration belongs in the main window.
-        menu.addItem(NSMenuItem(title: "Send Clipboard", action: #selector(sendClipboard), keyEquivalent: "s"))
-        menu.addItem(NSMenuItem(title: "Send Files…", action: #selector(chooseFilesToSend), keyEquivalent: "o"))
+        menu.addItem(NSMenuItem(
+            title: AirSendLocalization.localized("Send Clipboard"),
+            action: #selector(sendClipboard),
+            keyEquivalent: "s"
+        ))
+        menu.addItem(NSMenuItem(
+            title: AirSendLocalization.localized("Send Files…"),
+            action: #selector(chooseFilesToSend),
+            keyEquivalent: "o"
+        ))
         menu.addItem(NSMenuItem.separator())
         
         let groups = buildDeviceGroups()
@@ -3388,7 +3412,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             
         if !knownGroups.isEmpty {
             let headerItem = NSMenuItem()
-            headerItem.view = MenuSectionHeaderView(title: "KNOWN DEVICES")
+            headerItem.view = MenuSectionHeaderView(
+                title: AirSendLocalization.localized("KNOWN DEVICES")
+            )
             headerItem.isEnabled = false
             menu.addItem(headerItem)
             
@@ -3403,12 +3429,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         }
             
         let otherHeaderItem = NSMenuItem()
-        otherHeaderItem.view = MenuSectionHeaderView(title: "OTHER DEVICES")
+        otherHeaderItem.view = MenuSectionHeaderView(
+            title: AirSendLocalization.localized("OTHER DEVICES")
+        )
         otherHeaderItem.isEnabled = false
         menu.addItem(otherHeaderItem)
         
         if otherGroups.isEmpty {
-            let searchingItem = NSMenuItem(title: "  Searching nearby...", action: nil, keyEquivalent: "")
+            let searchingItem = NSMenuItem(
+                title: AirSendLocalization.localized("  Searching nearby..."),
+                action: nil,
+                keyEquivalent: ""
+            )
             searchingItem.isEnabled = false
             menu.addItem(searchingItem)
         } else {
@@ -3417,21 +3449,33 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
             }
         }
         
-        let broadcastItem = NSMenuItem(title: "All Devices (Broadcast)", action: #selector(deviceSelected(_:)), keyEquivalent: "")
+        let broadcastItem = NSMenuItem(
+            title: AirSendLocalization.localized("All Devices (Broadcast)"),
+            action: #selector(deviceSelected(_:)),
+            keyEquivalent: ""
+        )
         broadcastItem.representedObject = broadcastSelectionKey
         broadcastItem.state = selectedDeviceGroupKey == broadcastSelectionKey ? .on : .off
         menu.addItem(broadcastItem)
         
         menu.addItem(NSMenuItem.separator())
         
-        let settingsItem = NSMenuItem(title: "Open AirSend…", action: #selector(openSettingsWindow(_:)), keyEquivalent: ",")
+        let settingsItem = NSMenuItem(
+            title: AirSendLocalization.localized("Open AirSend…"),
+            action: #selector(openSettingsWindow(_:)),
+            keyEquivalent: ","
+        )
         settingsItem.keyEquivalentModifierMask = [.command]
         menu.addItem(settingsItem)
 
         menu.addItem(NSMenuItem.separator())
 
         if UpdateService.shared.isUpdateReady {
-            let installUpdateItem = NSMenuItem(title: "Update ready, restart now?", action: #selector(installUpdate), keyEquivalent: "")
+            let installUpdateItem = NSMenuItem(
+                title: AirSendLocalization.localized("Update ready, restart now?"),
+                action: #selector(installUpdate),
+                keyEquivalent: ""
+            )
             menu.addItem(installUpdateItem)
         }
         
@@ -3440,8 +3484,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         menu.addItem(updateItem)
         
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Refresh Devices", action: #selector(scanForDevices(_:)), keyEquivalent: "r"))
-        menu.addItem(NSMenuItem(title: "Quit AirSend", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(
+            title: AirSendLocalization.localized("Refresh Devices"),
+            action: #selector(scanForDevices(_:)),
+            keyEquivalent: "r"
+        ))
+        menu.addItem(NSMenuItem(
+            title: AirSendLocalization.localized("Quit AirSend"),
+            action: #selector(quit),
+            keyEquivalent: "q"
+        ))
     }
     
     private func addDeviceItem(
@@ -3699,10 +3751,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
         guard !candidates.isEmpty else {
             let alert = NSAlert()
-            alert.messageText = "No Devices Available to Trust"
-            alert.informativeText = "Discover an untrusted device on the current LAN, then try again."
+            alert.messageText = AirSendLocalization.localized("No Devices Available to Trust")
+            alert.informativeText = AirSendLocalization.localized("Discover an untrusted device on the current LAN, then try again.")
             alert.alertStyle = .informational
-            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: AirSendLocalization.localized("OK"))
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()
             return
@@ -3714,12 +3766,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
         })
 
         let alert = NSAlert()
-        alert.messageText = "Trust a Device"
-        alert.informativeText = "Trusted devices may send files without a prompt when receiving is limited to trusted devices. Only trust devices you control."
+        alert.messageText = AirSendLocalization.localized("Trust a Device")
+        alert.informativeText = AirSendLocalization.localized("Trusted devices may send files without a prompt when receiving is limited to trusted devices. Only trust devices you control.")
         alert.alertStyle = .informational
         alert.accessoryView = popup
-        alert.addButton(withTitle: "Trust Device")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: AirSendLocalization.localized("Trust Device"))
+        alert.addButton(withTitle: AirSendLocalization.localized("Cancel"))
         NSApp.activate(ignoringOtherApps: true)
 
         guard alert.runModal() == .alertFirstButtonReturn,
@@ -3953,10 +4005,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private func clearLogs() {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Clear AirSend logs?"
-        alert.informativeText = "This removes the local diagnostic log history."
-        alert.addButton(withTitle: "Clear Logs")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = AirSendLocalization.localized("Clear AirSend logs?")
+        alert.informativeText = AirSendLocalization.localized("This removes the local diagnostic log history.")
+        alert.addButton(withTitle: AirSendLocalization.localized("Clear Logs"))
+        alert.addButton(withTitle: AirSendLocalization.localized("Cancel"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         Task {
             try? await FileLogger.clear()
@@ -4009,26 +4061,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
     @objc func addDeviceByIP() {
         let alert = NSAlert()
-        alert.messageText = "Add Manual Device"
-        alert.informativeText = "AirSend will remember this endpoint and probe it directly. Add its fingerprint to use verified HTTPS."
-        alert.addButton(withTitle: "Add")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = AirSendLocalization.localized("Add Manual Device")
+        alert.informativeText = AirSendLocalization.localized("AirSend will remember this endpoint and probe it directly. Add its fingerprint to use verified HTTPS.")
+        alert.addButton(withTitle: AirSendLocalization.localized("Add"))
+        alert.addButton(withTitle: AirSendLocalization.localized("Cancel"))
 
         let aliasField = NSTextField(string: "")
-        aliasField.placeholderString = "Living Room Phone"
+        aliasField.placeholderString = AirSendLocalization.localized("Living Room Phone")
         let addressField = NSTextField(string: "")
         addressField.placeholderString = "192.168.1.100"
         let portField = NSTextField(string: String(NetworkPorts.transferPort))
         let fingerprintField = NSTextField(string: "")
-        fingerprintField.placeholderString = "Optional SHA-256 fingerprint"
+        fingerprintField.placeholderString = AirSendLocalization.localized("Optional SHA-256 fingerprint")
         for field in [aliasField, addressField, portField, fingerprintField] {
             field.widthAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
         }
         let grid = NSGridView(views: [
-            [NSTextField(labelWithString: "Name"), aliasField],
-            [NSTextField(labelWithString: "Address"), addressField],
-            [NSTextField(labelWithString: "Port"), portField],
-            [NSTextField(labelWithString: "Fingerprint"), fingerprintField],
+            [NSTextField(labelWithString: AirSendLocalization.localized("Name")), aliasField],
+            [NSTextField(labelWithString: AirSendLocalization.localized("Address")), addressField],
+            [NSTextField(labelWithString: AirSendLocalization.localized("Port")), portField],
+            [NSTextField(labelWithString: AirSendLocalization.localized("Fingerprint")), fingerprintField],
         ])
         grid.rowSpacing = 8
         grid.columnSpacing = 12
@@ -4096,9 +4148,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
                 )
                 let failure = NSAlert()
                 failure.alertStyle = .warning
-                failure.messageText = "Device Could Not Be Added"
+                failure.messageText = AirSendLocalization.localized("Device Could Not Be Added")
                 failure.informativeText = error.localizedDescription
-                failure.addButton(withTitle: "OK")
+                failure.addButton(withTitle: AirSendLocalization.localized("OK"))
                 failure.runModal()
             }
         }
@@ -4112,8 +4164,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
     private func showAndroidIntegrationAlert(featureName: String, description: String) {
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "\(featureName) Requires AirSend on Android"
-        alert.informativeText = """
+        alert.messageText = AirSendLocalization.currentLanguage == .simplifiedChinese
+            ? "\(AirSendLocalization.localized(featureName)) 需要 Android 版 AirSend"
+            : "\(featureName) Requires AirSend on Android"
+        alert.informativeText = AirSendLocalization.currentLanguage == .simplifiedChinese ? """
+        \(AirSendLocalization.localized(description))
+
+        官方 LocalSend 应用可以手动接收剪贴板内容，但静默后台同步仅受 AirSend Android 版本支持。
+
+        此设置需要 Root 级集成（Magisk + LSPosed），适用于有 Android 修改经验的用户。
+
+        仓库：\(androidAirSendRepository)
+        """ : """
         \(description)
 
         The official LocalSend app can receive clipboard content manually, but silent background sync is only supported with the AirSend Android build.
@@ -4122,8 +4184,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, DropTargetViewDelegate, NSMe
 
         Repository: \(androidAirSendRepository)
         """
-        alert.addButton(withTitle: "Open Repository")
-        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: AirSendLocalization.localized("Open Repository"))
+        alert.addButton(withTitle: AirSendLocalization.localized("Continue"))
 
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {

@@ -74,6 +74,7 @@ import androidx.compose.material.icons.twotone.InstallMobile
 import androidx.compose.material.icons.twotone.KeyboardArrowDown
 import androidx.compose.material.icons.twotone.LibraryAddCheck
 import androidx.compose.material.icons.twotone.LaptopMac
+import androidx.compose.material.icons.twotone.Language
 import androidx.compose.material.icons.twotone.LocalPolice
 import androidx.compose.material.icons.twotone.Memory
 import androidx.compose.material.icons.twotone.MusicNote
@@ -173,6 +174,7 @@ object AppIcons {
     val Close = Icons.TwoTone.Close
     val AutoFixHigh = Icons.TwoTone.AutoFixHigh
     val Developer = Icons.TwoTone.DeveloperMode
+    val Language = Icons.TwoTone.Language
     val Theme = Icons.TwoTone.ColorLens
     val ViewSourceCode = Icons.TwoTone.Code
     val OpenSourceLicense = Icons.TwoTone.Copyright

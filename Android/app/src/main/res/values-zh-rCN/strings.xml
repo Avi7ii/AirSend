@@ -1085,6 +1085,10 @@
     <string name="airsend_settings_permissions">权限</string>
     <string name="airsend_settings_diagnostics">日志与诊断</string>
     <string name="airsend_theme_desc">主题、Monet、强调色、悬浮底栏和模糊。</string>
+    <string name="airsend_language">语言</string>
+    <string name="airsend_language_desc">选择 AirSend 全局使用的语言。</string>
+    <string name="airsend_language_chinese">简体中文</string>
+    <string name="airsend_language_english">English</string>
     <string name="airsend_startup">开机启动</string>
     <string name="airsend_startup_desc">启动后保持 AirSend 可用。</string>
     <string name="airsend_logs">导出日志</string>

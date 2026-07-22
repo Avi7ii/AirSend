@@ -1,5 +1,6 @@
 package com.airsend
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -12,6 +13,7 @@ import androidx.compose.ui.unit.Density
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.rosan.installer.domain.settings.model.preferences.ThemeState
+import com.rosan.installer.core.locale.AirSendLocale
 import com.rosan.installer.domain.settings.provider.ThemeStateProvider
 import com.rosan.installer.ui.page.airsend.AirSendShareTargetDialog
 import com.rosan.installer.ui.page.airsend.runtime.AirSendRuntimeRepository
@@ -33,6 +35,10 @@ class AirSendShareDialogActivity : ComponentActivity(), KoinComponent {
 
     private val themeStateProvider by inject<ThemeStateProvider>()
     private val airSendRepository by inject<AirSendRuntimeRepository>()
+
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AirSendLocale.wrap(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

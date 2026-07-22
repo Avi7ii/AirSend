@@ -59,6 +59,7 @@ enum class AirSendContentId {
     QuickSave,
     SaveLocation,
     ReceivedHistory,
+    Language,
     Theme,
     Startup,
     NetworkDiscovery,
@@ -84,6 +85,7 @@ enum class AirSendContentIcon {
     Add,
     Save,
     Download,
+    Language,
     Theme,
     Launcher,
     Security,
@@ -314,6 +316,12 @@ object AirSendPageContent {
             section(
                 AirSendSectionId.Appearance,
                 R.string.airsend_settings_appearance,
+                item(
+                    AirSendContentId.Language,
+                    AirSendContentIcon.Language,
+                    R.string.airsend_language,
+                    R.string.airsend_language_desc
+                ),
                 item(
                     AirSendContentId.Theme,
                     AirSendContentIcon.Theme,

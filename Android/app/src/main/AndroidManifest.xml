@@ -71,7 +71,7 @@
 
         <activity
             android:name="com.rosan.installer.ui.activity.SettingsActivity"
-            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|locale|layoutDirection"
             android:exported="true"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
@@ -115,7 +115,7 @@
 
         <activity
             android:name="com.airsend.AirSendShareDialogActivity"
-            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|locale|layoutDirection"
             android:excludeFromRecents="true"
             android:exported="false"
             android:resizeableActivity="false"

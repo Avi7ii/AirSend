@@ -2,6 +2,7 @@
 // Copyright (C) 2025-2026 InstallerX Revived contributors
 package com.rosan.installer.ui.activity
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -21,10 +22,12 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.rosan.installer.domain.settings.repository.AppSettingsRepository
+import com.rosan.installer.core.locale.AirSendLocale
 import com.rosan.installer.domain.settings.repository.BooleanSetting
 import com.rosan.installer.domain.settings.model.preferences.ThemeState
 import com.rosan.installer.domain.settings.provider.ThemeStateProvider
 import com.rosan.installer.ui.navigation.InstallerNavContainer
+import com.rosan.installer.ui.locale.AirSendLanguageTransition
 import com.rosan.installer.ui.page.airsend.runtime.AirSendRuntimeRepository
 import com.rosan.installer.ui.page.airsend.runtime.AirSendForegroundServicePolicy
 import com.rosan.installer.ui.page.airsend.runtime.AndroidRuntimeReaderImpl
@@ -44,6 +47,10 @@ class SettingsActivity : ComponentActivity(), KoinComponent {
     private val appSettingsRepository by inject<AppSettingsRepository>()
     private val pendingShareIntent = mutableStateOf<Intent?>(null)
     private val pendingSharePreferredTargetId = mutableStateOf<String?>(null)
+
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AirSendLocale.wrap(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
@@ -76,6 +83,7 @@ class SettingsActivity : ComponentActivity(), KoinComponent {
         acceptShareIntent(intent)
         setContent {
             val uiState by themeStateProvider.themeStateFlow.collectAsStateWithLifecycle(initialValue = ThemeState())
+            val languageRequest by AirSendLocale.requestedLanguage.collectAsStateWithLifecycle()
             isThemeLoaded = uiState.isLoaded
 
             // Prevent heavy navigation setup until state is ready
@@ -109,23 +117,28 @@ class SettingsActivity : ComponentActivity(), KoinComponent {
                             .fillMaxSize()
                             .background(MiuixTheme.colorScheme.surface)
                     ) {
-                        InstallerNavContainer(effectiveUiState)
-                        pendingShareIntent.value?.let { shareIntent ->
-                            AirSendShareTargetDialog(
-                                shareIntent = shareIntent,
-                                preferredTargetId = pendingSharePreferredTargetId.value,
-                                repository = airSendRepository,
-                                onDismiss = {
-                                    pendingShareIntent.value = null
-                                    pendingSharePreferredTargetId.value = null
-                                    finish()
-                                },
-                                onSent = {
-                                    pendingShareIntent.value = null
-                                    pendingSharePreferredTargetId.value = null
-                                    finish()
-                                }
-                            )
+                        AirSendLanguageTransition(
+                            request = languageRequest,
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            InstallerNavContainer(effectiveUiState)
+                            pendingShareIntent.value?.let { shareIntent ->
+                                AirSendShareTargetDialog(
+                                    shareIntent = shareIntent,
+                                    preferredTargetId = pendingSharePreferredTargetId.value,
+                                    repository = airSendRepository,
+                                    onDismiss = {
+                                        pendingShareIntent.value = null
+                                        pendingSharePreferredTargetId.value = null
+                                        finish()
+                                    },
+                                    onSent = {
+                                        pendingShareIntent.value = null
+                                        pendingSharePreferredTargetId.value = null
+                                        finish()
+                                    }
+                                )
+                            }
                         }
                     }
                 }

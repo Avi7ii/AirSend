@@ -1,10 +1,12 @@
 package com.rosan.installer
 
 import android.app.Application
+import android.content.Context
 import android.os.Build
 import com.kieronquinn.monetcompat.core.MonetCompat
 import com.rosan.installer.core.crash.CrashHandler
 import com.rosan.installer.core.env.AppConfig
+import com.rosan.installer.core.locale.AirSendLocale
 import com.rosan.installer.di.init.appModules
 import org.koin.android.ext.koin.androidContext
 import org.koin.android.ext.koin.androidLogger
@@ -12,9 +14,14 @@ import org.koin.core.context.startKoin
 import timber.log.Timber
 
 class App : Application() {
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(AirSendLocale.wrap(base))
+    }
+
     override fun onCreate() {
         CrashHandler.init()
         super.onCreate()
+        AirSendLocale.applyCurrent(this)
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             MonetCompat.setup(this)

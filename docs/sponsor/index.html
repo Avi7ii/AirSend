@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f43f5e">
+  <meta name="description" content="请 AirSend 的开发者喝杯咖啡，支持这个免费、开源的 Mac 与 Android 互传项目。">
+  <title>请我喝杯咖啡 · AirSend</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --background: #f6f6f9;
+      --surface: rgba(255, 255, 255, 0.88);
+      --text: #19191d;
+      --muted: #696970;
+      --line: rgba(20, 20, 25, 0.08);
+      --accent: #e92f55;
+      --accent-soft: rgba(233, 47, 85, 0.1);
+      --shadow: 0 30px 80px rgba(38, 25, 32, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      padding: 32px 18px;
+      display: grid;
+      place-items: center;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 15% 10%, rgba(244, 63, 94, 0.13), transparent 34%),
+        radial-gradient(circle at 85% 88%, rgba(234, 179, 8, 0.12), transparent 32%),
+        var(--background);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.65;
+    }
+
+    main {
+      width: min(900px, 100%);
+      padding: clamp(28px, 6vw, 64px);
+      border: 1px solid var(--line);
+      border-radius: 36px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(22px);
+      -webkit-backdrop-filter: blur(22px);
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      color: var(--accent);
+      background: var(--accent-soft);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .brand-mark {
+      width: 26px;
+      height: 26px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: white;
+      background: linear-gradient(145deg, #ff5c76, #e61f4b);
+      box-shadow: 0 6px 18px rgba(233, 47, 85, 0.3);
+    }
+
+    h1 {
+      max-width: 700px;
+      margin: 24px 0 14px;
+      font-size: clamp(38px, 7vw, 68px);
+      line-height: 1.08;
+      letter-spacing: -0.045em;
+    }
+
+    .lead {
+      max-width: 690px;
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(17px, 2.4vw, 21px);
+    }
+
+    .content {
+      margin-top: 38px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(250px, 0.9fr);
+      gap: clamp(28px, 6vw, 64px);
+      align-items: center;
+    }
+
+    .story p {
+      margin: 0 0 16px;
+    }
+
+    .story strong {
+      color: var(--accent);
+    }
+
+    .qr-panel {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background: white;
+      box-shadow: 0 18px 50px rgba(28, 20, 24, 0.09);
+    }
+
+    .qr-panel img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 18px;
+    }
+
+    .scan-note {
+      margin: 13px 4px 1px;
+      color: #727278;
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .actions {
+      margin-top: 34px;
+      padding-top: 24px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 22px;
+      align-items: center;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    a {
+      color: var(--accent);
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    a:hover,
+    a:focus-visible {
+      text-decoration: underline;
+      text-underline-offset: 4px;
+    }
+
+    .english {
+      margin-top: 28px;
+      padding: 20px 22px;
+      border-radius: 20px;
+      color: var(--muted);
+      background: rgba(127, 127, 140, 0.07);
+      font-size: 14px;
+    }
+
+    .english strong {
+      color: var(--text);
+    }
+
+    @media (max-width: 680px) {
+      body {
+        padding: 16px 12px;
+      }
+
+      main {
+        padding: 28px 20px;
+        border-radius: 28px;
+      }
+
+      .content {
+        grid-template-columns: 1fr;
+      }
+
+      .qr-panel {
+        width: min(360px, 100%);
+        margin-inline: auto;
+      }
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --background: #101013;
+        --surface: rgba(27, 27, 31, 0.9);
+        --text: #f5f5f7;
+        --muted: #aaaab2;
+        --line: rgba(255, 255, 255, 0.09);
+        --accent: #ff5977;
+        --accent-soft: rgba(255, 89, 119, 0.13);
+        --shadow: 0 30px 90px rgba(0, 0, 0, 0.38);
+      }
+
+      .qr-panel {
+        background: #f7f7f7;
+      }
+
+      .scan-note {
+        color: #66666d;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand"><span class="brand-mark" aria-hidden="true">↗</span> AirSend</div>
+    <h1>请我喝杯咖啡 ☕</h1>
+    <p class="lead">AirSend 是一个免费、开源的项目；赞赏只是喜欢它的人，递来的一点鼓励。</p>
+
+    <section class="content" aria-label="支持 AirSend">
+      <div class="story">
+        <p>嗨，我是 AirSend 的开发者。</p>
+        <p>它最初只是想解决一个很具体的烦恼：<strong>为什么 Mac 和 Android 之间传个文件、复制一段文字，要绕这么多路？</strong></p>
+        <p>如果 AirSend 曾让你少用一次“文件传输助手”，让截图和剪贴板自然地出现在另一台设备上，或者在难搞的校园网里终于把文件传了过去——那就请我喝杯咖啡吧。</p>
+        <p>金额不重要。看到有人真的在使用 AirSend、觉得它值得继续做下去，对我来说就已经很开心了。</p>
+      </div>
+
+      <div class="qr-panel">
+        <img src="../assets/sponsor/wechat-reward.png" alt="W.W 的微信赞赏码" width="1109" height="1109">
+        <p class="scan-note">微信扫一扫 · 谢谢你的支持</p>
+      </div>
+    </section>
+
+    <div class="english" lang="en">
+      <strong>Buy me a coffee.</strong> If AirSend has ever made life between your Mac and Android a little easier, you can support its continued development. The amount does not matter—knowing that someone finds it useful already means a lot.
+    </div>
+
+    <footer class="actions">
+      <a href="https://github.com/Avi7ii/AirSend">← 返回 AirSend 仓库</a>
+      <span>不赞赏也完全没关系。一个 Star、一条认真反馈或一次分享，同样珍贵。❤️</span>
+    </footer>
+  </main>
+</body>
+</html>

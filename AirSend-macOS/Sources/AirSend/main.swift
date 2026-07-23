@@ -4587,7 +4587,7 @@ private enum SelfTestRunner {
             port: goodPort,
             deviceModel: model,
             deviceType: deviceType,
-            version: "5.0.1",
+            version: "5.0.2",
             https: deviceUsesHTTPS,
             download: true,
             lastSeen: Date()
@@ -4599,7 +4599,7 @@ private enum SelfTestRunner {
             port: badPort,
             deviceModel: model,
             deviceType: deviceType,
-            version: "5.0.1",
+            version: "5.0.2",
             https: deviceUsesHTTPS,
             download: true,
             lastSeen: Date()

@@ -57,12 +57,21 @@ fi
 APPCAST_PATH="${AIRSEND_APPCAST_PATH:-$REPO_ROOT/appcast.xml}"
 DOWNLOAD_URL_PREFIX="${AIRSEND_DOWNLOAD_URL_PREFIX:-}"
 SPARKLE_ACCOUNT="${SPARKLE_KEY_ACCOUNT:-AirSend}"
+WORK_APPCAST="$TMP_ARCHIVE_DIR/appcast.xml"
+
+# Preserve previously published items and their tag-specific GitHub URLs.
+# Only the new archive uses DOWNLOAD_URL_PREFIX. Sparkle otherwise rebuilds
+# the feed from the current directory and silently drops release history.
+if [ -f "$APPCAST_PATH" ]; then
+    cp -p "$APPCAST_PATH" "$WORK_APPCAST"
+fi
 
 ARGS=(
     --account "$SPARKLE_ACCOUNT"
     --embed-release-notes
     --link "https://github.com/Avi7ii/AirSend"
-    -o "$APPCAST_PATH"
+    --maximum-deltas 0
+    -o "$WORK_APPCAST"
 )
 
 if [ -n "$DOWNLOAD_URL_PREFIX" ]; then
@@ -74,4 +83,5 @@ if [ -n "$DOWNLOAD_URL_PREFIX" ]; then
 fi
 
 "$GENERATE_APPCAST" "${ARGS[@]}" "$TMP_ARCHIVE_DIR"
+cp -p "$WORK_APPCAST" "$APPCAST_PATH"
 echo "Updated appcast: $APPCAST_PATH"

@@ -39,8 +39,8 @@ android {
     defaultConfig {
         applicationId = project.findProperty("APP_ID") as String? ?: "com.airsend"
 
-        versionCode = 501
-        versionName = "5.0.1"
+        versionCode = 502
+        versionName = "5.0.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("boolean", "INTERNET_ACCESS_ENABLED", "true")
@@ -164,6 +164,7 @@ dependencies {
     implementation(libs.compose.ui.graphics)
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.material3)
+    implementation(libs.google.material)
     implementation("com.airbnb.android:lottie-compose:6.7.1")
     implementation(libs.androidx.lifecycle.viewmodel.navigation3)
 

@@ -54,8 +54,8 @@ class AirSendHomeStatusTest {
     private fun healthyState() = AirSendRuntimeState(
         serviceRunning = true,
         daemonReachable = true,
-        appVersion = "5.0.1",
-        appVersionCode = 501,
+        appVersion = "5.0.2",
+        appVersionCode = 502,
         notificationPermissionGranted = true,
         storagePermissionGranted = true,
         tlsReady = true,

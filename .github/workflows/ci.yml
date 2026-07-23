@@ -79,6 +79,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Select Xcode 26.3
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
+
       - name: Cache SwiftPM
         uses: actions/cache@v4
         with:
@@ -86,9 +89,9 @@ jobs:
             AirSend-macOS/.build
             ~/Library/Caches/org.swift.swiftpm
             ~/.swiftpm
-          key: ${{ runner.os }}-swiftpm-${{ hashFiles('AirSend-macOS/Package.swift', 'AirSend-macOS/Package.resolved') }}
+          key: ${{ runner.os }}-xcode-26.3-swiftpm-${{ hashFiles('AirSend-macOS/Package.swift', 'AirSend-macOS/Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-swiftpm-
+            ${{ runner.os }}-xcode-26.3-swiftpm-
 
       - name: Show toolchain versions
         working-directory: AirSend-macOS

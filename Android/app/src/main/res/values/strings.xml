@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name" translatable="false">AirSend</string>
     <string name="agreement_title">Policy</string>
     <!--<string name="agreement_text">Here is our user policy, Please read and agree to it. &lt;a href="https://iamr0s.github.io/AirSendDocs/terms"&gt;User Policy&lt;/a&gt;, &lt;a href="https://iamr0s.github.io/AirSendDocs/privacy"&gt;Privacy Policy&lt;/a&gt; This message won\'t show up again after you agree.</string>-->
@@ -1106,10 +1106,10 @@
     <string name="airsend_settings_permissions">Permissions</string>
     <string name="airsend_settings_diagnostics">Logs and Diagnostics</string>
     <string name="airsend_theme_desc">Theme, Monet, accent color, floating bar and blur.</string>
-    <string name="airsend_language">Language</string>
-    <string name="airsend_language_desc">Choose the language used throughout AirSend.</string>
-    <string name="airsend_language_chinese">简体中文</string>
-    <string name="airsend_language_english">English</string>
+    <string name="airsend_language" tools:ignore="MissingTranslation">Language</string>
+    <string name="airsend_language_desc" tools:ignore="MissingTranslation">Choose the language used throughout AirSend.</string>
+    <string name="airsend_language_chinese" tools:ignore="MissingTranslation">简体中文</string>
+    <string name="airsend_language_english" tools:ignore="MissingTranslation">English</string>
     <string name="airsend_startup">Start with system</string>
     <string name="airsend_startup_desc">Keep AirSend ready after boot.</string>
     <string name="airsend_logs">Export logs</string>
@@ -1178,29 +1178,29 @@
     <string name="airsend_status_attention_desc">Start the service and check daemon or permissions below.</string>
     <string name="airsend_status_pending">Activation pending</string>
     <string name="airsend_status_pending_desc">The LSPosed module is installed but not activated yet.</string>
-    <string name="airsend_home_checking">Checking AirSend</string>
-    <string name="airsend_home_checking_desc">Reading service, daemon and permission status.</string>
-    <string name="airsend_home_root_permission">AirSend needs Root access</string>
-    <string name="airsend_home_root_permission_desc">Grant Root access to AirSend, then check the runtime again.</string>
-    <string name="airsend_home_root_module_missing">AirSend Root module is missing</string>
-    <string name="airsend_home_root_module_missing_desc">Install the matching AirSend Root module before using privileged sync.</string>
-    <string name="airsend_home_lsposed_inactive">AirSend LSPosed module is inactive</string>
-    <string name="airsend_home_lsposed_inactive_desc">Enable the module and its required scope, then restart the phone.</string>
-    <string name="airsend_home_notification_permission">AirSend needs notification permission</string>
-    <string name="airsend_home_notification_permission_desc">Allow notifications so Android can keep the sync service available.</string>
-    <string name="airsend_home_media_permission">AirSend needs media permission</string>
-    <string name="airsend_home_media_permission_desc">Allow photo and video access so received media can be saved.</string>
-    <string name="airsend_home_service_offline">AirSend background service is offline</string>
-    <string name="airsend_home_service_offline_desc">Start the sync service to keep AirSend available in the background.</string>
-    <string name="airsend_home_daemon_offline">AirSend daemon is offline</string>
-    <string name="airsend_home_daemon_offline_desc">Restart the daemon, or open diagnostics to see the detailed cause.</string>
-    <string name="airsend_home_tls_unavailable">AirSend secure connection is unavailable</string>
-    <string name="airsend_home_tls_unavailable_desc">The daemon is online, but its secure transport is not ready.</string>
-    <string name="airsend_home_storage_unavailable">AirSend storage is unavailable</string>
-    <string name="airsend_home_storage_unavailable_desc">Check the save location and storage access before receiving files.</string>
-    <string name="airsend_home_no_nearby_devices">No nearby AirSend devices</string>
-    <string name="airsend_home_no_nearby_devices_desc">AirSend is running normally. Open AirSend on the other device and keep both devices on the same local network.</string>
-    <string name="airsend_home_ready_desc">Found %1$d online device(s).</string>
+    <string name="airsend_home_checking" tools:ignore="MissingTranslation">Checking AirSend</string>
+    <string name="airsend_home_checking_desc" tools:ignore="MissingTranslation">Reading service, daemon and permission status.</string>
+    <string name="airsend_home_root_permission" tools:ignore="MissingTranslation">AirSend needs Root access</string>
+    <string name="airsend_home_root_permission_desc" tools:ignore="MissingTranslation">Grant Root access to AirSend, then check the runtime again.</string>
+    <string name="airsend_home_root_module_missing" tools:ignore="MissingTranslation">AirSend Root module is missing</string>
+    <string name="airsend_home_root_module_missing_desc" tools:ignore="MissingTranslation">Install the matching AirSend Root module before using privileged sync.</string>
+    <string name="airsend_home_lsposed_inactive" tools:ignore="MissingTranslation">AirSend LSPosed module is inactive</string>
+    <string name="airsend_home_lsposed_inactive_desc" tools:ignore="MissingTranslation">Enable the module and its required scope, then restart the phone.</string>
+    <string name="airsend_home_notification_permission" tools:ignore="MissingTranslation">AirSend needs notification permission</string>
+    <string name="airsend_home_notification_permission_desc" tools:ignore="MissingTranslation">Allow notifications so Android can keep the sync service available.</string>
+    <string name="airsend_home_media_permission" tools:ignore="MissingTranslation">AirSend needs media permission</string>
+    <string name="airsend_home_media_permission_desc" tools:ignore="MissingTranslation">Allow photo and video access so received media can be saved.</string>
+    <string name="airsend_home_service_offline" tools:ignore="MissingTranslation">AirSend background service is offline</string>
+    <string name="airsend_home_service_offline_desc" tools:ignore="MissingTranslation">Start the sync service to keep AirSend available in the background.</string>
+    <string name="airsend_home_daemon_offline" tools:ignore="MissingTranslation">AirSend daemon is offline</string>
+    <string name="airsend_home_daemon_offline_desc" tools:ignore="MissingTranslation">Restart the daemon, or open diagnostics to see the detailed cause.</string>
+    <string name="airsend_home_tls_unavailable" tools:ignore="MissingTranslation">AirSend secure connection is unavailable</string>
+    <string name="airsend_home_tls_unavailable_desc" tools:ignore="MissingTranslation">The daemon is online, but its secure transport is not ready.</string>
+    <string name="airsend_home_storage_unavailable" tools:ignore="MissingTranslation">AirSend storage is unavailable</string>
+    <string name="airsend_home_storage_unavailable_desc" tools:ignore="MissingTranslation">Check the save location and storage access before receiving files.</string>
+    <string name="airsend_home_no_nearby_devices" tools:ignore="MissingTranslation">No nearby AirSend devices</string>
+    <string name="airsend_home_no_nearby_devices_desc" tools:ignore="MissingTranslation">AirSend is running normally. Open AirSend on the other device and keep both devices on the same local network.</string>
+    <string name="airsend_home_ready_desc" tools:ignore="MissingTranslation">Found %1$d online device(s).</string>
     <string name="airsend_authorization_root">Root</string>
     <string name="airsend_authorization_shizuku">Shizuku</string>
     <string name="airsend_authorization_dhizuku">Dhizuku</string>

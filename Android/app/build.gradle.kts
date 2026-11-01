@@ -82,7 +82,12 @@ android {
                 signingConfigs.getByName("debug")
             }
             vcsInfo.include = false
-            optimization.enable = true
+            optimization {
+                enable = true
+                keepRules {
+                    proguardFile(file("proguard-rules.pro"))
+                }
+            }
         }
     }
 
